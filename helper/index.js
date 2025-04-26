@@ -115,6 +115,7 @@ const supportedChain = [
   'aptos',
   'hedera',
   'bitcoin_cash',
+  'cardano',
   // 'bitcoin_taproot'
 ];
 
@@ -410,6 +411,12 @@ export const isCustomAddressNotSupportedChain = chain_name =>
 
 export const isPendingTransactionSupportedChain = chain_name =>
   EVM_CHAINS.includes(chain_name);
+
+const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = ['ripple', 'cardano'];
+
+export const isPrivateKeyNotSupportedChain = chain_name => {
+  return PRIVATE_KEY_NOT_SUPPORTED_CHAINS.includes(chain_name);
+};
 
 export const isAddressOrPrivateKeyExists = coin => {
   const chain_name = coin?.chain_name;
@@ -894,6 +901,8 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
     }`;
   } else if (chain_name === 'hedera') {
     return `${config.HEDERA_SCAN_URL}/account/${address}`;
+  } else if (chain_name === 'cardano') {
+    return `${config.CARDANO_SCAN_URL}/address/${address}`;
   }
   return null;
 };

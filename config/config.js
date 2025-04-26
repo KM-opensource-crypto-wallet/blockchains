@@ -5,7 +5,7 @@ import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import {shuffleArray} from 'dok-wallet-blockchain-networks/helper';
 
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false;
 
 const SANDBOX_CHAIN_ID = {
   ethereum: 11155111,
@@ -382,7 +382,7 @@ export const config = {
 
   MORALIS_CHAIN: IS_SANDBOX ? MORALIS_CHAIN_SANDBOX : MORALIS_CHAIN_PRODUCTION,
   MORALIS_API_KEY: process.env.MORALIS_API_KEY,
-
+  BLOCKFROST_API_KEY: process.env.BLOCKFROST_API_KEY,
   STELLAR_NETWORK: IS_SANDBOX
     ? StellarSdk.Networks.TESTNET
     : StellarSdk.Networks.PUBLIC,
@@ -450,6 +450,7 @@ export const config = {
   HEDERA_SCAN_URL: IS_SANDBOX
     ? 'https://hashscan.io/testnet'
     : 'https://hashscan.io/mainnet',
+  CARDANO_SCAN_URL: 'https://cardanoscan.io',
 };
 
 export const APP_NAME = process?.env?.APP_NAME || '';

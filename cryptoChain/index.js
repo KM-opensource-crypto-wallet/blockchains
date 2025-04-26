@@ -18,6 +18,7 @@ import {TonChain} from './chains/TonChain';
 import {DogecoinOrLitecoinChain} from './chains/DogecoinOrLitecoinChain';
 import {AptosChain} from './chains/AptosChain';
 import {HederaChain} from './chains/HederaChain';
+import {CardanoChain} from './chains/CardanoChain';
 
 const chains = {
   tron: TronChain,
@@ -55,6 +56,7 @@ const chains = {
   bitcoin_cash: DogecoinOrLitecoinChain,
   hedera: HederaChain,
   ink: EVMChain,
+  cardano: CardanoChain,
 };
 
 export const getChain = chain => {
