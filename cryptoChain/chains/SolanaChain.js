@@ -18,10 +18,11 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import {
+  createAssociatedTokenAccountInstruction,
   createTransferInstruction,
+  getAssociatedTokenAddress,
   getMint,
-  getOrCreateAssociatedTokenAccount,
-  TokenAccountNotFoundError,
+  ACCOUNT_SIZE,
 } from '@solana/spl-token';
 
 import {
@@ -100,6 +101,7 @@ export const SolanaChain = () => {
     fromAddress,
     transactionMessage,
     solanaProvider,
+    needATA,
   ) => {
     const fromAddressPubKey = new PublicKey(fromAddress);
     const {units, gasFee} = await getSimulationUnits(
@@ -111,7 +113,14 @@ export const SolanaChain = () => {
       transactionMessage.compileToV0Message(),
     );
     const extraFees = Math.ceil((gasFee * units) / 1000000);
-    const totalFee = extraFees + resp.value;
+    let rentExemptAmount = 0;
+    if (needATA) {
+      rentExemptAmount = await solanaProvider.getMinimumBalanceForRentExemption(
+        ACCOUNT_SIZE,
+      );
+    }
+    const totalFee = extraFees + resp.value + rentExemptAmount;
+
     const totalFeeStr = parseBalance(totalFee, 9);
     return {
       totalFee: totalFeeStr,
@@ -388,22 +397,24 @@ export const SolanaChain = () => {
     }) =>
       retryFunc(async solanaProvider => {
         try {
-          const transactionMessage = await prepareTokenTransferMessage({
-            toAddress,
-            contractAddress,
-            amount,
-            decimals,
-            tokenAmount,
-            mint,
-            memo,
-            privateKey,
-            solanaProvider: solanaProvider,
-          });
+          const {transactionMessage, needATA} =
+            await prepareTokenTransferMessage({
+              toAddress,
+              contractAddress,
+              amount,
+              decimals,
+              tokenAmount,
+              mint,
+              memo,
+              privateKey,
+              solanaProvider: solanaProvider,
+            });
           const fromAddressPublicKey = new PublicKey(fromAddress);
           const {totalFee, gasFee, unit} = await getTotalEstimateFees(
             fromAddressPublicKey,
             transactionMessage,
             solanaProvider,
+            needATA,
           );
           return {
             fee: totalFee,
@@ -791,7 +802,7 @@ export const SolanaChain = () => {
       retryFunc(
         async solanaProvider => {
           try {
-            const transactionMessage = await prepareTokenTransferMessage({
+            const {transactionMessage} = await prepareTokenTransferMessage({
               toAddress: to,
               contractAddress,
               amount,
@@ -892,43 +903,21 @@ export const SolanaChain = () => {
   };
 };
 
-async function safelyCreateOrGetAccount(
+async function getTokenAccount(
   solanaProvider,
-  to,
   mintAddress,
-  recipient,
+  walletAddress,
+  checkATA,
 ) {
-  return new Promise((resolve, reject) => {
-    getOrCreateAssociatedTokenAccount(
-      solanaProvider,
-      to,
-      mintAddress,
-      recipient,
-    )
-      .then(resp => {
-        return resolve(resp);
-      })
-      .catch(e => {
-        if (e instanceof TokenAccountNotFoundError) {
-          setTimeout(() => {
-            getOrCreateAssociatedTokenAccount(
-              solanaProvider,
-              to,
-              mintAddress,
-              recipient,
-            )
-              .then(resp2 => {
-                return resolve(resp2);
-              })
-              .catch(err => {
-                return reject(err);
-              });
-          }, 10000);
-        } else {
-          return reject(e);
-        }
-      });
-  });
+  const tokenAddress = await getAssociatedTokenAddress(
+    mintAddress,
+    walletAddress,
+  );
+  if (checkATA) {
+    const accountInfo = await solanaProvider.getAccountInfo(tokenAddress);
+    return {tokenAddress, needATA: accountInfo === null};
+  }
+  return {tokenAddress, needATA: false};
 }
 
 const buildStakingWithdrawTransaction = async (
@@ -1042,30 +1031,39 @@ const prepareTokenTransferMessage = async ({
     };
   }
   // Get the token account of the from address, and if it does not exist, create it
-  const fromTokenAccount = await safelyCreateOrGetAccount(
+  const {tokenAddress: fromTokenAccount} = await getTokenAccount(
     solanaProvider,
-    fromKeypair,
     finalMint.address,
     fromKeypair.publicKey,
   );
   // Get the token account of the recipient address, and if it does not exist, create it
-  const recipientTokenAccount = await safelyCreateOrGetAccount(
+  const {tokenAddress: recipientTokenAccount, needATA} = await getTokenAccount(
     solanaProvider,
-    fromKeypair,
     finalMint.address,
     recipient,
+    true,
   );
   const finalAmount = tokenAmount
     ? Number(tokenAmount)
     : convertToSmallAmount(amount, decimals);
   const instructions = [
     createTransferInstruction(
-      fromTokenAccount.address,
-      recipientTokenAccount.address,
+      fromTokenAccount,
+      recipientTokenAccount,
       fromKeypair.publicKey,
       BigInt(finalAmount),
     ),
   ];
+  if (needATA) {
+    instructions.unshift(
+      createAssociatedTokenAccountInstruction(
+        fromKeypair.publicKey, // payer
+        recipientTokenAccount,
+        recipient,
+        finalMint.address,
+      ),
+    );
+  }
   if (isValidStringWithValue(memo)) {
     instructions.push(getMemo(fromKeypair.publicKey, memo));
   }
@@ -1076,11 +1074,12 @@ const prepareTokenTransferMessage = async ({
     instructions.push(getComputePrice(gasFee));
   }
   const recentBlockHash = await solanaProvider.getLatestBlockhash('finalized');
-  return new TransactionMessage({
+  const transactionMessage = new TransactionMessage({
     payerKey: fromKeypair.publicKey,
     recentBlockhash: recentBlockHash.blockhash,
     instructions,
   });
+  return {transactionMessage, needATA};
 };
 
 const prepareTransferMessage = async ({
