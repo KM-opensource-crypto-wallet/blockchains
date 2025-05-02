@@ -33,5 +33,4 @@ export const getGoogleAnalyticsKey = state =>
 export const getIsMaxWalletLimitReached = state =>
   state?.cryptoProvider?.is_max_wallet_limit_reached;
 
-export const getGoogleSiteVerification = state =>
-  state?.cryptoProvider?.google_site_verification;
+

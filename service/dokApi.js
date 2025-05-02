@@ -330,17 +330,15 @@ export const fetchBitcoinTransactionDetails = async payload => {
   }
 };
 
-export const getWhiteLabelInfo = async key => {
-  if (typeof window !== 'undefined') {
-    try {
-      const resp = await DokApi.post('/get-white-label', {
-        domain: window.location.hostname,
-      });
-      return {status: resp?.status, data: resp?.data?.data};
-    } catch (e) {
-      console.error('Error in getNewsAPI', JSON.stringify(e));
-      throw e;
-    }
+export const getWhiteLabelInfo = async domain => {
+  try {
+    const resp = await DokApi.post('/get-white-label', {
+      domain,
+    });
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in getWhiteLabelInfo', JSON.stringify(e));
+    throw e;
   }
 };
 export const getCurrencyRate = async payload => {
