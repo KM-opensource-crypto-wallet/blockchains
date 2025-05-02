@@ -43,6 +43,7 @@ const initialState = {
     optimism_binance_smart_chain: 500000000000,
     ink: 500000000000,
   },
+  google_site_verification: null,
 };
 
 export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
@@ -73,6 +74,7 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       bitcoin_cash_fee_multiplier: data?.bitcoin_cash_fee_multiplier || {},
       additional_l1_fees: data?.additional_l1_fees || {},
       is_max_wallet_limit_reached: data?.is_max_wallet_limit_reached || false,
+      google_site_verification: data?.google_site_verification || null,
     };
   },
 );
@@ -169,6 +171,7 @@ export const cryptoProviderSlice = createSlice({
         );
         state.is_max_wallet_limit_reached =
           payload?.is_max_wallet_limit_reached;
+        state.google_site_verification = payload?.google_site_verification;
       },
     );
     builder.addCase(
