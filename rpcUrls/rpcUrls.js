@@ -264,6 +264,10 @@ const allFreeRpcUrl = {
     ],
     testnet: ['https://api.devnet.solana.com'],
   },
+  filecoin: {
+    mainnet: ['https://api.node.glif.io/rpc/v0'],
+    testnet: ['https://api.calibration.node.glif.io/rpc/v0'],
+  },
 };
 
 let rpcUrls = {
