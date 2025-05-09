@@ -265,8 +265,16 @@ const allFreeRpcUrl = {
     testnet: ['https://api.devnet.solana.com'],
   },
   filecoin: {
-    mainnet: ['https://api.node.glif.io/rpc/v0'],
-    testnet: ['https://api.calibration.node.glif.io/rpc/v0'],
+    mainnet: [
+      'https://api.node.glif.io/rpc/v0',
+      'https://rpc.ankr.com/filecoin',
+      'https://filecoin.chainup.net/rpc/v1',
+    ],
+    testnet: [
+      'https://api.calibration.node.glif.io/rpc/v0',
+      'https://rpc.ankr.com/filecoin_testnet',
+      'https://filecoin-calibration.chainup.net/rpc/v1',
+    ],
   },
 };
 
