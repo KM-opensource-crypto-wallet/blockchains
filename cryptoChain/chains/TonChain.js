@@ -18,6 +18,7 @@ import {keyPairFromSeed} from '@ton/crypto';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import BigNumber from 'bignumber.js';
 import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
+import {WL_APP_NAME} from 'utils/wlData';
 
 export const TonChain = () => {
   const tonClient = new TonClient({
@@ -104,7 +105,7 @@ export const TonChain = () => {
               value: BigInt(convertToSmallAmount(amount, 9)),
               body: isValidStringWithValue(memo)
                 ? memo
-                : 'Transfer from Dok Wallet',
+                : `Transfer from ${WL_APP_NAME}`,
               bounce: false,
             }),
           ],
@@ -157,7 +158,9 @@ export const TonChain = () => {
         const forwardPayload = beginCell()
           .storeUint(0, 32) // 0 opcode means we have a comment
           .storeStringTail(
-            isValidStringWithValue(memo) ? memo : 'Transfer from Dok Wallet',
+            isValidStringWithValue(memo)
+              ? memo
+              : `Transfer from ${WL_APP_NAME}`,
           )
           .endCell();
 
@@ -302,7 +305,7 @@ export const TonChain = () => {
               value: BigInt(convertToSmallAmount(amount, 9)),
               body: isValidStringWithValue(memo)
                 ? memo
-                : 'Transfer from Dok Wallet',
+                : `Transfer from ${WL_APP_NAME}`,
               bounce: false,
             }),
           ],
@@ -341,7 +344,7 @@ export const TonChain = () => {
         const forwardPayload = beginCell()
           .storeUint(0, 32) // 0 opcode means we have a comment
           .storeStringTail(
-            isValidStringWithValue(memo) ? memo : 'Transfer from Dok Wallet',
+            isValidStringWithValue(memo) ? memo : `${WL_APP_NAME}`,
           )
           .endCell();
 

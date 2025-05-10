@@ -1156,17 +1156,7 @@ export function getLargestNumber(arr) {
   return Math.max(...arr);
 }
 
-export function shuffleArray(array) {
-  // Create a copy of the array to avoid mutating the original array
-  const newArray = array.slice();
 
-  for (let i = newArray.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-  }
-
-  return newArray;
-}
 const fingerPrintName = {
   'Touch ID': 'Touch ID',
   'Face ID': 'Face ID',

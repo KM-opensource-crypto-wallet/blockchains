@@ -3,9 +3,20 @@ import * as bitcoin from 'bitcoinjs-lib';
 import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
-import {shuffleArray} from 'dok-wallet-blockchain-networks/helper';
 
 export const IS_SANDBOX = false;
+
+export function shuffleArray(array) {
+  // Create a copy of the array to avoid mutating the original array
+  const newArray = array.slice();
+
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+
+  return newArray;
+}
 
 const SANDBOX_CHAIN_ID = {
   ethereum: 11155111,
