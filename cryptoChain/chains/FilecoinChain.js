@@ -165,7 +165,7 @@ export const FilecoinChain = chain_name => {
       retryFunc(async ({lotusClient}) => {
         const sleep = ms =>
           new Promise(resolve => setTimeout(() => resolve('pending'), ms));
-        const waitForConfirmation = async () => {
+        const awaitTransactionConfirmation = async () => {
           try {
             const receipt = await lotusClient.state.waitMsg(
               {'/': transaction},
@@ -183,7 +183,10 @@ export const FilecoinChain = chain_name => {
             throw e;
           }
         };
-        return Promise.race([waitForConfirmation(), sleep(interval * retries)]);
+        return Promise.race([
+          awaitTransactionConfirmation(),
+          sleep(interval * retries),
+        ]);
       }, null),
   };
 };
