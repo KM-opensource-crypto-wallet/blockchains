@@ -116,6 +116,7 @@ const supportedChain = [
   'hedera',
   'bitcoin_cash',
   'cardano',
+  'filecoin',
   // 'bitcoin_taproot'
 ];
 
@@ -795,6 +796,10 @@ export const PrivateKeyList = [
     label: 'zkSync Era',
     value: 'zksync',
   },
+  {
+    label: 'Filecoin',
+    value: 'filecoin',
+  },
 ];
 
 export const AUTO_LOCK = [
@@ -903,6 +908,8 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
     return `${config.HEDERA_SCAN_URL}/account/${address}`;
   } else if (chain_name === 'cardano') {
     return `${config.CARDANO_SCAN_URL}/address/${address}`;
+  } else if (chain_name === 'filecoin') {
+    return `${config.FILECOIN_SCAN_URL}/address/${address}`;
   }
   return null;
 };
