@@ -90,19 +90,22 @@ export const FilecoinChain = chain_name => {
         try {
           const amountToSend = convertToSmallAmount(amount, 18);
           const nonce = await wallet.getNonce(fromAddress);
-          const {GasFeeCap, GasLimit, GasPremium} = await wallet.createMessage({
-            Nonce: nonce,
-            To: toAddress,
-            From: fromAddress,
-            Value: amountToSend,
-          });
-          const gasFee = new BigNumber(GasFeeCap)
-            .times(GasLimit)
-            .plus(parseFloat(GasPremium.toString()));
+
+          const {GasFeeCap, GasLimit, GasPremium} =
+            await wallet.estimateMessageGas({
+              To: toAddress,
+              From: fromAddress,
+              Value: amountToSend,
+              Nonce: nonce,
+            });
+
+          const gasLimitBN = new BigNumber(GasLimit);
+          const minerTipComponent = gasLimitBN.times(GasPremium);
+          const totalGasFee = new BigNumber(GasFeeCap.toString())
+            .plus(minerTipComponent)
+            .plus(IS_SANDBOX ? 1600000000 : 10000000000);
           return {
-            fee: parseBalance(gasFee.toString(), 18),
-            estimateGas: GasLimit,
-            gasFee: GasFeeCap.toString(),
+            fee: parseBalance(totalGasFee.toFixed(), 18),
           };
         } catch (e) {
           console.error('Error in filecoin gas fee', e);
@@ -136,31 +139,34 @@ export const FilecoinChain = chain_name => {
           throw e;
         }
       }, []),
-    send: async ({to, from, amount, phrase}) =>
-      retryFunc(async ({wallet, lotusClient}) => {
-        try {
-          const walletProvider = new MnemonicWalletProvider(
-            lotusClient,
-            phrase,
-            derivedPath,
-          );
-          await walletProvider.newAddress();
-          const nonce = await walletProvider.getNonce(from);
-          const amountToSend = convertToSmallAmount(amount, 18);
-          const message = await wallet.createMessage({
-            To: to,
-            From: from,
-            Nonce: nonce,
-            Value: amountToSend,
-          });
-          const sendMessage = await walletProvider.signMessage(message);
-          const sendSignedMessage =
-            await walletProvider.sendSignedMessage(sendMessage);
-          return sendSignedMessage['/'];
-        } catch (e) {
-          console.error('Error in send filecoin transaction', e);
-        }
-      }, ''),
+    send: async ({to, from, amount, phrase}) => {
+      try {
+        const connector = new HttpJsonRpcConnector(allRpcUrls[0]);
+        const lotusClient = new LotusClient(connector);
+        const walletProvider = new MnemonicWalletProvider(
+          lotusClient,
+          phrase,
+          derivedPath,
+        );
+        await walletProvider.newAddress();
+        const nonce = await walletProvider.getNonce(from);
+        const amountToSend = convertToSmallAmount(amount, 18);
+        const message = await walletProvider.createMessage({
+          To: to,
+          From: from,
+          Nonce: nonce,
+          Value: amountToSend,
+        });
+        const sendMessage = await walletProvider.signMessage(message);
+        const sendSignedMessage = await walletProvider.sendSignedMessage(
+          sendMessage,
+        );
+        return sendSignedMessage['/'];
+      } catch (e) {
+        console.error('Error in send filecoin transaction', e);
+        throw e;
+      }
+    },
     waitForConfirmation: async ({transaction, interval, retries}) =>
       retryFunc(async ({lotusClient}) => {
         const sleep = ms =>
