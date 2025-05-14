@@ -234,7 +234,6 @@ export const createWallet = createAsyncThunk(
       is_create_wallet: true,
       is_imported: isFromImportWallet,
     });
-    thunkAPI.dispatch(fetchSupportedBuyCryptoCurrency({fromDevice: isWeb}));
     return {
       newStoreWallet: newStoreWallet,
       replace: walletData.replace,
