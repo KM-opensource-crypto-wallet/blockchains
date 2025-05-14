@@ -1,3 +1,4 @@
+import {validateAddressString} from '@glif/filecoin-address';
 import {keyPairFromPrivateKey} from '@nodefactory/filecoin-address';
 import axios from 'axios';
 import BigNumber from 'bignumber.js';
@@ -13,9 +14,12 @@ import {
   LotusWalletProvider,
   MnemonicWalletProvider,
 } from 'filecoin.js';
-import {validateAddressString} from '@glif/filecoin-address';
 
 const derivedPath = IS_SANDBOX ? "m/44'/1'/0'/0/0" : "m/44'/461'/0'/0/0";
+
+const filfoxApi = axios.create({
+  baseURL: config.FILECOIN_SCAN_URL.replace('/en', '/api/v1'),
+});
 
 export const FilecoinChain = chain_name => {
   const allRpcUrls = getFreeRPCUrl(chain_name);
@@ -39,6 +43,17 @@ export const FilecoinChain = chain_name => {
       }
     }
   };
+
+  function calculateFilecoinGasFee(gasUsed, gasLimit, baseFee, gasPremium) {
+    const overEstimation = gasLimit - (11 / 10) * gasUsed;
+    const overEstimationBurn =
+      overEstimation > 0
+        ? (overEstimation * (gasLimit - gasUsed)) / gasUsed
+        : 0;
+    const totalFee =
+      gasUsed * baseFee + gasLimit * gasPremium + overEstimationBurn * baseFee;
+    return totalFee;
+  }
 
   return {
     isValidAddress: ({address}) => {
@@ -90,7 +105,6 @@ export const FilecoinChain = chain_name => {
         try {
           const amountToSend = convertToSmallAmount(amount, 18);
           const nonce = await wallet.getNonce(fromAddress);
-
           const {GasFeeCap, GasLimit, GasPremium} =
             await wallet.estimateMessageGas({
               To: toAddress,
@@ -98,14 +112,22 @@ export const FilecoinChain = chain_name => {
               Value: amountToSend,
               Nonce: nonce,
             });
-
-          const gasLimitBN = new BigNumber(GasLimit);
-          const minerTipComponent = gasLimitBN.times(GasPremium);
-          const totalGasFee = new BigNumber(GasFeeCap.toString())
-            .plus(minerTipComponent)
-            .plus(IS_SANDBOX ? 1600000000 : 10000000000);
+          const res = await filfoxApi.get('/stats/base-fee');
+          const baseFee = res.data?.at(-1)?.baseFee ?? 100;
+          const totalGasFee = calculateFilecoinGasFee(
+            parseFloat(GasFeeCap.toString()),
+            parseFloat(GasLimit.toString()),
+            parseFloat(baseFee.toString()),
+            parseFloat(GasPremium.toString()),
+          );
           return {
-            fee: parseBalance(totalGasFee.toFixed(), 18),
+            fee: parseBalance(totalGasFee.toFixed(0), 18),
+            estimateGas: {
+              nonce: nonce,
+              gasLimit: GasLimit,
+              gasFeeCap: GasFeeCap.toString(),
+              gasPremium: GasPremium.toString(),
+            },
           };
         } catch (e) {
           console.error('Error in filecoin gas fee', e);
@@ -116,11 +138,9 @@ export const FilecoinChain = chain_name => {
       retryFunc(async ({wallet}) => {
         try {
           const lookupId = await wallet.lookupId(address);
-          const url = `${config.FILECOIN_SCAN_URL.replace(
-            '/en',
-            '/api',
-          )}/v1/address/${lookupId}/messages?pageSize=20&page=0`;
-          const res = await axios.get(url);
+          const res = await filfoxApi.get(
+            `/address/${lookupId}/messages?pageSize=20&page=0`,
+          );
           return res.data.messages.map(item => {
             const bnValue = BigInt(item?.value);
             const txHash = item?.cid;
@@ -139,34 +159,44 @@ export const FilecoinChain = chain_name => {
           throw e;
         }
       }, []),
-    send: async ({to, from, amount, phrase}) => {
-      try {
-        const connector = new HttpJsonRpcConnector(allRpcUrls[0]);
-        const lotusClient = new LotusClient(connector);
-        const walletProvider = new MnemonicWalletProvider(
-          lotusClient,
-          phrase,
-          derivedPath,
-        );
-        await walletProvider.newAddress();
-        const nonce = await walletProvider.getNonce(from);
-        const amountToSend = convertToSmallAmount(amount, 18);
-        const message = await walletProvider.createMessage({
-          To: to,
-          From: from,
-          Nonce: nonce,
-          Value: amountToSend,
-        });
-        const sendMessage = await walletProvider.signMessage(message);
-        const sendSignedMessage = await walletProvider.sendSignedMessage(
-          sendMessage,
-        );
-        return sendSignedMessage['/'];
-      } catch (e) {
-        console.error('Error in send filecoin transaction', e);
-        throw e;
-      }
-    },
+    send: async ({
+      to,
+      from,
+      amount,
+      phrase,
+      estimateGas: {nonce, gasLimit, gasFeeCap, gasPremium},
+    }) =>
+      retryFunc(
+        async ({wallet, lotusClient}) => {
+          try {
+            const walletProvider = new MnemonicWalletProvider(
+              lotusClient,
+              phrase,
+              derivedPath,
+            );
+            await walletProvider.newAddress();
+            const amountToSend = convertToSmallAmount(amount, 18);
+            const message = await wallet.createMessage({
+              To: to,
+              From: from,
+              Nonce: nonce,
+              Value: amountToSend,
+              GasLimit: gasLimit,
+              GasFeeCap: new BigNumber(gasFeeCap),
+              GasPremium: new BigNumber(gasPremium),
+            });
+            const sendMessage = await walletProvider.signMessage(message);
+            const sendSignedMessage = await walletProvider.sendSignedMessage(
+              sendMessage,
+            );
+            return sendSignedMessage['/'];
+          } catch (e) {
+            console.error('Error in send filecoin transaction', e);
+            throw e;
+          }
+        },
+        {hash: '', error: true},
+      ),
     waitForConfirmation: async ({transaction, interval, retries}) =>
       retryFunc(async ({lotusClient}) => {
         const sleep = ms =>
