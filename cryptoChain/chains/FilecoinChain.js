@@ -17,8 +17,8 @@ import {
 
 const derivedPath = IS_SANDBOX ? "m/44'/1'/0'/0/0" : "m/44'/461'/0'/0/0";
 
-const filfoxApi = axios.create({
-  baseURL: config.FILECOIN_SCAN_URL.replace('/en', '/api/v1'),
+const filScanApi = axios.create({
+  baseURL: 'https://api-v2.filscan.io/api/v1',
 });
 
 export const FilecoinChain = chain_name => {
@@ -45,14 +45,21 @@ export const FilecoinChain = chain_name => {
   };
 
   function calculateFilecoinGasFee(gasUsed, gasLimit, baseFee, gasPremium) {
-    const overEstimation = gasLimit - (11 / 10) * gasUsed;
-    const overEstimationBurn =
-      overEstimation > 0
-        ? (overEstimation * (gasLimit - gasUsed)) / gasUsed
-        : 0;
-    const totalFee =
-      gasUsed * baseFee + gasLimit * gasPremium + overEstimationBurn * baseFee;
-    return totalFee;
+    const bnGasUsed = new BigNumber(gasUsed);
+    const bnGasLimit = new BigNumber(gasLimit);
+    const bnBaseFee = new BigNumber(baseFee);
+    const bnGasPremium = new BigNumber(gasPremium);
+    const overEstimation = bnGasLimit.minus(bnGasUsed.times(11).div(10));
+    const overEstimationBurn = overEstimation.gt(0)
+      ? overEstimation.times(bnGasLimit.minus(bnGasUsed)).div(bnGasUsed)
+      : new BigNumber(0);
+
+    const totalFee = bnGasUsed
+      .times(bnBaseFee)
+      .plus(bnGasLimit.times(bnGasPremium))
+      .plus(overEstimationBurn.times(bnBaseFee));
+
+    return totalFee.toString();
   }
 
   return {
@@ -112,16 +119,20 @@ export const FilecoinChain = chain_name => {
               Value: amountToSend,
               Nonce: nonce,
             });
-          const res = await filfoxApi.get('/stats/base-fee');
-          const baseFee = res.data?.at(-1)?.baseFee ?? 100;
+          const res = await filScanApi.post('/GasDataTrend', {interval: '24h'});
+          const resFee = res.data?.result?.items?.[0];
+          const baseFee = new BigNumber(resFee?.avg_gas_fee)
+            .div('1e10')
+            .toFixed(0);
+          const gasUsed = new BigNumber(resFee?.avg_gas_used).toFixed(0);
           const totalGasFee = calculateFilecoinGasFee(
-            parseFloat(GasFeeCap.toString()),
-            parseFloat(GasLimit.toString()),
-            parseFloat(baseFee.toString()),
-            parseFloat(GasPremium.toString()),
+            gasUsed.toString(),
+            GasLimit.toString(),
+            baseFee.toString(),
+            GasPremium.toString(),
           );
           return {
-            fee: parseBalance(totalGasFee.toFixed(0), 18),
+            fee: parseBalance(totalGasFee, 18),
             estimateGas: {
               nonce: nonce,
               gasLimit: GasLimit,
@@ -134,31 +145,34 @@ export const FilecoinChain = chain_name => {
           throw e;
         }
       }, null),
-    getTransactions: async ({address}) =>
-      retryFunc(async ({wallet}) => {
-        try {
-          const lookupId = await wallet.lookupId(address);
-          const res = await filfoxApi.get(
-            `/address/${lookupId}/messages?pageSize=20&page=0`,
-          );
-          return res.data.messages.map(item => {
-            const bnValue = BigInt(item?.value);
-            const txHash = item?.cid;
-            return {
-              amount: bnValue?.toString(),
-              link: txHash.substring(0, 13) + '...',
-              date: item?.timestamp * 1000,
-              status: item?.receipt?.exitCode === 0 ? 'SUCCESS' : 'FAILED',
-              url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
-              from: item?.from,
-              to: item?.to,
-            };
-          });
-        } catch (e) {
-          console.error('error in get transactions from filecoin', e);
-          throw e;
-        }
-      }, []),
+    getTransactions: async ({address}) => {
+      try {
+        const res = await filScanApi.post('/MessagesByAccountID', {
+          account_id: address,
+          filters: {
+            index: 0,
+            limit: 20,
+            method_name: '',
+          },
+        });
+        return res.data.result.messages_by_account_id_list.map(item => {
+          const bnValue = BigInt(item?.value);
+          const txHash = item?.cid;
+          return {
+            amount: bnValue?.toString(),
+            link: txHash.substring(0, 13) + '...',
+            date: item?.block_time * 1000,
+            status: item?.exit_code === 'Ok' ? 'SUCCESS' : 'FAILED',
+            url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+            from: item?.from,
+            to: item?.to,
+          };
+        });
+      } catch (e) {
+        console.error('error in get transactions from filecoin', e);
+        throw e;
+      }
+    },
     send: async ({
       to,
       from,

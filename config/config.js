@@ -452,8 +452,8 @@ export const config = {
     : 'https://hashscan.io/mainnet',
   CARDANO_SCAN_URL: 'https://cardanoscan.io',
   FILECOIN_SCAN_URL: IS_SANDBOX
-    ? 'https://calibration.filfox.info/en'
-    : 'https://filfox.info/en',
+    ? 'https://calibration.filscan.io/en'
+    : 'https://filscan.io/en',
 };
 
 export const APP_NAME = process?.env?.APP_NAME || '';
