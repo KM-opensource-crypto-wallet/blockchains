@@ -919,7 +919,7 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
   } else if (chain_name === 'cardano') {
     return `${config.CARDANO_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'filecoin') {
-    return `${config.FILECOIN_SCAN_URL}/address/${address}`;
+    return `${config.FILECOIN_SCAN_URL}/address/${address}/#message_list`;
   }
   return null;
 };

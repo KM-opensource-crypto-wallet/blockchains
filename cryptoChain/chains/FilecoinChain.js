@@ -1,5 +1,5 @@
+import {validateAddressString} from '@glif/filecoin-address';
 import {keyPairFromPrivateKey} from '@nodefactory/filecoin-address';
-import axios from 'axios';
 import BigNumber from 'bignumber.js';
 import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {
@@ -7,13 +7,13 @@ import {
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {FilScan} from 'dok-wallet-blockchain-networks/service/filScan';
 import {
   HttpJsonRpcConnector,
   LotusClient,
   LotusWalletProvider,
   MnemonicWalletProvider,
 } from 'filecoin.js';
-import {validateAddressString} from '@glif/filecoin-address';
 
 const derivedPath = IS_SANDBOX ? "m/44'/1'/0'/0/0" : "m/44'/461'/0'/0/0";
 
@@ -39,6 +39,24 @@ export const FilecoinChain = chain_name => {
       }
     }
   };
+
+  function calculateFilecoinGasFee(gasUsed, gasLimit, baseFee, gasPremium) {
+    const bnGasUsed = new BigNumber(gasUsed);
+    const bnGasLimit = new BigNumber(gasLimit);
+    const bnBaseFee = new BigNumber(baseFee);
+    const bnGasPremium = new BigNumber(gasPremium);
+    const overEstimation = bnGasLimit.minus(bnGasUsed.times(11).div(10));
+    const overEstimationBurn = overEstimation.gt(0)
+      ? overEstimation.times(bnGasLimit.minus(bnGasUsed)).div(bnGasUsed)
+      : new BigNumber(0);
+
+    const totalFee = bnGasUsed
+      .times(bnBaseFee)
+      .plus(bnGasLimit.times(bnGasPremium))
+      .plus(overEstimationBurn.times(bnBaseFee));
+
+    return totalFee.toString();
+  }
 
   return {
     isValidAddress: ({address}) => {
@@ -90,53 +108,61 @@ export const FilecoinChain = chain_name => {
         try {
           const amountToSend = convertToSmallAmount(amount, 18);
           const nonce = await wallet.getNonce(fromAddress);
-          const {GasFeeCap, GasLimit, GasPremium} = await wallet.createMessage({
-            Nonce: nonce,
-            To: toAddress,
-            From: fromAddress,
-            Value: amountToSend,
-          });
-          const gasFee = new BigNumber(GasFeeCap)
-            .times(GasLimit)
-            .plus(parseFloat(GasPremium.toString()));
+          const {GasFeeCap, GasLimit, GasPremium} =
+            await wallet.estimateMessageGas({
+              To: toAddress,
+              From: fromAddress,
+              Value: amountToSend,
+              Nonce: nonce,
+            });
+          const {baseFee, gasUsed} = await FilScan.getTransactionFees();
+          const totalGasFee = calculateFilecoinGasFee(
+            gasUsed.toString(),
+            GasLimit.toString(),
+            baseFee.toString(),
+            GasPremium.toString(),
+          );
           return {
-            fee: parseBalance(gasFee.toString(), 18),
-            estimateGas: GasLimit,
-            gasFee: GasFeeCap.toString(),
+            fee: parseBalance(totalGasFee, 18),
+            estimateGas: {
+              nonce: nonce,
+              gasLimit: GasLimit,
+              gasFeeCap: GasFeeCap.toString(),
+              gasPremium: GasPremium.toString(),
+            },
           };
         } catch (e) {
           console.error('Error in filecoin gas fee', e);
           throw e;
         }
       }, null),
-    getTransactions: async ({address}) =>
-      retryFunc(async ({wallet}) => {
-        try {
-          const lookupId = await wallet.lookupId(address);
-          const url = `${config.FILECOIN_SCAN_URL.replace(
-            '/en',
-            '/api',
-          )}/v1/address/${lookupId}/messages?pageSize=20&page=0`;
-          const res = await axios.get(url);
-          return res.data.messages.map(item => {
-            const bnValue = BigInt(item?.value);
-            const txHash = item?.cid;
-            return {
-              amount: bnValue?.toString(),
-              link: txHash.substring(0, 13) + '...',
-              date: item?.timestamp * 1000,
-              status: item?.receipt?.exitCode === 0 ? 'SUCCESS' : 'FAILED',
-              url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
-              from: item?.from,
-              to: item?.to,
-            };
-          });
-        } catch (e) {
-          console.error('error in get transactions from filecoin', e);
-          throw e;
-        }
-      }, []),
-    send: async ({to, from, amount, phrase}) =>
+    getTransactions: async ({address}) => {
+      try {
+        const transactions = await FilScan.getTransactions({address});
+        return transactions.map(item => {
+          const txHash = item?.txHash || '';
+          return {
+            amount: item?.amount?.toString(),
+            link: txHash ? txHash.substring(0, 13) + '...' : '',
+            url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+            status: item?.status === true ? 'SUCCESS' : 'FAILED',
+            date: item?.timestamp ? new Date(item.timestamp) : new Date(),
+            from: item?.from,
+            to: item?.to,
+          };
+        });
+      } catch (e) {
+        console.error('error in get transactions from filecoin', e);
+        return [];
+      }
+    },
+    send: async ({
+      to,
+      from,
+      amount,
+      phrase,
+      estimateGas: {nonce, gasLimit, gasFeeCap, gasPremium},
+    }) =>
       retryFunc(async ({wallet, lotusClient}) => {
         try {
           const walletProvider = new MnemonicWalletProvider(
@@ -145,22 +171,26 @@ export const FilecoinChain = chain_name => {
             derivedPath,
           );
           await walletProvider.newAddress();
-          const nonce = await walletProvider.getNonce(from);
           const amountToSend = convertToSmallAmount(amount, 18);
           const message = await wallet.createMessage({
             To: to,
             From: from,
             Nonce: nonce,
             Value: amountToSend,
+            GasLimit: gasLimit,
+            GasFeeCap: new BigNumber(gasFeeCap),
+            GasPremium: new BigNumber(gasPremium),
           });
           const sendMessage = await walletProvider.signMessage(message);
-          const sendSignedMessage =
-            await walletProvider.sendSignedMessage(sendMessage);
+          const sendSignedMessage = await walletProvider.sendSignedMessage(
+            sendMessage,
+          );
           return sendSignedMessage['/'];
         } catch (e) {
           console.error('Error in send filecoin transaction', e);
+          throw e;
         }
-      }, ''),
+      }, null),
     waitForConfirmation: async ({transaction, interval, retries}) =>
       retryFunc(async ({lotusClient}) => {
         const sleep = ms =>
