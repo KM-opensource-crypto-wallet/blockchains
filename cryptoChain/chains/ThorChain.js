@@ -3,6 +3,7 @@ import {decode} from 'bech32-buffer';
 import {ThorChainService} from 'dok-wallet-blockchain-networks/service/thorChain';
 import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {WL_APP_NAME} from 'utils/wlData';
 
 export const ThorChain = () => {
   return {
@@ -44,7 +45,7 @@ export const ThorChain = () => {
             const txid = await thorClient.transfer({
               amount: finalAmount,
               recipient: to,
-              memo: memo || 'transfer from dokwallet',
+              memo: memo || `transfer from ${WL_APP_NAME}`,
               asset: AssetRuneNative,
             });
             resolve(txid);

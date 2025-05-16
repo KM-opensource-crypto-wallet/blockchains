@@ -3,6 +3,7 @@ import {
   isBitcoinChain,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
+import {createSelector} from '@reduxjs/toolkit';
 
 export const selectAllWallets = state => {
   return state.wallets?.allWallets;
@@ -177,18 +178,58 @@ export const selectAllCoinsWalletByMnemonic = state => {
   return [];
 };
 
-export const getCoinsOptions = state => {
-  const alreadyIncluded = [];
-  const dropDownData = [];
+export const getCoinsOptions = createSelector(
+  [selectAllWallets],
+  allWallets => {
+    const alreadyIncluded = [];
+    const dropDownData = [];
 
-  const allWallets = selectAllWallets(state);
-  for (let i = 0; i < allWallets.length; i++) {
-    const tempWallet = allWallets[i];
-    const allCoins = tempWallet?.coins;
+    for (let i = 0; i < allWallets.length; i++) {
+      const tempWallet = allWallets[i];
+      const allCoins = tempWallet?.coins;
+      for (let j = 0; j < allCoins?.length; j++) {
+        const currentCoin = allCoins[j];
+        const key = currentCoin?.chain_name + '_' + currentCoin.symbol;
+        if (!currentCoin?.isInWallet || alreadyIncluded.includes(key)) {
+          continue;
+        }
+        alreadyIncluded.push(key);
+        dropDownData.push({
+          value: `${currentCoin?.chain_name}_${currentCoin.symbol}`,
+          options: {
+            title: currentCoin.name,
+            symbol: currentCoin.symbol,
+            decimal: currentCoin.decimal,
+            currencyRate: currentCoin.currencyRate,
+            chain_symbol: currentCoin.chain_symbol,
+            contract_address: currentCoin.contractAddress,
+            icon: currentCoin.icon,
+            chain_name: currentCoin?.chain_name,
+            chain_display_name:
+              currentCoin.type === 'token' ||
+              isBitcoinChain(currentCoin?.chain_name)
+                ? currentCoin?.chain_display_name
+                : '',
+          },
+          label: currentCoin.name,
+        });
+      }
+    }
+    return dropDownData;
+  },
+);
+
+export const getUserCoinsOptions = createSelector(
+  [selectCurrentWallet],
+  currentWallet => {
+    const alreadyIncluded = [];
+    const dropDownData = [];
+
+    const allCoins = currentWallet?.coins;
     for (let j = 0; j < allCoins?.length; j++) {
       const currentCoin = allCoins[j];
       const key = currentCoin?.chain_name + '_' + currentCoin.symbol;
-      if (!currentCoin?.isInWallet || alreadyIncluded.includes(key)) {
+      if (alreadyIncluded.includes(key) || !currentCoin?.isInWallet) {
         continue;
       }
       alreadyIncluded.push(key);
@@ -196,61 +237,26 @@ export const getCoinsOptions = state => {
         value: `${currentCoin?.chain_name}_${currentCoin.symbol}`,
         options: {
           title: currentCoin.name,
-          symbol: currentCoin.symbol,
           decimal: currentCoin.decimal,
           currencyRate: currentCoin.currencyRate,
-          chain_symbol: currentCoin.chain_symbol,
-          contract_address: currentCoin.contractAddress,
-          icon: currentCoin.icon,
+          symbol: currentCoin.symbol,
+          icon: currentCoin?.icon,
+          walletAddress: currentCoin?.address,
+          type: currentCoin?.type,
           chain_name: currentCoin?.chain_name,
           chain_display_name:
             currentCoin.type === 'token' ||
             isBitcoinChain(currentCoin?.chain_name)
               ? currentCoin?.chain_display_name
               : '',
+          displayTitle: `${currentCoin.symbol} (${currentCoin?.chain_display_name})`,
         },
         label: currentCoin.name,
       });
     }
-  }
-  return dropDownData;
-};
-
-export const getUserCoinsOptions = state => {
-  const alreadyIncluded = [];
-  const dropDownData = [];
-  const currentWallet = selectCurrentWallet(state);
-  const allCoins = currentWallet?.coins;
-  for (let j = 0; j < allCoins?.length; j++) {
-    const currentCoin = allCoins[j];
-    const key = currentCoin?.chain_name + '_' + currentCoin.symbol;
-    if (alreadyIncluded.includes(key) || !currentCoin?.isInWallet) {
-      continue;
-    }
-    alreadyIncluded.push(key);
-    dropDownData.push({
-      value: `${currentCoin?.chain_name}_${currentCoin.symbol}`,
-      options: {
-        title: currentCoin.name,
-        decimal: currentCoin.decimal,
-        currencyRate: currentCoin.currencyRate,
-        symbol: currentCoin.symbol,
-        icon: currentCoin?.icon,
-        walletAddress: currentCoin?.address,
-        type: currentCoin?.type,
-        chain_name: currentCoin?.chain_name,
-        chain_display_name:
-          currentCoin.type === 'token' ||
-          isBitcoinChain(currentCoin?.chain_name)
-            ? currentCoin?.chain_display_name
-            : '',
-        displayTitle: `${currentCoin.symbol} (${currentCoin?.chain_display_name})`,
-      },
-      label: currentCoin.name,
-    });
-  }
-  return dropDownData;
-};
+    return dropDownData;
+  },
+);
 
 export const selectCurrentCoin = state => {
   const currentWallet = selectCurrentWallet(state);

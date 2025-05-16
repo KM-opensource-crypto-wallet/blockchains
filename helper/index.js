@@ -204,15 +204,25 @@ export function validateBigNumberStr(number) {
     return '0';
   }
 }
-export function validateNumberInInput(text) {
+export function validateNumberInInput(text, decimals = 18) {
+  // Remove leading zeros unless it's something like "0." or just "0"
   while (text.charAt(0) === '0' && text.charAt(1) !== '.' && text.length > 1) {
     text = text.substring(1);
   }
 
-  // Check if the text is a valid floating point number or empty string
+  // Check if it's a valid number or empty string
   if (!isNaN(text) || text === '') {
+    const parts = text.split('.');
+
+    // If there's a decimal part, check its length
+    if (parts.length === 2 && parts[1].length > decimals) {
+      parts[1] = parts[1].slice(0, decimals); // Trim to 6 decimal places
+      return parts.join('.');
+    }
+
     return text;
   }
+
   return '0';
 }
 
@@ -1163,17 +1173,6 @@ export function getLargestNumber(arr) {
   return Math.max(...arr);
 }
 
-export function shuffleArray(array) {
-  // Create a copy of the array to avoid mutating the original array
-  const newArray = array.slice();
-
-  for (let i = newArray.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-  }
-
-  return newArray;
-}
 const fingerPrintName = {
   'Touch ID': 'Touch ID',
   'Face ID': 'Face ID',

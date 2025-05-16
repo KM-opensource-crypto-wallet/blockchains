@@ -3,6 +3,7 @@ import {v4} from 'uuid';
 import {IS_SANDBOX, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import {generateSHA256ForCoins} from 'utils/common';
 import {getAIDFromLocalStorage} from 'utils/localStorageData';
+import {isEVMChain} from 'dok-wallet-blockchain-networks/helper';
 
 export const addOTC = async payload => {
   try {
@@ -15,7 +16,7 @@ export const addOTC = async payload => {
 
 export const registerUserAPI = async payload => {
   try {
-    const sshData = await generateSHA256ForCoins(payload.coins);
+    const sshData = await generateSHA256ForCoins(payload.coins, isEVMChain);
     const finalPayload = {
       walletIds: sshData,
       clientId: payload?.clientId || v4(),
