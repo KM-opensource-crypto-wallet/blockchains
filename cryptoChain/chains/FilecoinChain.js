@@ -140,13 +140,13 @@ export const FilecoinChain = chain_name => {
       try {
         const transactions = await FilScan.getTransactions({address});
         return transactions.map(item => {
-          const txHash = item?.txHash;
+          const txHash = item?.txHash || '';
           return {
             amount: item?.amount?.toString(),
-            link: txHash.substring(0, 13) + '...',
+            link: txHash ? txHash.substring(0, 13) + '...' : '',
             url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
-            status: item?.status ? 'SUCCESS' : 'FAILED',
-            date: new Date(item.timestamp),
+            status: item?.status === true ? 'SUCCESS' : 'FAILED',
+            date: item?.timestamp ? new Date(item.timestamp) : new Date(),
             from: item?.from,
             to: item?.to,
           };
@@ -163,37 +163,34 @@ export const FilecoinChain = chain_name => {
       phrase,
       estimateGas: {nonce, gasLimit, gasFeeCap, gasPremium},
     }) =>
-      retryFunc(
-        async ({wallet, lotusClient}) => {
-          try {
-            const walletProvider = new MnemonicWalletProvider(
-              lotusClient,
-              phrase,
-              derivedPath,
-            );
-            await walletProvider.newAddress();
-            const amountToSend = convertToSmallAmount(amount, 18);
-            const message = await wallet.createMessage({
-              To: to,
-              From: from,
-              Nonce: nonce,
-              Value: amountToSend,
-              GasLimit: gasLimit,
-              GasFeeCap: new BigNumber(gasFeeCap),
-              GasPremium: new BigNumber(gasPremium),
-            });
-            const sendMessage = await walletProvider.signMessage(message);
-            const sendSignedMessage = await walletProvider.sendSignedMessage(
-              sendMessage,
-            );
-            return sendSignedMessage['/'];
-          } catch (e) {
-            console.error('Error in send filecoin transaction', e);
-            throw e;
-          }
-        },
-        {hash: '', error: true},
-      ),
+      retryFunc(async ({wallet, lotusClient}) => {
+        try {
+          const walletProvider = new MnemonicWalletProvider(
+            lotusClient,
+            phrase,
+            derivedPath,
+          );
+          await walletProvider.newAddress();
+          const amountToSend = convertToSmallAmount(amount, 18);
+          const message = await wallet.createMessage({
+            To: to,
+            From: from,
+            Nonce: nonce,
+            Value: amountToSend,
+            GasLimit: gasLimit,
+            GasFeeCap: new BigNumber(gasFeeCap),
+            GasPremium: new BigNumber(gasPremium),
+          });
+          const sendMessage = await walletProvider.signMessage(message);
+          const sendSignedMessage = await walletProvider.sendSignedMessage(
+            sendMessage,
+          );
+          return sendSignedMessage['/'];
+        } catch (e) {
+          console.error('Error in send filecoin transaction', e);
+          throw e;
+        }
+      }, null),
     waitForConfirmation: async ({transaction, interval, retries}) =>
       retryFunc(async ({lotusClient}) => {
         const sleep = ms =>
