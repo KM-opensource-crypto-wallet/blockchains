@@ -145,7 +145,7 @@ export const FilecoinChain = chain_name => {
             amount: item?.amount?.toString(),
             link: txHash.substring(0, 13) + '...',
             url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
-            status: item?.status ? 'SUCCESS' : 'FAILEd',
+            status: item?.status ? 'SUCCESS' : 'FAILED',
             date: new Date(item.timestamp),
             from: item?.from,
             to: item?.to,
