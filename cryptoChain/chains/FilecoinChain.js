@@ -2,12 +2,12 @@ import {validateAddressString} from '@glif/filecoin-address';
 import {keyPairFromPrivateKey} from '@nodefactory/filecoin-address';
 import BigNumber from 'bignumber.js';
 import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-import {FilScanApi} from 'dok-wallet-blockchain-networks/config/filScan';
 import {
   convertToSmallAmount,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {FilScan} from 'dok-wallet-blockchain-networks/service/filScan';
 import {
   HttpJsonRpcConnector,
   LotusClient,
@@ -115,12 +115,7 @@ export const FilecoinChain = chain_name => {
               Value: amountToSend,
               Nonce: nonce,
             });
-          const res = await filScanApi.post('/GasDataTrend', {interval: '24h'});
-          const resFee = res.data?.result?.items?.[0];
-          const baseFee = new BigNumber(resFee?.avg_gas_fee)
-            .div('1e10')
-            .toFixed(0);
-          const gasUsed = new BigNumber(resFee?.avg_gas_used).toFixed(0);
+          const {baseFee, gasUsed} = await FilScan.getTransactionFees();
           const totalGasFee = calculateFilecoinGasFee(
             gasUsed.toString(),
             GasLimit.toString(),
@@ -143,23 +138,15 @@ export const FilecoinChain = chain_name => {
       }, null),
     getTransactions: async ({address}) => {
       try {
-        const res = await FilScanApi.post('/MessagesByAccountID', {
-          account_id: address,
-          filters: {
-            index: 0,
-            limit: 20,
-            method_name: '',
-          },
-        });
-        return res.data.result.messages_by_account_id_list.map(item => {
-          const bnValue = BigInt(item?.value);
-          const txHash = item?.cid;
+        const transactions = await FilScan.getTransactions({address});
+        return transactions.map(item => {
+          const txHash = item?.txHash;
           return {
-            amount: bnValue?.toString(),
+            amount: item?.amount?.toString(),
             link: txHash.substring(0, 13) + '...',
-            date: item?.block_time * 1000,
-            status: item?.exit_code === 'Ok' ? 'SUCCESS' : 'FAILED',
             url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+            status: item?.status ? 'SUCCESS' : 'FAILEd',
+            date: new Date(item.timestamp),
             from: item?.from,
             to: item?.to,
           };
