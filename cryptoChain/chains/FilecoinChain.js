@@ -1,8 +1,8 @@
 import {validateAddressString} from '@glif/filecoin-address';
 import {keyPairFromPrivateKey} from '@nodefactory/filecoin-address';
-import axios from 'axios';
 import BigNumber from 'bignumber.js';
 import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {FilScanApi} from 'dok-wallet-blockchain-networks/config/filScan';
 import {
   convertToSmallAmount,
   parseBalance,
@@ -16,10 +16,6 @@ import {
 } from 'filecoin.js';
 
 const derivedPath = IS_SANDBOX ? "m/44'/1'/0'/0/0" : "m/44'/461'/0'/0/0";
-
-const filScanApi = axios.create({
-  baseURL: 'https://api-v2.filscan.io/api/v1',
-});
 
 export const FilecoinChain = chain_name => {
   const allRpcUrls = getFreeRPCUrl(chain_name);
@@ -147,7 +143,7 @@ export const FilecoinChain = chain_name => {
       }, null),
     getTransactions: async ({address}) => {
       try {
-        const res = await filScanApi.post('/MessagesByAccountID', {
+        const res = await FilScanApi.post('/MessagesByAccountID', {
           account_id: address,
           filters: {
             index: 0,
@@ -170,7 +166,7 @@ export const FilecoinChain = chain_name => {
         });
       } catch (e) {
         console.error('error in get transactions from filecoin', e);
-        throw e;
+        return [];
       }
     },
     send: async ({
