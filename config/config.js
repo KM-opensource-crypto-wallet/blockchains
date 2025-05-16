@@ -3,6 +3,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import {randomNumber} from 'utils/common';
 
 export const IS_SANDBOX = false;
 
@@ -11,7 +12,7 @@ export function shuffleArray(array) {
   const newArray = array.slice();
 
   for (let i = newArray.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomNumber(1, i);
     [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
 
