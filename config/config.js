@@ -3,18 +3,54 @@ import * as bitcoin from 'bitcoinjs-lib';
 import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
-import {getRandomValues} from 'crypto';
 
 export const IS_SANDBOX = false;
+
+export function getSecureRandomValues(length = 16) {
+  const result = new Uint8Array(length);
+
+  // Browser or React Native with polyfill
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    return crypto.getRandomValues(result);
+  }
+
+  // React Native fallback
+  if (
+    typeof global !== 'undefined' &&
+    global.crypto &&
+    global.crypto.getRandomValues
+  ) {
+    return global.crypto.getRandomValues(result);
+  }
+
+  // Node.js environment (Next.js SSR)
+  if (
+    typeof process !== 'undefined' &&
+    process.versions &&
+    process.versions.node
+  ) {
+    // Dynamic import to avoid issues with Next.js
+    const nodeCrypto = require('crypto');
+    const randomBytes = nodeCrypto.randomBytes(length);
+    for (let i = 0; i < length; i++) {
+      result[i] = randomBytes[i];
+    }
+    return result;
+  }
+  return result;
+}
 
 export function shuffleArray(array) {
   // Create a copy of the array to avoid mutating the original array
   const newArray = array.slice();
 
+  // Use secure random values for the shuffle
   for (let i = newArray.length - 1; i > 0; i--) {
-    const tempArray = new Uint32Array(1);
-    getRandomValues(tempArray);
-    const j = tempArray[0] % (i + 1);
+    // Get a single random value for each swap
+    const randomBytes = getSecureRandomValues(1);
+    // Convert to a number and get modulo to stay in range
+    const j = randomBytes[0] % (i + 1);
+    // Swap elements
     [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
 
