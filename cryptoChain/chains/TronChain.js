@@ -494,14 +494,14 @@ export const TronChain = () => {
               updatePrivateKey,
               memo,
             );
-            if (memo) {
-              totalFee += memoFee;
-            }
             totalFee = calculateBandwidth(
               txData,
               availableBandwidth,
               transactionFee,
             );
+            if (memo) {
+              totalFee += memoFee;
+            }
           }
           return {
             fee: TronWeb.fromSun(totalFee?.toString()),
