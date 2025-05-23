@@ -170,7 +170,7 @@ export const TronChain = () => {
       amount,
       fromAddress,
     );
-    let nexTxn = await addUpdateData(tronWeb, transaction, memo);
+    const nexTxn = await addUpdateData(tronWeb, transaction, memo);
     return tronWeb.trx.sign(nexTxn, updatePrivateKey);
   };
 
@@ -446,7 +446,7 @@ export const TronChain = () => {
             typesValues,
             tronWeb.address.toHex(fromAddress),
           );
-          let nexTxn = await addUpdateData(tronWeb, tx?.transaction, memo);
+          const nexTxn = await addUpdateData(tronWeb, tx?.transaction, memo);
           const txData = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
 
           let totalFee = calculateBandwidth(
@@ -904,7 +904,7 @@ export const TronChain = () => {
           tronWeb.toSun(amount), // 10 TRX, for example.
           from,
         );
-        let nexTxn = await addUpdateData(tronWeb, transaction, memo);
+        const nexTxn = await addUpdateData(tronWeb, transaction, memo);
         let signedTransaction = await tronWeb.trx.sign(
           nexTxn,
           updatePrivateKey,
@@ -950,7 +950,7 @@ export const TronChain = () => {
           ],
           tronWeb.address.toHex(from),
         );
-        let nexTxn = await addUpdateData(tronWeb, tx.transaction, memo);
+        const nexTxn = await addUpdateData(tronWeb, tx.transaction, memo);
         const signedTx = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
         return await tronWeb.trx.sendRawTransaction(signedTx);
       }, null),
