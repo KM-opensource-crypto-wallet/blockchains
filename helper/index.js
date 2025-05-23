@@ -399,6 +399,7 @@ const MEMO_SUPPORT_CHAIN = [
   'stellar',
   'hedera',
   'thorchain',
+  'tron',
 ];
 
 export const isMemoSupportChain = chain_name =>

@@ -135,12 +135,34 @@ export const TronChain = () => {
     return 0;
   };
 
+  const convertStringToHex = str => {
+    if (!str) {
+      return '';
+    }
+    const hex = Array.from(str)
+      .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('');
+    return hex;
+  };
+
+  const addUpdateData = (tronWeb, txn, memo) => {
+    if (!memo) {
+      return txn;
+    }
+    return tronWeb.transactionBuilder.addUpdateData(
+      txn,
+      convertStringToHex(memo),
+      'hex',
+    );
+  };
+
   const createTransactionForFees = async (
     tronWeb,
     fromAddress,
     toAddress,
     amount,
     privateKey,
+    memo,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
     const transaction = await tronWeb.transactionBuilder.sendTrx(
@@ -148,7 +170,8 @@ export const TronChain = () => {
       amount,
       fromAddress,
     );
-    return tronWeb.trx.sign(transaction, updatePrivateKey);
+    const nexTxn = await addUpdateData(tronWeb, transaction, memo);
+    return tronWeb.trx.sign(nexTxn, updatePrivateKey);
   };
 
   const createStakingTransactionFreezeBalance = async (
@@ -233,11 +256,14 @@ export const TronChain = () => {
       chainParams.find(item => item?.key === 'getTransactionFee').value || 1000;
     const energyFee =
       chainParams.find(item => item?.key === 'getEnergyFee').value || 420;
+    const memoFee =
+      chainParams.find(item => item?.key === 'getMemoFee').value || 1000000;
     return {
       accountCreationFee,
       newAccountFee,
       transactionFee,
       energyFee,
+      memoFee,
     };
   };
 
@@ -396,12 +422,15 @@ export const TronChain = () => {
       amount,
       decimals,
       privateKey,
+      memo,
     }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
 
-          const {transactionFee, energyFee} = await getChainData(tronWeb);
+          const {transactionFee, energyFee, memoFee} = await getChainData(
+            tronWeb,
+          );
           const sunAmount = convertToSmallAmount(amount, decimals);
           const {bandwidth: availableBandwidth, energy: currentAccountEnergy} =
             await getAccountResourcesData(tronWeb, fromAddress);
@@ -417,16 +446,18 @@ export const TronChain = () => {
             typesValues,
             tronWeb.address.toHex(fromAddress),
           );
-          const txData = await tronWeb.trx.sign(
-            tx?.transaction,
-            updatePrivateKey,
-          );
+          const nexTxn = await addUpdateData(tronWeb, tx?.transaction, memo);
+          const txData = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
+
           let totalFee = calculateBandwidth(
             txData,
             availableBandwidth,
             transactionFee,
             true,
           );
+          if (memo) {
+            totalFee += memoFee;
+          }
           const energyUsed = tx?.energy_used;
           const energyRequired = currentAccountEnergy - energyUsed;
 
@@ -445,11 +476,17 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    getEstimateFee: async ({fromAddress, toAddress, amount, privateKey}) =>
+    getEstimateFee: async ({
+      fromAddress,
+      toAddress,
+      amount,
+      privateKey,
+      memo,
+    }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {accountCreationFee, newAccountFee, transactionFee} =
+          const {accountCreationFee, newAccountFee, transactionFee, memoFee} =
             await getChainData(tronWeb);
           const sunAmount = tronWeb.toSun(amount);
           const isNewAccount = await checkNewAccount({
@@ -469,12 +506,16 @@ export const TronChain = () => {
               toAddress,
               Number(sunAmount),
               updatePrivateKey,
+              memo,
             );
             totalFee = calculateBandwidth(
               txData,
               availableBandwidth,
               transactionFee,
             );
+            if (memo) {
+              totalFee += memoFee;
+            }
           }
           return {
             fee: TronWeb.fromSun(totalFee?.toString()),
@@ -855,7 +896,7 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
-    send: async ({to, from, amount, privateKey}) =>
+    send: async ({to, from, amount, memo, privateKey}) =>
       retryFunc(async tronWeb => {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
         let transaction = await tronWeb.transactionBuilder.sendTrx(
@@ -863,9 +904,9 @@ export const TronChain = () => {
           tronWeb.toSun(amount), // 10 TRX, for example.
           from,
         );
-
+        const nexTxn = await addUpdateData(tronWeb, transaction, memo);
         let signedTransaction = await tronWeb.trx.sign(
-          transaction,
+          nexTxn,
           updatePrivateKey,
         );
 
@@ -883,6 +924,7 @@ export const TronChain = () => {
       amount,
       privateKey,
       decimal,
+      memo,
     }) =>
       retryFunc(async tronWeb => {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -908,10 +950,8 @@ export const TronChain = () => {
           ],
           tronWeb.address.toHex(from),
         );
-        const signedTx = await tronWeb.trx.sign(
-          tx.transaction,
-          updatePrivateKey,
-        );
+        const nexTxn = await addUpdateData(tronWeb, tx.transaction, memo);
+        const signedTx = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
         return await tronWeb.trx.sendRawTransaction(signedTx);
       }, null),
     createStaking: async ({from, amount, privateKey, resourceType}) =>
