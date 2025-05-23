@@ -135,11 +135,25 @@ export const TronChain = () => {
     return 0;
   };
 
+  const convertStringToHex = str => {
+    if (!str) {
+      return '';
+    }
+    const hex = Array.from(str)
+      .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('');
+    return hex;
+  };
+
   const addUpdateData = (tronWeb, txn, memo) => {
     if (!memo) {
       return txn;
     }
-    return tronWeb.transactionBuilder.addUpdateData(txn, memo);
+    return tronWeb.transactionBuilder.addUpdateData(
+      txn,
+      convertStringToHex(memo),
+      'hex',
+    );
   };
 
   const createTransactionForFees = async (
