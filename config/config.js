@@ -61,7 +61,7 @@ const SANDBOX_CHAIN_ID = {
   ethereum: 11155111,
   binance_smart_chain: 97,
   optimism: 11155420,
-  polygon: 80001,
+  polygon: 80002,
   base: 84532,
   arbitrum: 421614,
   optimism_binance_smart_chain: 5611,
@@ -133,7 +133,7 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'optimism',
     symbol: 'ETH',
   },
-  'eip155:80001': {
+  'eip155:80002': {
     chain_display_name: 'Polygon',
     chain_name: 'polygon',
     symbol: 'POL',

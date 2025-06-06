@@ -1273,3 +1273,12 @@ export function customFetchWithTimeout(url, options = {}) {
       throw error;
     });
 }
+
+export const isNewerVersion = (v1, v2) => {
+  const a = v1.split('.').map(Number);
+  const b = v2.split('.').map(Number);
+  return a.some((part, i) => part !== (b[i] || 0))
+    ? a.find((part, i) => part !== (b[i] || 0)) >
+        (b[a.findIndex((part, i) => part !== (b[i] || 0))] || 0)
+    : false;
+};
