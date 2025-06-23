@@ -1275,6 +1275,9 @@ export function customFetchWithTimeout(url, options = {}) {
 }
 
 export const isNewerVersion = (v1, v2) => {
+  if (!v1 || !v2) {
+    return false;
+  }
   const a = v1.split('.').map(Number);
   const b = v2.split('.').map(Number);
   return a.some((part, i) => part !== (b[i] || 0))
