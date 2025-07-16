@@ -847,6 +847,7 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
+        return res?.hash;
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
