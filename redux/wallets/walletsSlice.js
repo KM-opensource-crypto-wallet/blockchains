@@ -76,6 +76,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {fetchSupportedBuyCryptoCurrency} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProviderSlice';
+import { getHashString } from '../../cryptoChain';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -818,6 +819,7 @@ export const sendFunds = createAsyncThunk(
             }),
           );
         }
+        const tx_hash = getHashString(res, currentCoin?.chain_name);
         confirmTransaction = await nativeCoin.waitForConfirmation({
           transaction: res,
           interval: 5000,
@@ -847,7 +849,7 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
-        return res?.hash;
+        return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -857,6 +859,7 @@ export const sendFunds = createAsyncThunk(
           autoHide: true,
           toastId,
         });
+        return {tx_hash: '', status: 1};
       }
     } catch (e) {
       console.error('Error in send fund', e);

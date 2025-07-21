@@ -467,3 +467,50 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
 
   return coinWrapper;
 };
+
+const hashObject = {
+  tron: "txid", //
+  ethereum: "hash", //
+  binance_smart_chain: "hash", //
+  bitcoin: "", //
+  bitcoin_legacy: "", //
+  bitcoin_segwit: "", //
+  solana: "", //
+  polygon: "hash", //
+  base: "hash", //
+  arbitrum: "hash", //
+  optimism: "hash", //
+  litecoin: "", //
+  stellar: "", //
+  //! ripple: '', //
+  thorchain: "", //
+  tezos: "opHash", //
+  optimism_binance_smart_chain: "hash", //
+  avalanche: "hash", //
+  cosmos: "", //
+  fantom: "hash",
+  gnosis: "hash", //
+  viction: "hash",
+  //! polkadot: 'hash', //
+  //! ton: 'hash', //
+  dogecoin: "", //
+  aptos: "", //
+  //! linea: 'hash',
+  zksync: "hash", //
+  ethereum_classic: "hash", //
+  ethereum_pow: "hash", //
+  //! kava: 'hash',
+  bitcoin_cash: "", //
+  hedera: "transactionHash",
+  //! ink: 'hash',
+  cardano: "", //
+  filecoin: "", //
+};
+
+export const getHashString = (data, type) => {
+  const hashType = hashObject?.[type];
+  if (hashType) {
+    return data[hashType];
+  }
+  return data;
+};
