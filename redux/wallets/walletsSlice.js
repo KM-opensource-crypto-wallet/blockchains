@@ -1,4 +1,4 @@
-import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {getCoin, getHashString} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
   clearSelectedUTXOs,
@@ -76,7 +76,6 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {fetchSupportedBuyCryptoCurrency} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProviderSlice';
-import { getHashString } from '../../cryptoChain';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
