@@ -1,4 +1,4 @@
-import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {getCoin, getHashString} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
   clearSelectedUTXOs,
@@ -818,6 +818,7 @@ export const sendFunds = createAsyncThunk(
             }),
           );
         }
+        const tx_hash = getHashString(res, currentCoin?.chain_name);
         confirmTransaction = await nativeCoin.waitForConfirmation({
           transaction: res,
           interval: 5000,
@@ -847,6 +848,7 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
+        return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -856,6 +858,7 @@ export const sendFunds = createAsyncThunk(
           autoHide: true,
           toastId,
         });
+        return {tx_hash: '', status: 1};
       }
     } catch (e) {
       console.error('Error in send fund', e);
