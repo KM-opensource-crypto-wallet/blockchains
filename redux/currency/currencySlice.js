@@ -305,10 +305,6 @@ export const searchAndAddCoins = createAsyncThunk(
 
       if (isCoinsMissing) {
         dispatch(setMissingCoins(coinsList));
-        showToast({
-          type: 'errorToast',
-          title: 'Currency not found in the selected wallet',
-        });
         throw new Error('Currency not found in the selected wallet');
       }
     } catch (err) {

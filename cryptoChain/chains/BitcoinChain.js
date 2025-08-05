@@ -293,11 +293,13 @@ export const BitcoinChain = () => {
         return [];
       }
     },
-    getTransactions: async ({address}) => {
+    getTransactions: async ({address, deriveAddresses}) => {
       try {
+        const allAddresses = deriveAddresses?.map?.(item => item?.address);
         const transactions = await BitcoinFork.getTransactions({
           chain: 'btc',
           address,
+          derive_addresses: allAddresses,
         });
         if (Array.isArray(transactions)) {
           return transactions.map(item => {
