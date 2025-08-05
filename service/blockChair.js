@@ -1,13 +1,89 @@
 import {BlockChairAPI} from 'dok-wallet-blockchain-networks/config/blockChair';
 import BigNumber from 'bignumber.js';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 
 const chainName = {
-  btc: 'bitcoin',
+  btc: IS_SANDBOX ? 'bitcoin/testnet' : 'bitcoin',
   bch: 'bitcoin-cash',
   doge: 'dogecoin',
   ltc: 'litecoin',
 };
 
+const parseBlockchainTransactions = (txs, walletAddresses) => {
+  // Convert wallet addresses to lowercase Set for fast lookup
+  const walletSet = new Set(walletAddresses.map(addr => addr.toLowerCase()));
+
+  return txs
+    .map(tx => {
+      // Extract inputs and outputs arrays
+      const inputs = tx.inputs || [];
+      const outputs = tx.outputs || [];
+
+      // Check if any input belongs to our wallet (we're sending)
+      const isOutgoing = inputs.some(input =>
+        walletSet.has(input.recipient?.toLowerCase()),
+      );
+
+      // Separate outputs into external (actual transfers) and internal (change)
+      const externalOutputs = [];
+      const internalOutputs = [];
+
+      outputs.forEach(output => {
+        const address = output.recipient?.toLowerCase();
+        if (walletSet.has(address)) {
+          internalOutputs.push(output);
+        } else {
+          externalOutputs.push(output);
+        }
+      });
+
+      // Calculate amount based on transaction direction using BigNumber
+      let transferAmount;
+      if (isOutgoing) {
+        // For outgoing: amount sent = external outputs (what we sent to others)
+        transferAmount = externalOutputs.reduce(
+          (sum, output) => sum.plus(new BigNumber(output.value || 0)),
+          new BigNumber(0),
+        );
+      } else {
+        // For incoming: amount received = internal outputs (what we received)
+        transferAmount = internalOutputs.reduce(
+          (sum, output) => sum.plus(new BigNumber(output.value || 0)),
+          new BigNumber(0),
+        );
+      }
+
+      // Get fee amount from transaction object using BigNumber
+      const fee = new BigNumber(tx.transaction?.fee || 0);
+
+      // Get primary recipient (first external output)
+      const primaryRecipient = externalOutputs[0]?.recipient;
+
+      // Get sender address (first input from our wallet)
+      const senderAddress = inputs.find(input =>
+        walletSet.has(input.recipient?.toLowerCase()),
+      )?.recipient;
+
+      // Parse timestamp - combine date and time if available
+      let timestamp = null;
+      if (tx.transaction?.time) {
+        timestamp = new Date(tx.transaction.time);
+      }
+
+      return {
+        hash: tx.transaction?.hash,
+        timestamp: timestamp,
+        status: !!tx.transaction?.block_id, // Has block_id means it's confirmed
+        amount: transferAmount.toString(),
+        fee: fee.toString(),
+        from: isOutgoing ? senderAddress : inputs[0]?.recipient,
+        to: isOutgoing ? primaryRecipient : internalOutputs[0]?.recipient,
+      };
+    })
+    .sort(
+      (a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0),
+    );
+};
 export const BlockChair = {
   getBalance: async ({chain, address}) => {
     const resp = await BlockChairAPI.get(
@@ -21,7 +97,7 @@ export const BlockChair = {
     return resp?.data?.data?.[address]?.address?.balance;
   },
 
-  getTransactions: async ({chain, address}) => {
+  getTransactions: async ({chain, address, derive_addresses}) => {
     const resp = await BlockChairAPI.get(
       `${chainName[chain]}/dashboards/address/${address}`,
       {
@@ -36,46 +112,10 @@ export const BlockChair = {
     );
     const transactionsData = transactionResp?.data?.data || {};
     const txs = Object.values(transactionsData);
-    return txs?.map(item => {
-      const inputs = item?.inputs;
-      const fromAddress = inputs[0]?.recipient;
-      const isSender = fromAddress?.toLowerCase() === address?.toLowerCase();
-      let totalAmount = new BigNumber(0);
-      const transaction = item?.transaction;
-      const txHash = transaction?.hash;
-      const vOut = item?.outputs;
-      vOut.forEach(tr => {
-        const recipientLower = tr?.recipient?.toLowerCase();
-        const addressLower = address?.toLowerCase();
-        if (
-          (isSender && recipientLower !== addressLower) ||
-          (!isSender && recipientLower === addressLower)
-        ) {
-          const amount = new BigNumber(tr?.value || 0);
-          totalAmount = totalAmount.plus(amount);
-        }
-      });
-      if (isSender) {
-        const fees = new BigNumber(transaction?.fee || 0);
-        totalAmount = totalAmount.plus(fees);
-      }
-      return {
-        amount: totalAmount.toString(),
-        hash: txHash,
-        status: transaction?.block_id && transaction?.block_id !== -1,
-        timestamp: new Date(transaction?.time), //new Date(transaction.raw_data.timestamp),
-        from: fromAddress,
-        to: vOut.find(tx => {
-          const recipientLower = tx?.recipient?.toLowerCase();
-          const addressLower = address?.toLowerCase();
-          if (isSender) {
-            return recipientLower !== addressLower;
-          } else {
-            return recipientLower === addressLower;
-          }
-        })?.recipient,
-      };
-    });
+    const finalAddresses = Array.isArray(derive_addresses)
+      ? derive_addresses
+      : [address];
+    return parseBlockchainTransactions(txs, finalAddresses);
   },
 
   getUTXO: async ({chain, address}) => {

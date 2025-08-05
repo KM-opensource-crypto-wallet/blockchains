@@ -88,7 +88,11 @@ export const getCoinSnapshot = async (
             key,
           );
         }
-        trxs = await nativeCoin.getTransactions?.({pendingTransactions, key});
+        trxs = await nativeCoin.getTransactions?.({
+          pendingTransactions,
+          key,
+          deriveAddresses: coinDef?.deriveAddresses,
+        });
       }
       if (fetchUTXOs) {
         utxos = await nativeCoin.getUTXOs?.();

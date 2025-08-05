@@ -9,11 +9,12 @@ export const PremiumBlockChair = {
     });
   },
 
-  getTransactions: async ({chain, address}) => {
+  getTransactions: async ({chain, address, derive_addresses}) => {
     return getAllBlockchairAPI({
       type: 'getTransactions',
       chain,
       address,
+      derive_addresses,
     });
   },
 

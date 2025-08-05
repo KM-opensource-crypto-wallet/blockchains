@@ -8,6 +8,76 @@ const APIProvider = {
   ltc: LitecoinSpaceAPI,
   bch: BchMempoolAPI,
 };
+
+const parseReadableTransactions = (txs, walletAddresses) => {
+  // Convert wallet addresses to lowercase Set for fast lookup
+  const walletSet = new Set(walletAddresses.map(addr => addr.toLowerCase()));
+
+  return txs
+    .map(tx => {
+      // Check if any input belongs to our wallet (we're sending)
+      const isOutgoing = tx.vin?.some(input =>
+        walletSet.has(input.prevout?.scriptpubkey_address?.toLowerCase()),
+      );
+
+      // Separate outputs into external (actual transfers) and internal (change)
+      const externalOutputs = [];
+      const internalOutputs = [];
+
+      tx.vout?.forEach(output => {
+        const address = output.scriptpubkey_address?.toLowerCase();
+        if (walletSet.has(address)) {
+          internalOutputs.push(output);
+        } else {
+          externalOutputs.push(output);
+        }
+      });
+
+      // Calculate amount based on transaction direction using BigNumber
+      let transferAmount;
+      if (isOutgoing) {
+        // For outgoing: amount sent = external outputs (what we sent to others)
+        transferAmount = externalOutputs.reduce(
+          (sum, output) => sum.plus(new BigNumber(output.value || 0)),
+          new BigNumber(0),
+        );
+      } else {
+        // For incoming: amount received = internal outputs (what we received)
+        transferAmount = internalOutputs.reduce(
+          (sum, output) => sum.plus(new BigNumber(output.value || 0)),
+          new BigNumber(0),
+        );
+      }
+
+      // Get primary recipient (first external output)
+      const primaryRecipient = externalOutputs[0]?.scriptpubkey_address;
+
+      // Get sender address (first input from our wallet)
+      const senderAddress = tx.vin?.find(input =>
+        walletSet.has(input.prevout?.scriptpubkey_address?.toLowerCase()),
+      )?.prevout?.scriptpubkey_address;
+
+      return {
+        hash: tx.txid,
+        timestamp: tx.status?.block_time
+          ? new Date(tx.status.block_time * 1000)
+          : null,
+        status: !!tx.status?.confirmed,
+        amount: transferAmount.toString(),
+        fee: new BigNumber(tx.fee || 0).toString(),
+        from: isOutgoing
+          ? senderAddress
+          : tx.vin?.[0]?.prevout?.scriptpubkey_address,
+        to: isOutgoing
+          ? primaryRecipient
+          : internalOutputs[0]?.scriptpubkey_address,
+      };
+    })
+    .sort(
+      (a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0),
+    );
+};
+
 export const Mempool = {
   getBalance: async ({address, chain}) => {
     const resp = await APIProvider[chain].get(`/address/${address}`);
@@ -15,49 +85,13 @@ export const Mempool = {
     const spent = new BigNumber(resp?.data?.chain_stats?.spent_txo_sum || 0);
     return total.minus(spent).toString();
   },
-  getTransactions: async ({address, chain}) => {
+  getTransactions: async ({address, chain, derive_addresses}) => {
     const resp = await APIProvider[chain].get(`/address/${address}/txs`);
-    const txs = Array?.isArray(resp?.data) ? resp?.data : [];
-    const transactions = txs?.map(item => {
-      const fromAddress = item?.vin?.[0]?.prevout?.scriptpubkey_address;
-      const isSender = fromAddress === address;
-      let totalAmount = new BigNumber(0);
-      const txHash = item?.txid;
-      const vOut = Array.isArray(item?.vout) ? item?.vout : [];
-      vOut.forEach(tr => {
-        const txAddress = tr?.scriptpubkey_address?.toLowerCase();
-        const addressLower = address?.toLowerCase();
-        if (
-          (isSender && txAddress !== addressLower) ||
-          (!isSender && txAddress === addressLower)
-        ) {
-          const amount = new BigNumber(tr?.value || 0);
-          totalAmount = totalAmount.plus(amount);
-        }
-      });
-      if (isSender) {
-        const fees = new BigNumber(item?.fee || 0);
-        totalAmount = totalAmount.plus(fees);
-      }
-      return {
-        amount: totalAmount.toString(),
-        hash: txHash,
-        status: !!item?.status?.confirmed,
-        timestamp: new Date(item?.status?.block_time * 1000), //new Date(transaction.raw_data.timestamp),
-        from: fromAddress,
-        to: vOut?.find(tx => {
-          const txAddress = tx?.scriptpubkey_address?.toLowerCase();
-          const fromAddressLower = fromAddress?.toLowerCase();
-          const addressLower = address?.toLowerCase();
-          return isSender
-            ? txAddress !== fromAddressLower
-            : txAddress === addressLower;
-        })?.scriptpubkey_address,
-      };
-    });
-    return transactions.sort(
-      (a, b) => new Date(b?.timestamp) - new Date(a?.timestamp),
-    );
+    const txs = Array.isArray(resp?.data) ? resp?.data : [];
+    const finalAddresses = Array.isArray(derive_addresses)
+      ? derive_addresses
+      : [address];
+    return parseReadableTransactions(txs, finalAddresses);
   },
   getUTXO: async ({address, chain}) => {
     const resp = await APIProvider[chain].get(`/address/${address}/utxo`);
