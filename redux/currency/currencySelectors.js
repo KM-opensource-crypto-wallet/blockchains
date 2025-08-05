@@ -39,3 +39,5 @@ export const isSearchAllGroupCoinsLoading = state =>
   state?.currency?.searchAllGroupCoinsLoading;
 
 export const isAddingGroup = state => state?.currency?.isAddingGroup;
+export const getCurrencyLoading = state => state?.currency?.loading;
+export const getMissingCoins = state => state?.currency?.missingCoins;

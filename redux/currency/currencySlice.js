@@ -13,6 +13,8 @@ import {
   debounce,
   generateUniqueKeyForChain,
 } from 'dok-wallet-blockchain-networks/helper';
+import {showToast} from 'utils/toast';
+import {setCurrentCoin} from '../wallets/walletsSlice';
 
 const initialState = {
   loading: true,
@@ -37,6 +39,7 @@ const initialState = {
   searchAllGroupCoinsLoading: false,
   searchIsAllGroupCoinAvailable: false,
   isAddingGroup: {},
+  missingCoins: [],
 };
 
 export const fetchCurrencies = createAsyncThunk(
@@ -235,6 +238,86 @@ export const fetchAllSearchCoinsGroup = createAsyncThunk(
   searchCoinGroupHandler,
 );
 
+export const searchAndAddCoins = createAsyncThunk(
+  'wallets/searchAndAddCoins',
+  async (payload, thunkAPI) => {
+    const state = thunkAPI.getState();
+    const dispatch = thunkAPI.dispatch;
+    try {
+      const {currency} = payload;
+      const [chainName, symbol] = currency?.split(':') || [];
+
+      const userCoins = selectUserCoins(state).filter(
+        coin => coin.chain_name === chainName,
+      );
+
+      const hasExactCoin = userCoins.find(
+        coin => coin.type === 'coin' && coin.symbol === symbol,
+      );
+      if (hasExactCoin) {
+        dispatch(setCurrentCoin(hasExactCoin?._id));
+        return;
+      }
+
+      const coinsList = [];
+      let isCoinsMissing = false;
+
+      const hasChain = userCoins.find(coin => coin.type === 'coin');
+
+      if (hasChain) {
+        coinsList.push(hasChain);
+      } else {
+        const fetched = await dispatch(
+          fetchCurrencies({search: chainName.replace(/_/g, ' ')}),
+        ).unwrap();
+        const found = fetched.find(
+          coin =>
+            coin.chain_name === chainName &&
+            (coin.type === 'coin' || coin.symbol === symbol),
+        );
+        if (found) {
+          coinsList.push(found);
+        }
+        isCoinsMissing = true;
+      }
+
+      const hasToken = userCoins.find(
+        coin => coin.type === 'token' && coin.symbol === symbol,
+      );
+      if (hasToken) {
+        dispatch(setCurrentCoin(hasToken?._id));
+        coinsList.push(hasToken);
+      } else {
+        const fetched = await dispatch(
+          fetchCurrencies({search: symbol}),
+        ).unwrap();
+        const found = fetched.find(
+          coin =>
+            coin.chain_name === chainName &&
+            coin.type === 'token' &&
+            coin.symbol === symbol,
+        );
+        if (found) {
+          coinsList.push(found);
+        }
+        isCoinsMissing = true;
+      }
+
+      if (isCoinsMissing) {
+        dispatch(setMissingCoins(coinsList));
+        showToast({
+          type: 'errorToast',
+          title: 'Currency not found in the selected wallet',
+        });
+        throw new Error('Currency not found in the selected wallet');
+      }
+    } catch (err) {
+      console.error('Error in searchAndAddCoins:', err);
+      throw err;
+    }
+  },
+);
+
 export const currencySlice = createSlice({
   name: 'currency',
   initialState,
@@ -322,6 +405,9 @@ export const currencySlice = createSlice({
     resetIsAddingGroup(state) {
       state.isAddingGroup = {};
     },
+    setMissingCoins(state, {payload}) {
+      state.missingCoins = payload;
+    },
   },
   extraReducers: builder => {
     builder.addCase(fetchCurrencies.fulfilled, (state, {payload}) => {
@@ -331,6 +417,15 @@ export const currencySlice = createSlice({
     });
     builder.addCase(fetchCurrencies.rejected, (state, {payload}) => {
       state.error = payload;
+      state.loading = false;
+    });
+    builder.addCase(searchAndAddCoins.pending, state => {
+      state.loading = true;
+    });
+    builder.addCase(searchAndAddCoins.fulfilled, state => {
+      state.loading = false;
+    });
+    builder.addCase(searchAndAddCoins.rejected, state => {
       state.loading = false;
     });
   },
@@ -361,4 +456,5 @@ export const {
   resetIsAddingGroup,
   setIsAddingGroup,
   setIsRemovingGroup,
+  setMissingCoins,
 } = currencySlice.actions;
