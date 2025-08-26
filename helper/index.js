@@ -305,7 +305,7 @@ export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
 
 const OPTIONS_GAS_FEES_CHAIN = [
   'ethereum',
-  'binance_smart_chain',
+  // 'binance_smart_chain',
   'fantom',
   'avalanche',
   'gnosis',
