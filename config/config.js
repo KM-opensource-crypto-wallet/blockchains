@@ -10,7 +10,9 @@ export function getSecureRandomValues(length = 16) {
   const result = new Uint8Array(length);
 
   // Browser or React Native with polyfill
+  // eslint-disable-next-line no-undef
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    // eslint-disable-next-line no-undef
     return crypto.getRandomValues(result);
   }
 
@@ -74,6 +76,7 @@ const SANDBOX_CHAIN_ID = {
   ethereum_classic: 61,
   ethereum_pow: 10001,
   kava: 2221,
+  ink: 763373,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -93,6 +96,7 @@ const PRODUCTION_CHAIN_ID = {
   ethereum_classic: 61,
   ethereum_pow: 10001,
   kava: 2222,
+  ink: 57073,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
@@ -515,3 +519,20 @@ export const GAS_ORACLE_CONTRACT_ADDRESS = {
   base: '0x420000000000000000000000000000000000000F',
   ink: '0x420000000000000000000000000000000000000F',
 };
+
+const SANDBOX_BATCH_TRANSACTION_CONTRACT = {
+  ethereum: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
+  base: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
+};
+
+const PRODUCTION_BATCH_TRANSACTION_CONTRACT = {
+  ethereum: '0xDA1333D76a1B9883022513c089a0ca84043cF079',
+  optimism: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+  arbitrum: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+  gnosis: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+  base: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+};
+
+export const BATCH_TRANSACTION_CONTRACT_ADDRESS = IS_SANDBOX
+  ? SANDBOX_BATCH_TRANSACTION_CONTRACT
+  : PRODUCTION_BATCH_TRANSACTION_CONTRACT;

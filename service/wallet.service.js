@@ -10,6 +10,7 @@ import {
 import {selectAllActiveCurrencies} from 'dok-wallet-blockchain-networks/redux/currency/currencySelectors';
 import {
   calculatePrice,
+  createBalanceKey,
   createPendingTransactionKey,
   isBitcoinChain,
   isEVMChain,
@@ -255,4 +256,68 @@ export const addExistingDeriveAddress = (currentWallet, coin) => {
     }
   }
   return coin;
+};
+
+export const fetchBatchTransactionBalances = async (
+  transactions,
+  currentState,
+  validateSufficientBalance = false,
+) => {
+  const uniqueCoins = {};
+  const uniqueCoinDetails = [];
+  const transactionAmounts = {}; // Track total amounts needed per coin using BigNumber
+
+  // Process transactions and collect unique coins + required amounts
+  transactions?.forEach(transaction => {
+    const key = createBalanceKey(transaction?.coinInfo);
+
+    if (!uniqueCoins[key]) {
+      uniqueCoins[key] = true;
+      uniqueCoinDetails.push(transaction?.coinInfo);
+      transactionAmounts[key] = new BigNumber(0);
+    }
+
+    // Add transaction amount to total needed for this coin using BigNumber
+    const amount = new BigNumber(transaction?.transferData?.amount || 0);
+    transactionAmounts[key] = transactionAmounts[key].plus(amount);
+  });
+
+  // Fetch current balances
+  const tPromises = uniqueCoinDetails.map(async item => {
+    const chain = await getNativeCoin(currentState, item);
+    const address = item?.address;
+    const contractAddress = item?.contractAddress;
+    const decimal = item?.decimal;
+    const balance = await chain?.getBalance?.({address, contractAddress});
+    return parseBalance(balance, decimal);
+  });
+
+  const balances = await Promise.all(tPromises);
+  const balanceObj = {};
+
+  // Create balance object and validate if requested
+  for (let i = 0; i < balances.length; i++) {
+    const coinInfo = uniqueCoinDetails?.[i];
+    const balance = balances[i];
+    const key = createBalanceKey(coinInfo);
+    balanceObj[key] = balance;
+
+    // Balance validation using BigNumber for precise comparison
+    if (validateSufficientBalance) {
+      const transactionKey = createBalanceKey(coinInfo);
+      const requiredAmount = transactionAmounts[transactionKey];
+      const availableBalance = new BigNumber(balance || 0);
+
+      if (availableBalance.isLessThan(requiredAmount)) {
+        throw new Error(
+          `Insufficient balance for ${coinInfo?.symbol || 'token'} on ${
+            coinInfo?.chain_display_name || coinInfo?.chain_name
+          }. ` +
+            `Required: ${requiredAmount.toString()}, Available: ${availableBalance.toString()}`,
+        );
+      }
+    }
+  }
+
+  return balanceObj;
 };
