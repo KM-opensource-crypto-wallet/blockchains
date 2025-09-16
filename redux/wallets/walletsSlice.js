@@ -1,4 +1,7 @@
-import {getCoin, getHashString} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {
+  getCoin,
+  getHashString,
+} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
   clearSelectedUTXOs,
@@ -16,13 +19,13 @@ import {
   addExistingDeriveAddress,
   createCoin,
   createCoins,
+  fetchBatchTransactionBalances,
   getCoinSnapshot,
   getNativeCoin,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
   _currentWalletIndexSelector,
   getCurrentWalletIndex,
-  getEthereumCoin,
   getMasterClientId,
   getSelectedNftData,
   selectAllCoins,
@@ -59,7 +62,7 @@ import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -75,7 +78,7 @@ import {
   setIsRemovingGroup,
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
-import {fetchSupportedBuyCryptoCurrency} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProviderSlice';
+import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -686,6 +689,13 @@ export const sendFunds = createAsyncThunk(
         return null;
       }
       const transferData = getTransferData(currentState);
+      if (txData?.isBatchTransaction && txData?.transactionsData) {
+        await fetchBatchTransactionBalances(
+          txData?.transactionsData,
+          currentState,
+          true,
+        );
+      }
 
       //
       const res = txData?.isNFT
@@ -770,6 +780,14 @@ export const sendFunds = createAsyncThunk(
             stakingAddress: txData?.stakingAddress,
             memo: txData?.memo,
           })
+        : txData?.isBatchTransaction
+        ? await nativeCoin.sendBatchTransaction({
+            calls: txData.calls,
+            gasFee: transferData?.gasFee,
+            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+            estimateGas: transferData?.estimateGas,
+            transactionFee: transferData?.transactionFee,
+          })
         : await nativeCoin.send({
             to: txData.to,
             amount: txData.amount,
@@ -794,6 +812,26 @@ export const sendFunds = createAsyncThunk(
         }
         thunkAPI.dispatch(clearSelectedUTXOs());
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
+        const batchTransactionChainName =
+          txData?.transactionsData?.[0]?.coinInfo?.chain_name;
+        const batchTransactionChainAddress =
+          txData?.transactionsData?.[0]?.coinInfo?.address;
+        const batchTransactionWalletId =
+          txData?.transactionsData?.[0]?.wallet_id;
+        if (
+          txData?.isBatchTransaction &&
+          batchTransactionChainName &&
+          batchTransactionChainAddress &&
+          batchTransactionWalletId
+        ) {
+          thunkAPI.dispatch(
+            clearTransactionsForSelectedChain({
+              chain_name: batchTransactionChainName,
+              address: batchTransactionChainAddress,
+              wallet_id: batchTransactionWalletId,
+            }),
+          );
+        }
 
         toastId = showToast({
           type: 'progressToast',

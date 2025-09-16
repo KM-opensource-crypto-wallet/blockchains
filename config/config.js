@@ -10,7 +10,9 @@ export function getSecureRandomValues(length = 16) {
   const result = new Uint8Array(length);
 
   // Browser or React Native with polyfill
+  // eslint-disable-next-line no-undef
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    // eslint-disable-next-line no-undef
     return crypto.getRandomValues(result);
   }
 
@@ -515,3 +517,19 @@ export const GAS_ORACLE_CONTRACT_ADDRESS = {
   base: '0x420000000000000000000000000000000000000F',
   ink: '0x420000000000000000000000000000000000000F',
 };
+
+const SANDBOX_BATCH_TRANSACTION_CONTRACT = {
+  ethereum: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
+  binance_smart_chain: '0xfb02c1e7e817934b13bafee8d0f81962b9d51747',
+  base: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
+};
+
+const PRODUCTION_BATCH_TRANSACTION_CONTRACT = {
+  ethereum: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
+  binance_smart_chain: '0xfb02c1e7e817934b13bafee8d0f81962b9d51747',
+  base: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
+};
+
+export const BATCH_TRANSACTION_CONTRACT_ADDRESS = IS_SANDBOX
+  ? SANDBOX_BATCH_TRANSACTION_CONTRACT
+  : PRODUCTION_BATCH_TRANSACTION_CONTRACT;

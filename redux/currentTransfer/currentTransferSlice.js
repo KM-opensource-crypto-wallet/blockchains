@@ -1,6 +1,9 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
-import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {
+  fetchBatchTransactionBalances,
+  getNativeCoin,
+} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
   selectCurrentCoin,
   selectCurrentWallet,
@@ -71,8 +74,9 @@ export const calculateEstimateFee = createAsyncThunk(
     try {
       dispatch(setCurrentTransferLoading(true));
       const currentState = thunkAPI.getState();
-      const transfer = getTransferData(currentState);
-      const currentCoin = selectCurrentCoin(currentState);
+      const transfer = payload?.transferData || getTransferData(currentState);
+      const currentCoin =
+        payload?.currentCoin || selectCurrentCoin(currentState);
       const chain_name = currentCoin?.chain_name;
       const bitcoinFeeMultiplier = getBitcoinFeeMultiplier(currentState);
       const litecoinFeeMultiplier = getLitecoinFeeMultiplier(currentState);
@@ -91,6 +95,13 @@ export const calculateEstimateFee = createAsyncThunk(
         dogecoin: dogecoinFeeMultiplier,
         bitcoin_cash: bitcoinCashFeeMultiplier,
       };
+      if (payload?.isBatchTransaction && transfer?.transactionsData) {
+        await fetchBatchTransactionBalances(
+          transfer?.transactionsData,
+          currentState,
+          true,
+        );
+      }
 
       const nativeCoin = await getNativeCoin(
         currentState,
@@ -119,6 +130,8 @@ export const calculateEstimateFee = createAsyncThunk(
         respData = await nativeCoin?.getEstimateFeeForWithdrawStaking(payload);
       } else if (payload?.isStakingRewards) {
         respData = await nativeCoin?.getEstimateFeeForStakingRewards(payload);
+      } else if (payload?.isBatchTransaction) {
+        respData = await nativeCoin?.getEstimateFeeForBatchTransaction(payload);
       } else {
         respData = await nativeCoin?.getEstimateFee({
           selectedUTXOs: transfer?.selectedUTXOs,
@@ -210,6 +223,13 @@ export const calculateEstimateFee = createAsyncThunk(
           type: 'errorToast',
           title: 'Polkadot warning',
           message: 'Receiver address should have minimum 1 DOT',
+        });
+      }
+      if (e?.message?.startsWith('Insufficient balance')) {
+        showToast({
+          type: 'errorToast',
+          title: 'Low Balance',
+          message: e?.message,
         });
       }
     }
@@ -349,6 +369,9 @@ export const currentTransferSlice = createSlice({
     setCurrentTransferData(state, {payload}) {
       state.transferData = {...state.transferData, ...payload};
     },
+    updateCurrentTransferData(state, {payload}) {
+      state.transferData = {...initialState.transferData, ...payload};
+    },
     clearSelectedUTXOs(state) {
       state.transferData.selectedUTXOsValue = undefined;
       state.transferData.selectedUTXOs = undefined;
@@ -487,4 +510,5 @@ export const {
   setUpdateTransactionLoading,
   setUpdateTransactionSubmitting,
   resetUpdateTransactionData,
+  updateCurrentTransferData,
 } = currentTransferSlice.actions;

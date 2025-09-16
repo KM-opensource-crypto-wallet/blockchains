@@ -317,6 +317,19 @@ const EIP_1559_NOT_SUPPORTED = ['binance_smart_chain', 'kava'];
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
+const EIP_7702_SUPPORTED_CHAIN = [
+  'ethereum',
+  // 'binance_smart_chain',
+  'base',
+  'optimism',
+  'ink',
+  'arbitrum',
+  'gnosis',
+];
+
+export const isEip7702SupportedChain = chain_name =>
+  EIP_7702_SUPPORTED_CHAIN.includes(chain_name);
+
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
 
@@ -1284,4 +1297,8 @@ export const isNewerVersion = (v1, v2) => {
     ? a.find((part, i) => part !== (b[i] || 0)) >
         (b[a.findIndex((part, i) => part !== (b[i] || 0))] || 0)
     : false;
+};
+
+export const createBalanceKey = coinInfo => {
+  return `${coinInfo?.chain_name?.toLowerCase()}_${coinInfo?.symbol?.toLowerCase()}_${coinInfo?.address?.toLowerCase()}`;
 };

@@ -1,5 +1,6 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
 import {
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
   CHAIN_ID,
   GAS_ORACLE_CONTRACT_ADDRESS,
   IS_SANDBOX,
@@ -17,6 +18,7 @@ import {
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
+  convertToSmallAmount,
   deleteItemAtIndex,
   isEip1559NotSupported,
   isLayer2Chain,
@@ -29,6 +31,7 @@ import {
   getFeesMultiplier,
   getMaxPriorityFee,
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
+import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -45,6 +48,13 @@ export const EVMChain = chain_name => {
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
+
+  async function createAuthorization(wallet, nonce, delegationContractAddress) {
+    return await wallet.authorize({
+      address: delegationContractAddress,
+      nonce: nonce,
+    });
+  }
 
   const getScanUrlName = () => {
     if (chain_name === 'polygon') {
@@ -276,7 +286,7 @@ export const EVMChain = chain_name => {
         });
         return await cb(retryEvmProvider);
       } catch (e) {
-        console.log('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
+        console.error('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
           if (defaultResponse) {
             return defaultResponse;
@@ -447,6 +457,7 @@ export const EVMChain = chain_name => {
     contract_type,
     twiceFee,
     additionalL1Fee,
+    ignoreLayer2,
   }) => {
     const {gasPrice, feesOptions, maxPriorityFeePerGas} =
       await getEtherGasPrice(feesType, evmProvider);
@@ -456,7 +467,7 @@ export const EVMChain = chain_name => {
     if (twiceFee) {
       finalGasPrice = finalGasPrice * 2n;
     }
-    if (isLayer2Chain(chain_name)) {
+    if (isLayer2Chain(chain_name) && !ignoreLayer2) {
       level1Fees = await getL1Fee({
         from: fromAddress,
         to: toAddress,
@@ -544,6 +555,43 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, ''),
+    getEstimateFeeForBatchTransaction: async ({calls, privateKey, feesType}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const wallet = new ethers.Wallet(privateKey);
+          let walletSigner = wallet.connect(evmProvider);
+          const delegatedContract = new ethers.Contract(
+            walletSigner.address,
+            contractABI,
+            walletSigner,
+          );
+          const currentNonce = await EVMChain(chain_name).getNonce({
+            address: wallet.address,
+          });
+          // Create authorization with incremented nonce for same-wallet transactions
+          const auth = await createAuthorization(
+            walletSigner,
+            currentNonce + 1,
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+          );
+          const options = {
+            type: 4,
+            authorizationList: [auth],
+          };
+          const estimateGas = await delegatedContract[
+            'execute((address,uint256,bytes)[])'
+          ].estimateGas(calls, options);
+          return await calculateTotalFees({
+            evmProvider,
+            feesType,
+            estimateGas,
+            ignoreLayer2: true,
+          });
+        } catch (e) {
+          console.error('error in get token fees for batch transaction', e);
+          throw e;
+        }
+      }, null),
     getEstimateFeeForToken: async ({
       fromAddress,
       toAddress,
@@ -665,6 +713,64 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, null),
+    createCall: async ({toAddress, amount, decimals}) => {
+      try {
+        return [toAddress, convertToSmallAmount(amount, decimals || 18), '0x'];
+      } catch (e) {
+        console.error('Error in createCall', e);
+        throw e;
+      }
+    },
+    createTokenCall: async ({contractAddress, toAddress, amount, decimals}) => {
+      try {
+        const erc20Interface = new ethers.Interface(erc20Abi);
+        const finalAmount = convertToSmallAmount(amount, decimals);
+        return [
+          contractAddress,
+          '0',
+          erc20Interface.encodeFunctionData('transfer', [
+            toAddress,
+            finalAmount,
+          ]),
+        ];
+      } catch (e) {
+        console.error('Error in createTokenCall', e);
+        throw e;
+      }
+    },
+    createNFTCall: async ({
+      contractAddress,
+      fromAddress,
+      toAddress,
+      tokenId,
+      contract_type,
+      tokenAmount,
+    }) => {
+      try {
+        const abi = contract_type === 'ERC1155' ? erc1155Abi : erc721Abi;
+        const nftInterface = new ethers.Interface(abi);
+        return [
+          contractAddress,
+          '0',
+          contract_type === 'ERC1155'
+            ? nftInterface.encodeFunctionData('safeTransferFrom', [
+                fromAddress,
+                toAddress,
+                Number(tokenId),
+                Number(tokenAmount),
+                '0x',
+              ])
+            : nftInterface.encodeFunctionData('safeTransferFrom', [
+                fromAddress,
+                toAddress,
+                Number(tokenId),
+              ]),
+        ];
+      } catch (e) {
+        console.error('Error in createNFTCall', e);
+        throw e;
+      }
+    },
     getEstimateFeeForPendingTransaction: async ({
       fromAddress,
       toAddress,
@@ -1087,6 +1193,75 @@ export const EVMChain = chain_name => {
           'Error in accelerate ether Transaction  transaction',
           reason,
         );
+        throw new Error(reason);
+      }
+    },
+    sendBatchTransaction: async ({
+      calls,
+      privateKey,
+      estimateGas,
+      gasFee,
+      feesType,
+      maxPriorityFeePerGas,
+    }) => {
+      try {
+        const fetchRequest = new FetchRequest(allRpcUrls[0]);
+        fetchRequest.timeout = TIMEOUT;
+        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
+          staticNetwork: true,
+        });
+        const wallet = new ethers.Wallet(privateKey);
+        let walletSigner = wallet.connect(evmProvider);
+        const delegatedContract = new ethers.Contract(
+          walletSigner.address,
+          contractABI,
+          walletSigner,
+        );
+        let finalEstimateGas = estimateGas;
+        if (typeof finalEstimateGas !== 'bigint') {
+          finalEstimateGas = await delegatedContract[
+            'execute((address,uint256,bytes)[])'
+          ].estimateGas(calls);
+        }
+        let finalGasPrice = gasFee;
+        let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+        if (typeof finalGasPrice !== 'bigint') {
+          const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+          finalGasPrice = gasFeeData?.gasPrice;
+          finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+        }
+        const currentNonce = await EVMChain(chain_name).getNonce({
+          address: wallet.address,
+        });
+
+        // Create authorization with incremented nonce for same-wallet transactions
+        const auth = await createAuthorization(
+          walletSigner,
+          currentNonce + 1,
+          BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+        );
+        const options = {
+          type: 4,
+          gasLimit: finalEstimateGas,
+          maxFeePerGas: finalGasPrice,
+          maxPriorityFeePerGas: finalMaxPriorityFeePerGas,
+          nonce: currentNonce,
+          authorizationList: [auth],
+        };
+
+        if (isEip1559NotSupported(chain_name)) {
+          delete options.maxPriorityFeePerGas;
+          delete options.maxFeePerGas;
+          delete options.type;
+          options.gasPrice = finalGasPrice;
+        }
+        const tx = await delegatedContract[
+          'execute((address,uint256,bytes)[])'
+        ].populateTransaction(calls, options);
+        return await createSendTransaction(walletSigner, tx);
+      } catch (e) {
+        console.error('Error in send ether batch transaction', e);
+        const {reason} = await errorDecoder.decode(e);
         throw new Error(reason);
       }
     },

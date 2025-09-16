@@ -265,6 +265,11 @@ const getBaseCoin = async (chain, wallet, coin) => {
         ...payload,
         privateKey: wallet.privateKey,
       }),
+    createCall: async payload =>
+      await chain.createCall({
+        ...payload,
+        fromAddress: wallet.address,
+      }),
     createStaking: async payload =>
       await chain.createStaking({
         ...payload,
@@ -287,6 +292,18 @@ const getBaseCoin = async (chain, wallet, coin) => {
       }),
     deactivateStaking: async payload =>
       await chain.deactivateStaking({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    getEstimateFeeForBatchTransaction: async payload =>
+      await chain.getEstimateFeeForBatchTransaction({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    sendBatchTransaction: async payload =>
+      await chain.sendBatchTransaction({
         ...payload,
         privateKey: wallet.privateKey,
         from: wallet.address,
@@ -432,6 +449,16 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         ...payload,
         privateKey: wallet.privateKey,
       }),
+    createTokenCall: async payload =>
+      await chain.createTokenCall({
+        ...payload,
+        fromAddress: wallet.address,
+      }),
+    createNFTCall: async payload =>
+      await chain.createNFTCall({
+        ...payload,
+        fromAddress: wallet.address,
+      }),
     sendNFT: async payload =>
       await chain.sendNFT({
         ...payload,
@@ -463,48 +490,60 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         ...payload,
         privateKey: wallet.privateKey,
       }),
+    getEstimateFeeForBatchTransaction: async payload =>
+      await chain.getEstimateFeeForBatchTransaction({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    sendBatchTransaction: async payload =>
+      await chain.sendBatchTransaction({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
   };
 
   return coinWrapper;
 };
 
 const hashObject = {
-  tron: "txid",
-  ethereum: "hash",
-  binance_smart_chain: "hash",
-  bitcoin: "",
-  bitcoin_legacy: "",
-  bitcoin_segwit: "",
-  solana: "",
-  polygon: "hash",
-  base: "hash",
-  arbitrum: "hash",
-  optimism: "hash",
-  litecoin: "",
-  stellar: "",
-  ripple: "result.hash",
-  thorchain: "",
-  tezos: "opHash",
-  optimism_binance_smart_chain: "hash",
-  avalanche: "hash",
-  cosmos: "",
-  fantom: "hash",
-  gnosis: "hash",
-  viction: "hash",
+  tron: 'txid',
+  ethereum: 'hash',
+  binance_smart_chain: 'hash',
+  bitcoin: '',
+  bitcoin_legacy: '',
+  bitcoin_segwit: '',
+  solana: '',
+  polygon: 'hash',
+  base: 'hash',
+  arbitrum: 'hash',
+  optimism: 'hash',
+  litecoin: '',
+  stellar: '',
+  ripple: 'result.hash',
+  thorchain: '',
+  tezos: 'opHash',
+  optimism_binance_smart_chain: 'hash',
+  avalanche: 'hash',
+  cosmos: '',
+  fantom: 'hash',
+  gnosis: 'hash',
+  viction: 'hash',
   // ! polkadot: 'hash',
   // ! ton: 'hash',
-  dogecoin: "",
-  aptos: "",
-  linea: "hash",
-  zksync: "hash",
-  ethereum_classic: "hash",
-  ethereum_pow: "hash",
-  kava: "hash",
-  bitcoin_cash: "",
-  hedera: "transactionHash",
-  ink: "hash",
-  cardano: "",
-  filecoin: "",
+  dogecoin: '',
+  aptos: '',
+  linea: 'hash',
+  zksync: 'hash',
+  ethereum_classic: 'hash',
+  ethereum_pow: 'hash',
+  kava: 'hash',
+  bitcoin_cash: '',
+  hedera: 'transactionHash',
+  ink: 'hash',
+  cardano: '',
+  filecoin: '',
 };
 
 export const getHashString = (data, type) => {
@@ -513,7 +552,7 @@ export const getHashString = (data, type) => {
     return data;
   }
 
-  const keys = hashType.split(".");
+  const keys = hashType.split('.');
   let result = data;
 
   for (const key of keys) {
