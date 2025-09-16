@@ -874,7 +874,9 @@ export const sendFunds = createAsyncThunk(
             type: 'successToast',
             title: 'Transaction Successful',
             message: `Your transaction completed successfully.${
-              txData?.isCreateStaking
+              txData?.isBatchTransaction
+                ? 'Batch transactions are completed successfully.'
+                : txData?.isCreateStaking
                 ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
                 : txData?.isNFT
                 ? 'You just sent NFT'

@@ -322,7 +322,7 @@ const EIP_7702_SUPPORTED_CHAIN = [
   // 'binance_smart_chain',
   'base',
   'optimism',
-  'ink',
+  // 'ink',
   'arbitrum',
   'gnosis',
 ];
