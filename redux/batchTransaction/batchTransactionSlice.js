@@ -135,8 +135,8 @@ export const initializeFilters = createAsyncThunk(
           extra.is_exceed_balance = true;
           extra.require_amount = amount.minus(availableBalance).toString();
           isValid = false;
-          invalid_reason =
-            'Your transaction(s) exceed the balance remove the specific transaction(s)';
+          invalid_reason = ` 'Your transaction(s) exceed the available balance. Please remove specific transaction(s) or add funds.
+          Note: Gas fees are not included in this check and will be calculated separately`;
         }
         const leftBalance = availableBalance.minus(amount);
         tempBalances[key] = leftBalance.toString();

@@ -1232,11 +1232,24 @@ export const EVMChain = chain_name => {
           contractABI,
           walletSigner,
         );
+        const currentNonce = await EVMChain(chain_name).getNonce({
+          address: wallet.address,
+        });
         let finalEstimateGas = estimateGas;
         if (typeof finalEstimateGas !== 'bigint') {
+          // Create authorization for gas estimation consistency
+          const tempAuth = await createAuthorization(
+            walletSigner,
+            currentNonce + 1,
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+          );
+          const tempOptions = {
+            type: 4,
+            authorizationList: [tempAuth],
+          };
           finalEstimateGas = await delegatedContract[
             'execute((address,uint256,bytes)[])'
-          ].estimateGas(calls);
+          ].estimateGas(calls, tempOptions);
         }
         let finalGasPrice = gasFee;
         let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -1245,9 +1258,6 @@ export const EVMChain = chain_name => {
           finalGasPrice = gasFeeData?.gasPrice;
           finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
         }
-        const currentNonce = await EVMChain(chain_name).getNonce({
-          address: wallet.address,
-        });
 
         // Create authorization with incremented nonce for same-wallet transactions
         const auth = await createAuthorization(

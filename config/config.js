@@ -76,6 +76,7 @@ const SANDBOX_CHAIN_ID = {
   ethereum_classic: 61,
   ethereum_pow: 10001,
   kava: 2221,
+  ink: 763373,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -95,6 +96,7 @@ const PRODUCTION_CHAIN_ID = {
   ethereum_classic: 61,
   ethereum_pow: 10001,
   kava: 2222,
+  ink: 57073,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
