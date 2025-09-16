@@ -40,6 +40,7 @@ const FEES_BY_RPC_CHAINS = [
   'ethereum_classic',
   'ethereum_pow',
   'kava',
+  'ink',
 ];
 const TIMEOUT = 45000;
 
@@ -97,11 +98,25 @@ export const EVMChain = chain_name => {
       feesType === 'normal'
         ? BigInt(bnGasPrice.toFixed(0))
         : BigInt(bnMultiplyGasPrice.toFixed(0));
+
+    let maxPriorityFeePerGas =
+      feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name);
+
+    if (maxPriorityFeePerGas) {
+      try {
+        const maxPriorityFeePerGasBigInt = BigInt(maxPriorityFeePerGas);
+        if (maxPriorityFeePerGasBigInt >= finalGasPrice) {
+          maxPriorityFeePerGas = finalGasPrice - 1n;
+        }
+      } catch (e) {
+        console.error('Error in convert to bigint', e);
+      }
+    }
+
     return {
       gasPrice: finalGasPrice,
       feesOptions,
-      maxPriorityFeePerGas:
-        feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name),
+      maxPriorityFeePerGas,
     };
   };
 
