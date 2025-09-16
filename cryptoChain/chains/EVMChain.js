@@ -44,11 +44,17 @@ const FEES_BY_RPC_CHAINS = [
 ];
 const TIMEOUT = 45000;
 
+const ADDITIONAL_ESTIMATE_GAS = {
+  arbitrum: 100000n,
+};
+
 export const EVMChain = chain_name => {
   const allRpcUrls = getFreeRPCUrl(chain_name);
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
+
+  const extraEstimate = ADDITIONAL_ESTIMATE_GAS[chain_name] || 0n;
 
   async function createAuthorization(wallet, nonce, delegationContractAddress) {
     return await wallet.authorize({
@@ -1267,7 +1273,7 @@ export const EVMChain = chain_name => {
         );
         const options = {
           type: 4,
-          gasLimit: finalEstimateGas,
+          gasLimit: finalEstimateGas + extraEstimate,
           maxFeePerGas: finalGasPrice,
           maxPriorityFeePerGas: finalMaxPriorityFeePerGas,
           nonce: currentNonce,
