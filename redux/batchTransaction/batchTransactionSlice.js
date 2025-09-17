@@ -178,6 +178,18 @@ export const addBatchTransaction = createAsyncThunk(
       // Check if adding this transaction would exceed the limit of 3
       const existingTransactions =
         currentState.batchTransaction.transactions[wallet_id] || [];
+      if (
+        existingTransactions?.find(
+          item => item?.transactionId === payload?.transactionId,
+        )
+      ) {
+        showToast({
+          type: 'errorToast',
+          title: 'Transaction already added',
+          message: 'Check in home screen',
+        });
+        return thunkAPI.rejectWithValue('Transaction already added');
+      }
       if (existingTransactions.length >= 980) {
         showToast({
           type: 'errorToast',
@@ -235,10 +247,13 @@ export const addBatchTransaction = createAsyncThunk(
         wallet_id,
       };
       const navigation = payload?.navigation;
+      const router = payload?.router;
       if (navigation) {
         navigation.navigate('Sidebar', {
           screen: 'Home',
         });
+      } else if (router) {
+        router.replace('/home');
       }
       return {
         wallet_id,
