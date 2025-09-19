@@ -1302,3 +1302,41 @@ export const isNewerVersion = (v1, v2) => {
 export const createBalanceKey = coinInfo => {
   return `${coinInfo?.chain_name?.toLowerCase()}_${coinInfo?.symbol?.toLowerCase()}_${coinInfo?.address?.toLowerCase()}`;
 };
+
+export const isValidEVMTransactionHash = hash => {
+  if (!hash) {
+    return false;
+  }
+  return /^0x([A-Fa-f0-9]{64})$/.test(hash);
+};
+
+export async function sleep(timeMs) {
+  return new Promise(resolve => {
+    setTimeout(resolve, timeMs);
+  });
+}
+
+export function extractHashFromEVMError(error) {
+  // Try to extract transaction hash from error message
+  const hashMatch = error.message?.match(/0x[a-fA-F0-9]{64}/);
+  return hashMatch ? hashMatch[0] : null;
+}
+
+export function extractTxHashFromEVMMissingError(error) {
+  // Check if error has the expected structure
+  if (!error.value || !Array.isArray(error.value)) {
+    return null;
+  }
+
+  // Look for a result that looks like a transaction hash (64 hex characters)
+  for (const response of error.value) {
+    if (response.result && typeof response.result === 'string') {
+      // Transaction hashes are 32 bytes = 64 hex characters + '0x' prefix = 66 characters
+      if (response.result.length === 66 && response.result.startsWith('0x')) {
+        return response.result;
+      }
+    }
+  }
+
+  return null;
+}

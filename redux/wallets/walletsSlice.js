@@ -705,6 +705,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             transactionFee: transferData?.transactionFee,
             contract_type: txData?.contract_type,
@@ -720,6 +721,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -734,6 +736,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -750,6 +753,7 @@ export const sendFunds = createAsyncThunk(
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
             transactionFee: transferData?.transactionFee,
+            nonce: transferData?.nonce,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
             stakingAddress: txData?.stakingAddress,
@@ -774,6 +778,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -786,6 +791,7 @@ export const sendFunds = createAsyncThunk(
             gasFee: transferData?.gasFee,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             transactionFee: transferData?.transactionFee,
           })
         : await nativeCoin.send({
@@ -795,6 +801,7 @@ export const sendFunds = createAsyncThunk(
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             isMax: transferData?.isMax,
             estimateGas: transferData?.estimateGas,
+            nonce: transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             memo: txData?.memo,
@@ -919,6 +926,27 @@ export const sendFunds = createAsyncThunk(
             title: e?.message,
           });
         }
+        const flPayload = {
+          fromAddress: txData?.currentCoin?.address || txData?.from,
+          amount: txData?.amount,
+          toAddress: txData?.to,
+          timestamp: new Date().toISOString(),
+        };
+        const contractAddress =
+          txData?.contractAddress || txData?.currentCoin?.contractAddress;
+        if (contractAddress) {
+          flPayload.contractAddress = contractAddress;
+        }
+        if (txData?.calls) {
+          flPayload.calls = txData?.calls;
+        }
+        if (txData?.currentCoin?.chain_name) {
+          flPayload.chain_name = txData?.currentCoin?.chain_name;
+        }
+        if (txData?.currentCoin?.symbol) {
+          flPayload.symbol = txData?.currentCoin?.symbol;
+        }
+        thunkAPI.dispatch(setFailedTransaction(flPayload));
 
         return;
       }
@@ -1074,6 +1102,7 @@ const initialState = {
   currentWalletIndex: 0,
   pendingTransactions: {},
   masterClientId: null,
+  failedTransaction: null,
 };
 
 export const createIfNotExistsMasterClientId = createAsyncThunk(
@@ -1813,6 +1842,9 @@ export const walletsSlice = createSlice({
         clientId: item?.clientId || v4(),
       }));
     },
+    setFailedTransaction: (state, action) => {
+      state.failedTransaction = action?.payload;
+    },
   },
   extraReducers: builder => {
     builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
@@ -2126,6 +2158,7 @@ export const {
   resetIsAdding50MoreAddresses,
   createClientIdIfNotExist,
   deleteCoin,
+  setFailedTransaction,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators
