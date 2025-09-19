@@ -1592,7 +1592,7 @@ export const EVMChain = chain_name => {
             }
             throw new Error(reason);
           }
-        } else if (typeof Array.isArray(transaction)) {
+        } else if (Array.isArray(transaction)) {
           console.log('wait multiples transaction', transaction);
           // Handle transactions that were already in the mempool
           let attempts = 0;

@@ -409,7 +409,7 @@ export const currentTransferSlice = createSlice({
       state.transferData.currencyRate = payload?.currencyRate;
       state.transferData.maxPriorityFeePerGas = payload?.maxPriorityFeePerGas;
       state.transferData.l1Fees = payload?.l1Fees;
-      if (payload?.nonce) {
+      if (payload?.nonce != null) {
         state.transferData.nonce = payload?.nonce;
       }
     },
