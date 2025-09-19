@@ -55,6 +55,7 @@ const initialState = {
     customError: '',
     selectedUTXOsValue: undefined,
     selectedUTXOs: undefined,
+    nonce: undefined,
   },
   pendingTransferData: {
     isLoading: false,
@@ -144,6 +145,7 @@ export const calculateEstimateFee = createAsyncThunk(
       const gasFee = respData?.gasFee;
       const maxPriorityFeePerGas = respData?.maxPriorityFeePerGas;
       const fee = respData?.fee;
+      const nonce = respData?.nonce;
       const feesOptions = respData?.feesOptions;
       const l1Fees = respData?.l1Fees || 0;
       const allUserCoins = selectUserCoins(currentState);
@@ -176,6 +178,7 @@ export const calculateEstimateFee = createAsyncThunk(
           feesOptions: finalFeesOptions,
           l1Fees,
           currencyRate,
+          nonce,
         }),
       );
       if (
@@ -406,6 +409,9 @@ export const currentTransferSlice = createSlice({
       state.transferData.currencyRate = payload?.currencyRate;
       state.transferData.maxPriorityFeePerGas = payload?.maxPriorityFeePerGas;
       state.transferData.l1Fees = payload?.l1Fees;
+      if (payload?.nonce) {
+        state.transferData.nonce = payload?.nonce;
+      }
     },
     setCurrentTransferAmount(state, {payload}) {
       state.transferData.amount = payload;

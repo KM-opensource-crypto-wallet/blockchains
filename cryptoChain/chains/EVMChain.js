@@ -20,9 +20,13 @@ import {
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
+  extractHashFromEVMError,
+  extractTxHashFromEVMMissingError,
   isEip1559NotSupported,
   isLayer2Chain,
+  isValidEVMTransactionHash,
   parseBalance,
+  sleep,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
@@ -61,6 +65,23 @@ export const EVMChain = chain_name => {
       address: delegationContractAddress,
       nonce: nonce,
     });
+  }
+
+  function validatePriorityFee(maxPriorityFeePerGas, finalGasPrice) {
+    if (!maxPriorityFeePerGas || !finalGasPrice) {
+      return maxPriorityFeePerGas;
+    }
+    try {
+      let maxPriorityFeePerGasBigInt = BigInt(maxPriorityFeePerGas);
+      const finalGasPriceBigInt = BigInt(finalGasPrice);
+      if (maxPriorityFeePerGasBigInt >= finalGasPriceBigInt) {
+        maxPriorityFeePerGasBigInt = finalGasPrice - 1n;
+      }
+      return maxPriorityFeePerGasBigInt;
+    } catch (e) {
+      console.error('Error in convert to bigint', e);
+      return maxPriorityFeePerGas;
+    }
   }
 
   const getScanUrlName = () => {
@@ -109,14 +130,10 @@ export const EVMChain = chain_name => {
       feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name);
 
     if (maxPriorityFeePerGas) {
-      try {
-        const maxPriorityFeePerGasBigInt = BigInt(maxPriorityFeePerGas);
-        if (maxPriorityFeePerGasBigInt >= finalGasPrice) {
-          maxPriorityFeePerGas = finalGasPrice - 1n;
-        }
-      } catch (e) {
-        console.error('Error in convert to bigint', e);
-      }
+      maxPriorityFeePerGas = validatePriorityFee(
+        maxPriorityFeePerGas,
+        finalGasPrice,
+      );
     }
 
     return {
@@ -320,36 +337,70 @@ export const EVMChain = chain_name => {
   };
 
   const createSendTransactionsPromises = (finalWallet, tx) => {
-    return allRpcUrls.map(
-      rpcUrl =>
-        new Promise(async resolve => {
-          try {
-            const fetchRequest = new FetchRequest(rpcUrl);
-            fetchRequest.timeout = TIMEOUT;
-            const tempProvider = new JsonRpcProvider(fetchRequest, chainId, {
-              staticNetwork: true,
-            });
-            const finalWal = finalWallet.connect(tempProvider);
-            const tr = await finalWal.sendTransaction(tx);
-            resolve({resp: tr, error: null});
-          } catch (e) {
-            resolve({resp: null, error: e});
+    return allRpcUrls.map(async rpcUrl => {
+      try {
+        const fetchRequest = new FetchRequest(rpcUrl);
+        fetchRequest.timeout = TIMEOUT;
+        const tempProvider = new JsonRpcProvider(fetchRequest, chainId, {
+          staticNetwork: true,
+        });
+        const finalWal = finalWallet.connect(tempProvider);
+        const tr = await finalWal.sendTransaction(tx);
+        return {resp: tr, error: null};
+      } catch (e) {
+        if (
+          e.message?.includes('already known') ||
+          e.message?.includes('ALREADY_EXISTS')
+        ) {
+          const txHash = extractHashFromEVMError(e);
+          console.log(
+            `[EVM] Duplicate transaction detected for RPC ${rpcUrl}, hash: ${txHash}`,
+          );
+          if (txHash) {
+            return {resp: txHash, error: null};
           }
-        }),
-    );
+        } else if (
+          e.message?.toLowerCase()?.includes('missing response for request')
+        ) {
+          const txHash = extractTxHashFromEVMMissingError(e);
+          console.log(
+            `[EVM] Missing response but transaction likely submitted, hash: ${txHash}`,
+          );
+          if (txHash) {
+            return {resp: txHash, error: null};
+          }
+        }
+        return {resp: null, error: e};
+      }
+    });
   };
 
   const createSendTransaction = async (wallet, tx) => {
-    const allResp = await Promise.all(
+    let allResp = await Promise.allSettled(
       createSendTransactionsPromises(wallet, tx),
     );
+    const submittedTxs = [];
     for (let i = 0; i < allResp.length; i++) {
-      const txData = allResp[i].resp;
-      const error = allResp[i].error;
-      if (txData) {
+      const txData = allResp[i]?.value.resp;
+      const error = allResp[i]?.value.error;
+      if (txData?.hash) {
         return txData;
       }
+      if (
+        txData &&
+        typeof txData === 'string' &&
+        !submittedTxs.includes(txData)
+      ) {
+        submittedTxs.push(txData);
+      }
+      if (submittedTxs.length && i === allResp.length - 1) {
+        return submittedTxs;
+      }
       if (i === allResp.length - 1 && error) {
+        console.error(
+          '[EVM] All RPC endpoints failed, throwing error:',
+          error.message,
+        );
         throw error;
       }
     }
@@ -403,8 +454,8 @@ export const EVMChain = chain_name => {
     tokenAmount,
     contract_type,
     additionalL1Fee = 0,
+    nonce,
   }) => {
-    const nonce = await EVMChain(chain_name).getNonce({address: from});
     const tx = new Transaction();
     let transaction;
     if (erc20TokenContract) {
@@ -479,6 +530,9 @@ export const EVMChain = chain_name => {
     twiceFee,
     additionalL1Fee,
     ignoreLayer2,
+    isFetchNonce,
+    existingNonce,
+    ignoreFetchingNonce,
   }) => {
     const {gasPrice, feesOptions, maxPriorityFeePerGas} =
       await getEtherGasPrice(feesType, evmProvider);
@@ -487,6 +541,14 @@ export const EVMChain = chain_name => {
     let finalGasPrice = gasPrice;
     if (twiceFee) {
       finalGasPrice = finalGasPrice * 2n;
+    }
+    let currentNonce;
+    if (!ignoreFetchingNonce && (isFetchNonce || existingNonce == null)) {
+      currentNonce = await EVMChain(chain_name).getNonce({
+        address: fromAddress,
+      });
+    } else if (existingNonce) {
+      currentNonce = existingNonce;
     }
     if (isLayer2Chain(chain_name) && !ignoreLayer2) {
       level1Fees = await getL1Fee({
@@ -503,10 +565,12 @@ export const EVMChain = chain_name => {
         tokenAmount,
         contract_type,
         additionalL1Fee,
+        nonce: currentNonce,
       });
     }
     const transactionFee = estimateGas * finalGasPrice + level1Fees;
     const totalTransactionFee = ethers.formatUnits(transactionFee, 'ether');
+
     return {
       fee: totalTransactionFee,
       gasFee: finalGasPrice,
@@ -514,6 +578,7 @@ export const EVMChain = chain_name => {
       maxPriorityFeePerGas,
       feesOptions,
       l1Fees: level1Fees,
+      nonce: currentNonce,
     };
   };
 
@@ -576,7 +641,13 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, ''),
-    getEstimateFeeForBatchTransaction: async ({calls, privateKey, feesType}) =>
+    getEstimateFeeForBatchTransaction: async ({
+      calls,
+      privateKey,
+      feesType,
+      isFetchNonce,
+      existingNonce,
+    }) =>
       retryFunc(async evmProvider => {
         try {
           const wallet = new ethers.Wallet(privateKey);
@@ -586,9 +657,15 @@ export const EVMChain = chain_name => {
             contractABI,
             walletSigner,
           );
-          const currentNonce = await EVMChain(chain_name).getNonce({
-            address: wallet.address,
-          });
+          let currentNonce;
+          if (isFetchNonce || existingNonce == null) {
+            currentNonce = await EVMChain(chain_name).getNonce({
+              address: wallet.address,
+            });
+          } else if (existingNonce) {
+            currentNonce = existingNonce;
+          }
+
           // Create authorization with incremented nonce for same-wallet transactions
           const auth = await createAuthorization(
             walletSigner,
@@ -607,6 +684,9 @@ export const EVMChain = chain_name => {
             feesType,
             estimateGas,
             ignoreLayer2: true,
+            isFetchNonce,
+            existingNonce: currentNonce,
+            ignoreFetchingNonce: true,
           });
         } catch (e) {
           console.error('error in get token fees for batch transaction', e);
@@ -622,6 +702,8 @@ export const EVMChain = chain_name => {
       privateKey,
       feesType,
       additionalL1Fee,
+      isFetchNonce,
+      existingNonce,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -645,6 +727,8 @@ export const EVMChain = chain_name => {
             toAddress,
             erc20TokenContract: contract,
             additionalL1Fee,
+            isFetchNonce,
+            existingNonce,
           });
         } catch (e) {
           console.error('error in get token fees for ether', e);
@@ -662,6 +746,8 @@ export const EVMChain = chain_name => {
       tokenAmount,
       feesType,
       additionalL1Fee,
+      isFetchNonce,
+      existingNonce,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -698,6 +784,8 @@ export const EVMChain = chain_name => {
             tokenAmount,
             contract_type,
             additionalL1Fee,
+            isFetchNonce,
+            existingNonce,
           });
         } catch (e) {
           console.error('error in get nft fees for ether chain', e);
@@ -710,6 +798,8 @@ export const EVMChain = chain_name => {
       amount,
       feesType,
       additionalL1Fee,
+      isFetchNonce,
+      existingNonce,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -728,6 +818,8 @@ export const EVMChain = chain_name => {
             value,
             feesType,
             additionalL1Fee,
+            isFetchNonce,
+            existingNonce,
           });
         } catch (e) {
           console.error('Error in gas fee', e);
@@ -1063,6 +1155,7 @@ export const EVMChain = chain_name => {
       feesType,
       maxPriorityFeePerGas,
       isMax,
+      nonce,
     }) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[0]);
@@ -1100,7 +1193,6 @@ export const EVMChain = chain_name => {
         if (balanceBN.lt(totalAmount)) {
           finalAmount = balanceBN.minus(feeBN).toString();
         }
-        const nonce = await EVMChain(chain_name).getNonce({address: from});
         const tx = {
           type: 2,
           from: from,
@@ -1110,7 +1202,7 @@ export const EVMChain = chain_name => {
           maxFeePerGas: finalGasPrice,
           maxPriorityFeePerGas: isMax
             ? finalGasPrice
-            : finalMaxPriorityFeePerGas,
+            : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice),
           nonce,
         };
         if (isEip1559NotSupported(chain_name)) {
@@ -1224,6 +1316,7 @@ export const EVMChain = chain_name => {
       gasFee,
       feesType,
       maxPriorityFeePerGas,
+      nonce,
     }) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[0]);
@@ -1238,15 +1331,13 @@ export const EVMChain = chain_name => {
           contractABI,
           walletSigner,
         );
-        const currentNonce = await EVMChain(chain_name).getNonce({
-          address: wallet.address,
-        });
+
         let finalEstimateGas = estimateGas;
         if (typeof finalEstimateGas !== 'bigint') {
           // Create authorization for gas estimation consistency
           const tempAuth = await createAuthorization(
             walletSigner,
-            currentNonce + 1,
+            nonce + 1,
             BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
           );
           const tempOptions = {
@@ -1268,15 +1359,18 @@ export const EVMChain = chain_name => {
         // Create authorization with incremented nonce for same-wallet transactions
         const auth = await createAuthorization(
           walletSigner,
-          currentNonce + 1,
+          nonce + 1,
           BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
         );
         const options = {
           type: 4,
           gasLimit: finalEstimateGas + extraEstimate,
           maxFeePerGas: finalGasPrice,
-          maxPriorityFeePerGas: finalMaxPriorityFeePerGas,
-          nonce: currentNonce,
+          maxPriorityFeePerGas: validatePriorityFee(
+            finalMaxPriorityFeePerGas,
+            finalGasPrice,
+          ),
+          nonce,
           authorizationList: [auth],
         };
 
@@ -1305,6 +1399,7 @@ export const EVMChain = chain_name => {
       contractAddress,
       feesType,
       maxPriorityFeePerGas,
+      nonce,
     }) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[0]);
@@ -1333,14 +1428,14 @@ export const EVMChain = chain_name => {
           finalGasPrice = gasFeeData?.gasPrice;
           finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
         }
-        const nonce = await EVMChain(chain_name).getNonce({
-          address: wallet.address,
-        });
         const options = {
           type: 2,
           gasLimit: finalEstimateGas, // 100000
           maxFeePerGas: finalGasPrice,
-          maxPriorityFeePerGas: finalMaxPriorityFeePerGas,
+          maxPriorityFeePerGas: validatePriorityFee(
+            finalMaxPriorityFeePerGas,
+            finalGasPrice,
+          ),
           nonce,
         };
         if (isEip1559NotSupported(chain_name)) {
@@ -1373,6 +1468,7 @@ export const EVMChain = chain_name => {
       tokenId,
       feesType,
       maxPriorityFeePerGas,
+      nonce,
     }) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[0]);
@@ -1411,14 +1507,15 @@ export const EVMChain = chain_name => {
           finalGasPrice = gasFeeData?.gasPrice;
           finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
         }
-        const nonce = await EVMChain(chain_name).getNonce({
-          address: wallet.address,
-        });
+
         const options = {
           type: 2,
           gasLimit: finalEstimateGas, // 100000
           maxFeePerGas: finalGasPrice,
-          maxPriorityFeePerGas: finalMaxPriorityFeePerGas,
+          maxPriorityFeePerGas: validatePriorityFee(
+            finalMaxPriorityFeePerGas,
+            finalGasPrice,
+          ),
           nonce,
         };
         if (isEip1559NotSupported(chain_name)) {
@@ -1482,18 +1579,52 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, 'not_found_latest_nonce'),
-    waitForConfirmation: async ({transaction}) => {
-      if (transaction?.wait) {
-        try {
-          return await transaction?.wait(null, 60000);
-        } catch (e) {
-          const {reason} = await errorDecoder.decode(e);
-          if (reason === 'wait for transaction timeout') {
-            return 'pending';
+    waitForConfirmation: async ({transaction, retries, interval}) =>
+      retryFunc(async evmProvider => {
+        if (transaction?.wait) {
+          try {
+            console.log('wait for transaction', transaction?.hash);
+            return await transaction?.wait(null, 60000);
+          } catch (e) {
+            const {reason} = await errorDecoder.decode(e);
+            if (reason === 'wait for transaction timeout') {
+              return 'pending';
+            }
+            throw new Error(reason);
           }
-          throw new Error(reason);
+        } else if (typeof Array.isArray(transaction)) {
+          console.log('wait multiples transaction', transaction);
+          // Handle transactions that were already in the mempool
+          let attempts = 0;
+          while (attempts < retries) {
+            try {
+              // Try to find the transaction by the hash we extracted
+              for (let i = 0; i < transaction.length; i++) {
+                const txHash = transaction[i];
+                if (isValidEVMTransactionHash(txHash)) {
+                  const tx = await evmProvider.getTransaction(txHash);
+                  if (tx) {
+                    return await tx?.wait(null, 60000);
+                  }
+                }
+              }
+              if (attempts === retries - 1) {
+                return 'pending';
+              }
+            } catch (e) {
+              // Continue waiting
+              if (attempts === retries - 1) {
+                const {reason} = await errorDecoder.decode(e);
+                if (reason === 'wait for transaction timeout') {
+                  return 'pending';
+                }
+                throw new Error(reason);
+              }
+            }
+            await sleep(interval);
+            attempts++;
+          }
         }
-      }
-    },
+      }, 'pending'),
   };
 };

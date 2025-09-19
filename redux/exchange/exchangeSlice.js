@@ -108,6 +108,7 @@ export const calculateExchange = createAsyncThunk(
           );
           await dispatch(
             calculateEstimateFee({
+              isFetchNonce: true,
               fromAddress: selectedFromAsset?.address,
               toAddress: data?.depositAddress,
               amount: amountFrom,

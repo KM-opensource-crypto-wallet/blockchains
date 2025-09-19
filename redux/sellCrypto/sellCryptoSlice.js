@@ -63,6 +63,7 @@ const initiateTransfer = async (payload, thunkAPI) => {
     );
     dispatch(
       calculateEstimateFee({
+        isFetchNonce: true,
         fromAddress: requestDetails?.selectedFromAsset?.address,
         toAddress: transferDetails?.depositAddress,
         amount: transferDetails?.depositAmount,

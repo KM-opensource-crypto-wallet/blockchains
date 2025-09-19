@@ -353,3 +353,4 @@ export const isAdding50MoreAddresses = state => {
 export const getMasterClientId = state => {
   return state.wallets?.masterClientId;
 };
+export const getFailedTransaction = state => state.wallets?.failedTransaction;

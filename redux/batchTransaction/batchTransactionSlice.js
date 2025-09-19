@@ -389,6 +389,9 @@ export const batchTransactionSlice = createSlice({
     clearSelectedItems: state => {
       state.ui.selectedItems = [];
     },
+    resetBatchTransactions: () => {
+      return initialState;
+    },
   },
   extraReducers: builder => {
     builder
@@ -442,4 +445,5 @@ export const {
   toggleSelectedItem,
   clearSelectedItems,
   clearTransactionsForSelectedChain,
+  resetBatchTransactions,
 } = batchTransactionSlice.actions;

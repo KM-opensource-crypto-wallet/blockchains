@@ -81,7 +81,6 @@ const allFreeRpcUrl = {
       'https://rpc.builder0x69.io',
     ],
     testnet: [
-      'https://1rpc.io/sepolia',
       'https://rpc.sepolia.org',
       'https://ethereum-sepolia-rpc.publicnode.com',
       'https://eth-sepolia.public.blastapi.io',
@@ -92,7 +91,6 @@ const allFreeRpcUrl = {
       'https://arbitrum-one.publicnode.com',
       'https://rpc.ankr.com/arbitrum',
       'https://arbitrum.llamarpc.com',
-      'https://1rpc.io/arb',
     ],
     testnet: [
       'https://arbitrum-sepolia.blockpi.network/v1/rpc/public',
@@ -139,7 +137,6 @@ const allFreeRpcUrl = {
       'https://opbnb.publicnode.com',
       'https://opbnb-mainnet-rpc.bnbchain.org',
       'https://opbnb-mainnet.nodereal.io/v1/e9a36765eb8a40b9bd12e680a1fd2bc5',
-      'https://1rpc.io/opbnb',
     ],
     testnet: [
       'https://opbnb-testnet-rpc.bnbchain.org',
@@ -179,12 +176,10 @@ const allFreeRpcUrl = {
     mainnet: [
       'https://rpc.ankr.com/gnosis',
       'https://gnosis-mainnet.public.blastapi.io',
-      'https://1rpc.io/gnosis',
       'https://gnosis.blockpi.network/v1/rpc/public',
       'https://gnosis-rpc.publicnode.com',
     ],
     testnet: [
-      'https://1rpc.io/gnosis',
       'https://gnosis-chiado-rpc.publicnode.com',
       'https://rpc.chiadochain.net',
     ],
@@ -192,7 +187,6 @@ const allFreeRpcUrl = {
   linea: {
     mainnet: [
       'https://linea.decubate.com',
-      'https://1rpc.io/linea',
       'https://linea.blockpi.network/v1/rpc/public',
       'https://rpc.linea.build',
     ],
