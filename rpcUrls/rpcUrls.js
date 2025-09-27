@@ -217,6 +217,20 @@ const allFreeRpcUrl = {
     mainnet: ['https://kava-evm-rpc.publicnode.com', 'https://kava.drpc.org'],
     testnet: ['https://kava-testnet.drpc.org', 'https://evm.testnet.kava.io'],
   },
+  ink: {
+    mainnet: [
+      'https://rpc-qnd.inkonchain.com',
+      'https://rpc-gel.inkonchain.com',
+    ],
+    testnet: ['https://rpc-gel-sepolia.inkonchain.com'],
+  },
+  sei: {
+    mainnet: ['https://sei.therpc.io', 'https://sei.drpc.org'],
+    testnet: [
+      'https://evm-rpc-testnet.sei-apis.com',
+      'https://sei-testnet-public.nodies.app',
+    ],
+  },
   solana: {
     mainnet: [
       'https://solana-mainnet.g.alchemy.com/v2/LqXKA4ZLdyCbWyPwtLqri3696CgruA0w',
@@ -241,13 +255,6 @@ const allFreeRpcUrl = {
     testnet: [
       'https://api.calibration.node.glif.io/rpc/v0',
       'https://filecoin-calibration.chainup.net/rpc/v1',
-    ],
-  },
-  sei: {
-    mainnet: ['https://sei.therpc.io', 'https://sei.drpc.org'],
-    testnet: [
-      'https://evm-rpc-testnet.sei-apis.com',
-      'https://sei-testnet-public.nodies.app',
     ],
   },
 };
