@@ -94,6 +94,7 @@ const ethereumChains = {
   ethereum_pow: 'ethereum',
   kava: 'ethereum',
   ink: 'ethereum',
+  sei: 'ethereum',
 };
 
 const supportedChain = [
@@ -299,6 +300,7 @@ const EVM_CHAINS = [
   'ethereum_pow',
   'kava',
   'ink',
+  'sei',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
@@ -689,6 +691,14 @@ export const ModalAddTokenList = [
     token_type: 'ERC20',
     isEVM: true,
   },
+  {
+    label: 'SEI',
+    value: 'sei',
+    chain_symbol: 'SEI',
+    type: 'token',
+    token_type: 'ERC20',
+    isEVM: true,
+  },
 ];
 
 export const PrivateKeyList = [
@@ -791,6 +801,10 @@ export const PrivateKeyList = [
   {
     label: 'Polygon',
     value: 'polygon',
+  },
+  {
+    label: 'Sei',
+    value: 'sei',
   },
   {
     label: 'Solana',
