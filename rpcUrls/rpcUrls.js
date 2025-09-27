@@ -243,7 +243,7 @@ const allFreeRpcUrl = {
     testnet: ['https://rpc-gel-sepolia.inkonchain.com'],
   },
   sei: {
-    mainnet: ['https://sei.therpc.io', 'https://sei.drpc.orgx'],
+    mainnet: ['https://sei.therpc.io', 'https://sei.drpc.org'],
     testnet: [
       'https://evm-rpc-testnet.sei-apis.com',
       'https://sei-testnet-public.nodies.app',
