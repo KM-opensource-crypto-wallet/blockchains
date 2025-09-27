@@ -57,6 +57,7 @@ const chains = {
   bitcoin_cash: DogecoinOrLitecoinChain,
   hedera: HederaChain,
   ink: EVMChain,
+  sei: EVMChain,
   cardano: CardanoChain,
   filecoin: FilecoinChain,
 };
@@ -542,6 +543,7 @@ const hashObject = {
   bitcoin_cash: '',
   hedera: 'transactionHash',
   ink: 'hash',
+  sei: 'hash',
   cardano: '',
   filecoin: '',
 };

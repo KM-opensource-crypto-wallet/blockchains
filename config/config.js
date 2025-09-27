@@ -77,6 +77,7 @@ const SANDBOX_CHAIN_ID = {
   ethereum_pow: 10001,
   kava: 2221,
   ink: 763373,
+  sei: 1328,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -97,6 +98,7 @@ const PRODUCTION_CHAIN_ID = {
   ethereum_pow: 10001,
   kava: 2222,
   ink: 57073,
+  sei: 1329,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
@@ -207,6 +209,11 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'ink',
     symbol: 'ETH',
   },
+  'eip155:1328': {
+    chain_display_name: 'Sei',
+    chain_name: 'sei',
+    symbol: 'SEI',
+  },
   'tron:0xcd8690dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -305,6 +312,11 @@ const WalletConnectSupportedChainProduction = {
     chain_name: 'ink',
     symbol: 'ETH',
   },
+  'eip155:1329': {
+    chain_display_name: 'Sei',
+    chain_name: 'sei',
+    symbol: 'SEI',
+  },
   'tron:0x2b6653dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -363,6 +375,7 @@ export const SCAN_URL = {
   ink: IS_SANDBOX
     ? 'https://explorer-sepolia.inkonchain.com/'
     : 'https://explorer.inkonchain.com/',
+  sei: IS_SANDBOX ? 'https://testnet.seiscan.io' : 'https://seiscan.io',
 };
 
 export const config = {
