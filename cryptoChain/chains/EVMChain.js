@@ -36,6 +36,14 @@ import {
   getMaxPriorityFee,
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
+import {
+  ChainId,
+  UiPoolDataProvider,
+  StakingServiceV3,
+} from '@aave/contract-helpers';
+import {getStakingByChain} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {StakeWiz} from 'dok-wallet-blockchain-networks/service/stakeWiz';
+import {providers} from 'ethers-v5';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -1063,6 +1071,175 @@ export const EVMChain = chain_name => {
         },
       };
     },
+
+    getStaking: async ({address}) => {
+      try {
+        const rpcUrl = allRpcUrls[0];
+        const provider = new providers.JsonRpcProvider(rpcUrl).getSigner(
+          address,
+        );
+
+        const stakingServiceV3 = new StakingServiceV3(provider, {
+          TOKEN_STAKING_ADDRESS: '0xA484Ab92fe32B143AEE7019fC1502b1dAA522D31',
+        });
+
+        try {
+          const stake = await stakingServiceV3.stake(
+            address,
+            '0.00001',
+            address,
+          );
+          console.log('🚀 - EVMChain - stake:', stake);
+        } catch (error) {
+          console.log('error', error);
+        }
+
+        // sendWith();
+
+        // const poolDataProviderContract = new UiPoolDataProvider({
+        //   provider,
+        //   chainId: ChainId.sepolia,
+        //   uiPoolDataProviderAddress: AaveV3Sepolia.UI_POOL_DATA_PROVIDER,
+        // });
+
+        // const reserves =
+        //   await poolDataProviderContract.getUserReservesHumanized({
+        //     user: address,
+        //     lendingPoolAddressProvider: AaveV3Sepolia.POOL_ADDRESSES_PROVIDER,
+        //   });
+        // console.log('🚀 - EVMChain - reserves:', reserves);
+
+        // // Process reserves to ensure all big numbers are handled properly
+        // const processedReserves = reserves.map(reserve => ({
+        //   ...reserve,
+        //   // Convert any large number fields to string to avoid overflow
+        //   liquidityRate: reserve.liquidityRate?.toString(),
+        //   availableLiquidity: reserve.availableLiquidity?.toString(),
+        //   totalDebt: reserve.totalDebt?.toString(),
+        //   // Add other numeric fields that might be large numbers
+        //   ...(reserve.priceInMarketReferenceCurrency && {
+        //     priceInMarketReferenceCurrency:
+        //       reserve.priceInMarketReferenceCurrency.toString(),
+        //   }),
+        // }));
+
+        // console.log('🚀 - EVMChain - processedReserves:', processedReserves);
+        // return processedReserves;
+
+        //   contractAddress,
+        //   stakingContractAbi,
+        //   evmProvider,
+        // );
+        // console.log('🚀 - EVMChain - staking:', staking);
+        // try {
+        //   const staked = await staking.stakedOf(address);
+        //   console.log(staked.toString());
+        // } catch (error) {
+        //   console.error('Error in getStaking', error);
+        //   return [];
+        // }
+        // try {
+        //   const reward = await staking.rewardOf(address);
+        //   console.log(reward.toString());
+        // } catch (error) {
+        //   console.error('Error in getStaking', error);
+        //   return [];
+        // }
+        // try {
+        //   const totalStaked = await staking.totalStaked();
+        //   console.log(totalStaked.toString());
+        // } catch (error) {
+        //   console.error('Error in getStaking', error);
+        //   return [];
+        // }
+        // const a = {
+        //   staked: ethers.utils.formatEther(staked),
+        //   reward: ethers.utils.formatEther(reward),
+        //   totalStaked: ethers.utils.formatEther(totalStaked),
+        // };
+        // console.log('🚀 - EVMChain - a:', a);
+        return [];
+      } catch (error) {
+        console.error('Error in getStaking', error);
+        return [];
+      }
+    },
+    // , [])
+    getStakingInfo: async ({staking}) => {
+      try {
+        const tempStaking = Array.isArray(staking) ? staking : [];
+        const {totalValue, tempPendingAmount} = tempStaking.reduce(
+          (acc, item) => {
+            const amountBN = new BigNumber(item.amount || 0);
+            if (item?.status !== 'activating') {
+              acc.totalValue = acc.totalValue.plus(amountBN);
+            } else {
+              acc.tempPendingAmount = acc.tempPendingAmount.plus(amountBN);
+            }
+            return acc;
+          },
+          {totalValue: new BigNumber(0), tempPendingAmount: new BigNumber(0)},
+        );
+        const info = [
+          {
+            label: 'Stake',
+            value: `${totalValue.toString()} ETH`,
+          },
+          {
+            label: 'Pending',
+            value: `${tempPendingAmount?.toString()} ETH`,
+          },
+        ];
+        // const epochInfo = await EVMChain(chain_name).getEpochTime();
+        // if (epochInfo) {
+        //   info.push({
+        //     label: 'Epoch ends in',
+        //     value: differentInCurrentTime(epochInfo),
+        //   });
+        // }
+        return info;
+      } catch (e) {
+        console.error('Error in get solana getStakingInfo', e);
+        return [];
+      }
+    },
+    getStakingValidators: async ({chain_name}) => {
+      try {
+        const stakingResponse = await getStakingByChain({chain_name});
+        const validatorsResp = await StakeWiz.getListOfValidator();
+        const stakingValidators = stakingResponse?.data;
+        console.log('🚀 - EVMChain - stakingValidators:', stakingValidators);
+        const allValidators = validatorsResp?.data;
+        console.log('🚀 - EVMChain - allValidators:', allValidators);
+        let finalValidatorDetails = [];
+        for (let item of stakingValidators) {
+          const foundValidator = allValidators.find(subItem => {
+            return item?.vote_pub_key === subItem?.vote_identity;
+          });
+          if (foundValidator) {
+            finalValidatorDetails.push({
+              ...foundValidator,
+              validatorAddress: foundValidator?.vote_identity,
+              image: foundValidator?.image,
+              name: foundValidator?.name,
+              apy_estimate: foundValidator?.apy_estimate,
+              activated_stake: foundValidator?.activated_stake,
+            });
+          }
+        }
+        return {validators: finalValidatorDetails};
+      } catch (e) {
+        console.error('Error in get solana getStakingInfo', e);
+        return [];
+      }
+    },
+    getStakingBalance: () => {},
+    getEstimateFeeForStaking: () => {},
+    getEstimateFeeForDeactivateStaking: () => {},
+    getEstimateFeeForWithdrawStaking: () => {},
+    createStaking: () => {},
+    deactivateStaking: () => {},
+    withdrawStaking: () => {},
 
     getTokenTransactions: async ({
       address,

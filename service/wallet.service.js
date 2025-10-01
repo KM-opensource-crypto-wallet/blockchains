@@ -56,7 +56,7 @@ export const getCoinSnapshot = async (
       energyBalance = stakingBalanceInfo?.energyBalance || 0;
       bandwidthBalance = stakingBalanceInfo?.bandwidthBalance || 0;
     }
-    if (isStaking && coinDef?.type === 'coin' && isFetchStaking) {
+    if (isStaking && coinDef?.type !== 'coin' && isFetchStaking) {
       staking = (await nativeCoin.getStaking?.()) || [];
       finalStaking = staking.map(item => {
         const amount = item?.amount;

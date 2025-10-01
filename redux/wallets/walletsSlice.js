@@ -303,7 +303,7 @@ export const addToken = createAsyncThunk(
       energyBalance = stakingBalanceInfo?.energyBalance || 0;
       bandwidthBalance = stakingBalanceInfo?.bandwidthBalance || 0;
     }
-    if (isStaking && tokenData?.type === 'coin') {
+    if (isStaking && tokenData?.type !== 'coin') {
       staking = (await nativeCoin.getStaking?.()) || [];
       finalStaking = staking.map(item => {
         const amount = item?.amount;

@@ -339,7 +339,7 @@ const DERIVE_ADDRESS_SUPPORT_CHAIN = [...EVM_CHAINS, 'tron', 'solana'];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
 
-const STAKING_CHAINS = ['solana', 'tron'];
+const STAKING_CHAINS = ['ethereum', 'solana', 'tron'];
 
 export const isStakingChain = chain_name => STAKING_CHAINS.includes(chain_name);
 
