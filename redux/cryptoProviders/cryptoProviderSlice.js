@@ -11,6 +11,7 @@ import {getSelectedCountry} from 'dok-wallet-blockchain-networks/redux/cryptoPro
 
 const initialState = {
   providers: [],
+  sellCryptoProviders: [],
   shownOTC: false,
   loading: false,
   error: null,
@@ -58,6 +59,9 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
     return {
       providers: Array.isArray(data?.cryptoProviders)
         ? data?.cryptoProviders
+        : [],
+      sellCryptoProviders: Array.isArray(data?.sellCryptoProviders)
+        ? data?.sellCryptoProviders
         : [],
       shownOTC: !!data?.shownOtc,
       messageAllowUrls: Array.isArray(data?.messageAllowUrls)
@@ -136,6 +140,7 @@ export const cryptoProviderSlice = createSlice({
       fetchSupportedBuyCryptoCurrency.fulfilled,
       (state, {payload}) => {
         state.providers = payload?.providers;
+        state.sellCryptoProviders = payload?.sellCryptoProviders;
         state.shownOTC = payload?.shownOTC;
         state.messageAllowUrls = payload?.messageAllowUrls;
         state.disableMessage = payload?.disableMessage?.toString();

@@ -9,7 +9,9 @@ export const getSelectedCountry = state => state?.cryptoProvider?.country;
 export const getFetchProvider = state => state?.cryptoProvider?.fetchProvider;
 export const getDisableMessage = state => state?.cryptoProvider?.disableMessage;
 export const getExchangeProviders = state =>
-  state?.cryptoProvider?.exchangeProviders;
+  state?.cryptoProvider?.exchangeProviders || [];
+export const getSellCryptoAllProviders = state =>
+  state?.cryptoProvider?.sellCryptoProviders || [];
 export const getMessageAllowUrls = state =>
   state?.cryptoProvider?.messageAllowUrls || [];
 
