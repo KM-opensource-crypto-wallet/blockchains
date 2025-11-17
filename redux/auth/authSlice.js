@@ -1,5 +1,46 @@
-import {createSlice} from '@reduxjs/toolkit';
+import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {resetWallet} from '../wallets/walletsSlice';
+import {resetCurrentTransferData} from '../currentTransfer/currentTransferSlice';
+import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice';
 
+export const handleAttempts = createAsyncThunk(
+  'auth/handleAttempts',
+  async (payload, thunkAPI) => {
+    try {
+      const currentState = thunkAPI.getState();
+      const {
+        auth: {attempts, maxAttempt, isLocked},
+      } = currentState;
+      const threshold = maxAttempt - 1;
+      const failureCount = attempts.length;
+      const attemptsLeft = maxAttempt - failureCount;
+      const navigation = payload?.navigation;
+      const router = payload?.router;
+      if (failureCount >= threshold) {
+        if (attemptsLeft <= 0 && isLocked) {
+          thunkAPI.dispatch(resetAttempts());
+          thunkAPI.dispatch(resetWallet());
+          thunkAPI.dispatch(resetCurrentTransferData());
+          thunkAPI.dispatch(resetBatchTransactions());
+          thunkAPI.dispatch(logOutSuccess());
+          if (navigation) {
+            navigation?.reset({
+              index: 0,
+              routes: [{name: 'CarouselCards'}],
+            });
+          } else if (router) {
+            router.replace('/home');
+          }
+          thunkAPI.dispatch(loadingOff());
+        }
+      }
+      thunkAPI.dispatch(recordFailureAttempts());
+    } catch (error) {
+      console.error('Error: ', error);
+      thunkAPI.dispatch(loadingOff());
+    }
+  },
+);
 const initialState = {
   isLogin: false,
   password: '',
@@ -50,7 +91,7 @@ export const authSlice = createSlice({
     },
     recordFailureAttempts: state => {
       const maxAttempts = 5;
-      const windowMs = 1 * 60 * 1000; // 1 minute
+      const windowMs = 5 * 60 * 1000; // 1 minute
       const now = Date.now();
 
       // Keep only recent attempts
@@ -69,6 +110,25 @@ export const authSlice = createSlice({
       state.isLocked = false;
     },
   },
+  extraReducers: builder => {
+    builder
+      // when handleAttempts is triggered
+      .addCase(handleAttempts.pending, state => {
+        state.loading = true;
+        state.error = null;
+      })
+
+      // when all logic inside handleAttempts finishes
+      .addCase(handleAttempts.fulfilled, (state, action) => {
+        state.loading = false;
+      })
+
+      // if thunk throws an error
+      .addCase(handleAttempts.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error?.message || 'Failed to handle attempts';
+      });
+  },
 });
 
 export const {
@@ -83,4 +143,5 @@ export const {
   setLastUpdateCheckTimestamp,
   recordFailureAttempts,
   resetAttempts,
+  setLastAttempt,
 } = authSlice.actions;
