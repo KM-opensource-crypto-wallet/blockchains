@@ -91,7 +91,7 @@ export const authSlice = createSlice({
     },
     recordFailureAttempts: state => {
       const maxAttempts = 5;
-      const windowMs = 5 * 60 * 1000; // 1 minute
+      const windowMs = 5 * 60 * 1000; // 5 minute
       const now = Date.now();
 
       // Keep only recent attempts
