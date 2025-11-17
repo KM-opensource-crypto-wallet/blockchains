@@ -14,6 +14,7 @@ const state = {
   feesOptions: false,
   chatsOptions: false,
   searchInHomeScreen: true,
+  isWalletReset: false,
 };
 
 export const settingsSlice = createSlice({
@@ -59,6 +60,9 @@ export const settingsSlice = createSlice({
       state.paymentUrlAmount = '';
       state.paymentUrlCoin = {};
     },
+    setResetWallet(state, {payload}) {
+      state.isWalletReset = payload;
+    },
   },
 });
 
@@ -75,4 +79,5 @@ export const {
   updateChatOptions,
   setPaymentUrlCurrencyAmount,
   updateSearchInHomeScreen,
+  setResetWallet,
 } = settingsSlice.actions;
