@@ -143,5 +143,4 @@ export const {
   setLastUpdateCheckTimestamp,
   recordFailureAttempts,
   resetAttempts,
-  setLastAttempt,
 } = authSlice.actions;
