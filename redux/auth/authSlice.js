@@ -29,7 +29,7 @@ export const handleAttempts = createAsyncThunk(
               routes: [{name: 'CarouselCards'}],
             });
           } else if (router) {
-            router.replace('/home');
+            router.replace('/');
           }
           thunkAPI.dispatch(loadingOff());
         }
