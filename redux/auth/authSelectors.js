@@ -5,3 +5,7 @@ export const getFingerprintAuth = state => state.auth.fingerprintAuth;
 
 export const getLastUpdateCheckTimestamp = state =>
   state.auth.lastUpdateCheckTimestamp;
+
+export const getAttempts = state => state.auth.attempts;
+export const getIsLocked = state => state.auth.isLocked;
+export const getMaxAttempt = state => state.auth.maxAttempt;

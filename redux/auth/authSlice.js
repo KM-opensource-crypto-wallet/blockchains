@@ -7,6 +7,9 @@ const initialState = {
   error: null,
   fingerprintAuth: false,
   lastUpdateCheckTimestamp: null,
+  attempts: [],
+  maxAttempt: 5,
+  isLocked: false,
 };
 
 export const authSlice = createSlice({
@@ -45,6 +48,26 @@ export const authSlice = createSlice({
     setLastUpdateCheckTimestamp(state, {payload}) {
       state.lastUpdateCheckTimestamp = payload;
     },
+    recordFailureAttempts: state => {
+      const maxAttempts = 5;
+      const windowMs = 1 * 60 * 1000; // 1 minute
+      const now = Date.now();
+
+      // Keep only recent attempts
+      state.attempts = state.attempts.filter(
+        timestamp => now - timestamp < windowMs,
+      );
+
+      // Add new attempt
+      state.attempts.push(now);
+
+      // Lock if threshold reached
+      state.isLocked = state.attempts.length >= maxAttempts;
+    },
+    resetAttempts: state => {
+      state.attempts = [];
+      state.isLocked = false;
+    },
   },
 });
 
@@ -58,4 +81,6 @@ export const {
   loadingOn,
   loadingOff,
   setLastUpdateCheckTimestamp,
+  recordFailureAttempts,
+  resetAttempts,
 } = authSlice.actions;
