@@ -126,7 +126,7 @@ export const authSlice = createSlice({
       state.attempts = [];
       state.isLocked = false;
     },
-    setLastAttempt: (state, payload) => {
+    setLastAttempt: (state, {payload}) => {
       state.lastAttempt = payload;
     },
   },
