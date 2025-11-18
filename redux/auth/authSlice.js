@@ -10,46 +10,48 @@ export const handleAttempts = createAsyncThunk(
     try {
       const currentState = thunkAPI.getState();
       const {
-        auth: {attempts, maxAttempt, isLocked},
+        auth: {attempts, maxAttempt},
       } = currentState;
       const threshold = maxAttempt - 1;
       const failureCount = attempts.length;
-      const attemptsLeft = maxAttempt - failureCount;
+      const attemptsLeft = threshold - failureCount;
 
       const navigation = payload?.navigation;
       const router = payload?.router;
 
-      if (failureCount >= threshold) {
+      if (attemptsLeft <= 0) {
+        showToast({
+          type: 'warningToast',
+          title: 'Wallet Deleted',
+          message: 'Too many failed login attempts',
+        });
+        thunkAPI.dispatch(resetAttempts());
+        thunkAPI.dispatch(resetWallet());
+        thunkAPI.dispatch(resetCurrentTransferData());
+        thunkAPI.dispatch(resetBatchTransactions());
+        thunkAPI.dispatch(logOutSuccess());
+        if (navigation) {
+          console.log('navigation reset');
+          navigation?.reset({
+            index: 0,
+            routes: [{name: 'CarouselCards'}],
+          });
+        } else if (router) {
+          router.replace('/');
+        }
+        thunkAPI.dispatch(loadingOff());
+        return {successful_deleted: true};
+      } else {
         if (attemptsLeft === 1) {
           thunkAPI.dispatch(setLastAttempt(true));
-        } else if (attemptsLeft <= 0 && isLocked) {
-          showToast({
-            type: 'warningToast',
-            title: 'Wallet Deleted',
-            message: 'Too many failed login attempts',
-          });
-          thunkAPI.dispatch(resetAttempts());
-          thunkAPI.dispatch(resetWallet());
-          thunkAPI.dispatch(resetCurrentTransferData());
-          thunkAPI.dispatch(resetBatchTransactions());
-          thunkAPI.dispatch(logOutSuccess());
-          if (navigation) {
-            navigation?.reset({
-              index: 0,
-              routes: [{name: 'CarouselCards'}],
-            });
-          } else if (router) {
-            router.replace('/');
-          }
-          thunkAPI.dispatch(loadingOff());
         }
+        thunkAPI.dispatch(recordFailureAttempts());
+        showToast({
+          type: 'warningToast',
+          title: 'Invalid password',
+          message: `${attemptsLeft} Attempts left`,
+        });
       }
-      showToast({
-        type: 'warningToast',
-        title: 'Invalid password',
-        message: `${attemptsLeft} Attempts left`,
-      });
-      thunkAPI.dispatch(recordFailureAttempts());
       thunkAPI.dispatch(loadingOff());
     } catch (error) {
       console.error('Error While deleting the wallet: ', error);
@@ -66,7 +68,6 @@ const initialState = {
   lastUpdateCheckTimestamp: null,
   attempts: [],
   maxAttempt: 5,
-  isLocked: false,
   lastAttempt: false,
 };
 
@@ -107,8 +108,7 @@ export const authSlice = createSlice({
       state.lastUpdateCheckTimestamp = payload;
     },
     recordFailureAttempts: state => {
-      const maxAttempts = 5;
-      const windowMs = 5 * 60 * 1000; // 5 minute
+      const windowMs = 1800000; // 30 minute
       const now = Date.now();
 
       // Keep only recent attempts
@@ -120,11 +120,10 @@ export const authSlice = createSlice({
       state.attempts.push(now);
 
       // Lock if threshold reached
-      state.isLocked = state.attempts.length >= maxAttempts;
     },
     resetAttempts: state => {
       state.attempts = [];
-      state.isLocked = false;
+      state.lastAttempt = false;
     },
     setLastAttempt: (state, {payload}) => {
       state.lastAttempt = payload;
