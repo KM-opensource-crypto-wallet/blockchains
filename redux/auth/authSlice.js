@@ -2,6 +2,7 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {resetWallet} from '../wallets/walletsSlice';
 import {resetCurrentTransferData} from '../currentTransfer/currentTransferSlice';
 import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice';
+import {showToast} from 'utils/toast';
 
 export const handleAttempts = createAsyncThunk(
   'auth/handleAttempts',
@@ -14,10 +15,19 @@ export const handleAttempts = createAsyncThunk(
       const threshold = maxAttempt - 1;
       const failureCount = attempts.length;
       const attemptsLeft = maxAttempt - failureCount;
+
       const navigation = payload?.navigation;
       const router = payload?.router;
+
       if (failureCount >= threshold) {
-        if (attemptsLeft <= 0 && isLocked) {
+        if (attemptsLeft === 1) {
+          thunkAPI.dispatch(setLastAttempt(true));
+        } else if (attemptsLeft <= 0 && isLocked) {
+          showToast({
+            type: 'warningToast',
+            title: 'Wallet Deleted',
+            message: 'Too many failed login attempts',
+          });
           thunkAPI.dispatch(resetAttempts());
           thunkAPI.dispatch(resetWallet());
           thunkAPI.dispatch(resetCurrentTransferData());
@@ -34,9 +44,15 @@ export const handleAttempts = createAsyncThunk(
           thunkAPI.dispatch(loadingOff());
         }
       }
+      showToast({
+        type: 'warningToast',
+        title: 'Invalid password',
+        message: `${attemptsLeft} Attempts left`,
+      });
       thunkAPI.dispatch(recordFailureAttempts());
+      thunkAPI.dispatch(loadingOff());
     } catch (error) {
-      console.error('Error: ', error);
+      console.error('Error While deleting the wallet: ', error);
       thunkAPI.dispatch(loadingOff());
     }
   },
@@ -51,6 +67,7 @@ const initialState = {
   attempts: [],
   maxAttempt: 5,
   isLocked: false,
+  lastAttempt: false,
 };
 
 export const authSlice = createSlice({
@@ -109,6 +126,9 @@ export const authSlice = createSlice({
       state.attempts = [];
       state.isLocked = false;
     },
+    setLastAttempt: (state, payload) => {
+      state.lastAttempt = payload;
+    },
   },
   extraReducers: builder => {
     builder
@@ -143,4 +163,5 @@ export const {
   setLastUpdateCheckTimestamp,
   recordFailureAttempts,
   resetAttempts,
+  setLastAttempt,
 } = authSlice.actions;

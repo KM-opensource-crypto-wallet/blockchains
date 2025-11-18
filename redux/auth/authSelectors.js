@@ -9,3 +9,4 @@ export const getLastUpdateCheckTimestamp = state =>
 export const getAttempts = state => state.auth.attempts;
 export const getIsLocked = state => state.auth.isLocked;
 export const getMaxAttempt = state => state.auth.maxAttempt;
+export const getLastAttempt = state => state.auth.lastAttempt;
