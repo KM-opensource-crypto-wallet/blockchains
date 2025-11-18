@@ -54,8 +54,8 @@ const allRPCUrl = {
     testnet: 'https://cosmos-rpc.publicnode.com:443',
   },
   polkadot: {
-    mainnet: 'wss://1rpc.io/dot',
-    testnet: 'wss://1rpc.io/dot',
+    mainnet: 'https://rpc.polkadot.io',
+    testnet: 'https://rpc.polkadot.io',
   },
   ton: {
     mainnet: 'https://toncenter.com/api/v2/jsonRPC',
