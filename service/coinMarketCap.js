@@ -1,13 +1,12 @@
-import {CoinMarketCapAPI} from 'dok-wallet-blockchain-networks/config/coinMarketCap';
+import { CoinMarketCapAPI } from 'dok-wallet-blockchain-networks/config/coinMarketCap';
 import dayjs from 'dayjs';
-import {getCurrencyRate} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
-
+import { getCurrencyRate } from 'dok-wallet-blockchain-networks/service/dokApi';
+import { config, isWeb } from 'dok-wallet-blockchain-networks/config/config';
+import {store } from "../../src/redux/store"
 let priceInfo = {};
 let lastCallTimeStamp;
 
 const fetchWithRetry = async (symbol, currency) => {
-  const {store} = require('redux/store');
   const {
     getCmcApiKeys,
   } = require('dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors');
@@ -47,7 +46,7 @@ export const getPrice = async (symbol, currency) => {
       lastCallTimeStamp = new Date();
       let resp;
       if (isWeb) {
-        resp = await getCurrencyRate({symbol, currency});
+        resp = await getCurrencyRate({ symbol, currency });
         priceInfo = resp?.data;
       } else {
         resp = await fetchWithRetry(symbol, currency);

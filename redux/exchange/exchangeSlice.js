@@ -1,13 +1,13 @@
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {getExchange} from 'dok-wallet-blockchain-networks/redux/exchange/exchangeSelectors';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { getExchange } from 'dok-wallet-blockchain-networks/redux/exchange/exchangeSelectors';
 import {
   calculateEstimateFee,
   setCurrentTransferData,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
-import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
-import {isNameSupportChain} from 'dok-wallet-blockchain-networks/helper';
-import {showToast} from 'utils/toast';
-import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
+import { getChain } from 'dok-wallet-blockchain-networks/cryptoChain';
+import { isNameSupportChain } from 'dok-wallet-blockchain-networks/helper';
+import { showToast } from '../../../src/utils/toast';
+import { createExchange } from 'dok-wallet-blockchain-networks/service/dokApi';
 
 const initialState = {
   amountFrom: '',
@@ -140,19 +140,19 @@ export const exchangeSlice = createSlice({
   name: 'exchange',
   initialState,
   reducers: {
-    setExchangeFields(state, {payload}) {
-      return {...state, ...payload};
+    setExchangeFields(state, { payload }) {
+      return { ...state, ...payload };
     },
     resetExchangeFields() {
       return initialState;
     },
-    setExchangeLoading(state, {payload}) {
+    setExchangeLoading(state, { payload }) {
       state.isLoading = payload;
       if (payload) {
         state.success = false;
       }
     },
-    setExchangeSuccess(state, {payload}) {
+    setExchangeSuccess(state, { payload }) {
       state.success = payload;
       state.isLoading = false;
     },

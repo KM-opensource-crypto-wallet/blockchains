@@ -1,7 +1,7 @@
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {getEthereumCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
-import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
-import {XMTP} from 'utils/xmtp';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { getEthereumCoin } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+import { getChain } from 'dok-wallet-blockchain-networks/cryptoChain';
+import { XMTP } from '../../../src/utils/xmtp';
 
 /*
 Conversation data structure
@@ -61,11 +61,11 @@ export const getConversation = createAsyncThunk(
         address: ethereumCoin?.address,
       });
       const conversations = await XMTP.getConversations();
-      const allTopics = conversations.map(({topic}) => topic);
+      const allTopics = conversations.map(({ topic }) => topic);
       const lastMessages = await Promise.all(
-        allTopics.map(async topic => await XMTP.getMessages({topic, limit: 1})),
+        allTopics.map(async topic => await XMTP.getMessages({ topic, limit: 1 })),
       );
-      return {conversations, lastMessages, address: ethereumCoin?.address};
+      return { conversations, lastMessages, address: ethereumCoin?.address };
     } catch (e) {
       console.log('error in getMessageConversation', e);
       return thunkAPI.rejectWithValue('something went wrong');
@@ -79,9 +79,9 @@ export const getMessage = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsFetchingMessage(true));
-      const {topic} = payload;
-      const messages = await XMTP.getMessages({topic, limit: 20});
-      thunkAPI.dispatch(setMessagesToConversation({messages, topic}));
+      const { topic } = payload;
+      const messages = await XMTP.getMessages({ topic, limit: 20 });
+      thunkAPI.dispatch(setMessagesToConversation({ messages, topic }));
     } catch (e) {
       console.log('error in getMessageConversation', e);
       thunkAPI.dispatch(setIsFetchingMessage(false));
@@ -96,7 +96,7 @@ export const getMoreMessages = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsFetchingMoreMessage(true));
-      const {topic, lastMessageDate, prevMessages, limit = 20} = payload;
+      const { topic, lastMessageDate, prevMessages, limit = 20 } = payload;
       const messages = await XMTP.getMessages({
         topic,
         limit,
@@ -104,7 +104,7 @@ export const getMoreMessages = createAsyncThunk(
         prevMessages,
       });
       thunkAPI.dispatch(
-        addMessagesToConversation({messages, topic, skipLastMessage: true}),
+        addMessagesToConversation({ messages, topic, skipLastMessage: true }),
       );
     } catch (e) {
       console.log('error in getMoreMessages', e);
@@ -120,7 +120,7 @@ export const updateConsentState = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsUpdatingConsentState(true));
-      const {topic, address, consentState, peerAddress} = payload;
+      const { topic, address, consentState, peerAddress } = payload;
       if (consentState !== 'denied' && consentState !== 'allowed') {
         return console.error(
           'consentState must be one of this allowed or denied  ',
@@ -138,7 +138,7 @@ export const updateConsentState = createAsyncThunk(
       }
 
       thunkAPI.dispatch(
-        updateConversation({address, topic, conversationData: {consentState}}),
+        updateConversation({ address, topic, conversationData: { consentState } }),
       );
       thunkAPI.dispatch(getConversation());
     } catch (e) {
@@ -155,7 +155,7 @@ export const forwardMessages = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsForwardingMessage(true));
-      const {conversations, messages} = payload;
+      const { conversations, messages } = payload;
       if (
         !Array.isArray(conversations) ||
         !conversations.length ||
@@ -191,36 +191,36 @@ export const messageSlice = createSlice({
   name: 'message',
   initialState,
   reducers: {
-    setIsFetchingConversation(state, {payload}) {
+    setIsFetchingConversation(state, { payload }) {
       state.isFetchingConversations = payload;
     },
-    setIsFetchingMessage(state, {payload}) {
+    setIsFetchingMessage(state, { payload }) {
       state.isFetchingMessages = payload;
       if (payload) {
         state.isAllMessageLoaded = false;
       }
     },
-    setIsFetchingMoreMessage(state, {payload}) {
+    setIsFetchingMoreMessage(state, { payload }) {
       state.isFetchingMoreMessages = payload;
       if (payload) {
         state.isAllMessageLoaded = false;
       }
     },
-    setIsUpdatingConsentState(state, {payload}) {
+    setIsUpdatingConsentState(state, { payload }) {
       state.isUpdatingConsentState = payload;
     },
-    setIsForwardingMessage(state, {payload}) {
+    setIsForwardingMessage(state, { payload }) {
       state.isForwardingMessage = payload;
     },
-    setSelectedConversation(state, {payload}) {
+    setSelectedConversation(state, { payload }) {
       state.selectedConversation = {
         address: payload?.address,
         topic: payload?.topic,
       };
     },
-    setMessagesToConversation(state, {payload}) {
+    setMessagesToConversation(state, { payload }) {
       state.isFetchingMessages = false;
-      const {topic, messages} = payload;
+      const { topic, messages } = payload;
       if (topic && Array.isArray(messages)) {
         state.messageData[topic] = messages;
         state.isAllMessageLoaded = messages.length < 20;
@@ -231,8 +231,8 @@ export const messageSlice = createSlice({
         );
       }
     },
-    addMessagesToConversation(state, {payload}) {
-      const {topic, messages, address, skipLastMessage} = payload;
+    addMessagesToConversation(state, { payload }) {
+      const { topic, messages, address, skipLastMessage } = payload;
       state.isFetchingMessages = false;
       state.isFetchingMoreMessages = false;
       if (topic && Array.isArray(messages)) {
@@ -245,10 +245,10 @@ export const messageSlice = createSlice({
           : [...messages, ...previousMessages];
         if (!skipLastMessage && address) {
           const tempConversationData = state.conversationData[address]
-            ? {...state.conversationData[address]}
+            ? { ...state.conversationData[address] }
             : {};
           const finalConvData = tempConversationData[topic]
-            ? {...tempConversationData[topic]}
+            ? { ...tempConversationData[topic] }
             : {};
           finalConvData.lastMessage = messages[0];
           tempConversationData[topic] = finalConvData;
@@ -261,12 +261,12 @@ export const messageSlice = createSlice({
         );
       }
     },
-    addConversation(state, {payload}) {
-      const {topic, conversationData, address} = payload;
+    addConversation(state, { payload }) {
+      const { topic, conversationData, address } = payload;
       state.isFetchingMessages = false;
       if (topic && conversationData && address) {
         const tempConversationData = state.conversationData[address]
-          ? {...state.conversationData[address]}
+          ? { ...state.conversationData[address] }
           : {};
         tempConversationData[topic] = conversationData;
         state.conversationData[address] = tempConversationData;
@@ -274,11 +274,11 @@ export const messageSlice = createSlice({
         console.warn('some payload is missing addConversations', payload);
       }
     },
-    updateConversation(state, {payload}) {
-      const {topic, conversationData, address} = payload;
+    updateConversation(state, { payload }) {
+      const { topic, conversationData, address } = payload;
       if (topic && conversationData && address) {
         const tempConversationData = state.conversationData[address]
-          ? {...state.conversationData[address]}
+          ? { ...state.conversationData[address] }
           : {};
         const previousConversationData = tempConversationData[topic];
         tempConversationData[topic] = {
@@ -290,8 +290,8 @@ export const messageSlice = createSlice({
         console.warn('some payload is missing addConversations', payload);
       }
     },
-    addConversationsName(state, {payload}) {
-      const {name} = payload;
+    addConversationsName(state, { payload }) {
+      const { name } = payload;
       const conversationData = state?.conversationData;
       const selectedConversation = state?.selectedConversation;
       const selectedConversationData =
@@ -302,7 +302,7 @@ export const messageSlice = createSlice({
 
       if (typeof name === 'string' && peerAddress) {
         state.conversationName[peerAddress] = name;
-        const updatedCon = {...selectCon, name};
+        const updatedCon = { ...selectCon, name };
         state.conversationData[selectedConversation?.address] = {
           ...selectedConversationData,
           [selectedConversation.topic]: updatedCon,
@@ -313,8 +313,8 @@ export const messageSlice = createSlice({
     },
   },
   extraReducers: builder => {
-    builder.addCase(getConversation.fulfilled, (state, {payload}) => {
-      const {conversations, lastMessages, address} = payload;
+    builder.addCase(getConversation.fulfilled, (state, { payload }) => {
+      const { conversations, lastMessages, address } = payload;
       const conversationName = state.conversationName;
       const finalConversations = {};
       for (let i = 0; i < conversations.length; i++) {
@@ -322,7 +322,7 @@ export const messageSlice = createSlice({
         if (!tempConversation) {
           continue;
         }
-        const {peerAddress, topic} = tempConversation;
+        const { peerAddress, topic } = tempConversation;
         const tempMessage = lastMessages[i];
         finalConversations[topic] = {
           ...tempConversation,
@@ -330,9 +330,9 @@ export const messageSlice = createSlice({
           name: conversationName[peerAddress] || '',
         };
       }
-      const tempMessageData = {...state.conversationData};
+      const tempMessageData = { ...state.conversationData };
       const finalConvData = tempMessageData.conversations
-        ? {...tempMessageData.conversations, finalConversations}
+        ? { ...tempMessageData.conversations, finalConversations }
         : finalConversations;
       state.conversationData = {
         ...tempMessageData,
@@ -340,7 +340,7 @@ export const messageSlice = createSlice({
       };
       state.isFetchingConversations = false;
     });
-    builder.addCase(getConversation.rejected, (state, {payload}) => {
+    builder.addCase(getConversation.rejected, (state, { payload }) => {
       state.isFetchingConversations = false;
     });
   },

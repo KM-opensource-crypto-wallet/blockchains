@@ -1,10 +1,10 @@
-import {createAsyncThunk} from '@reduxjs/toolkit';
-import {etherWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/etherWalletConnect';
-import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletconnect';
-import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
-import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
-import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
-import {showToast} from 'utils/toast';
+import { createAsyncThunk } from '@reduxjs/toolkit';
+import { etherWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/etherWalletConnect';
+import { getWalletConnect } from 'dok-wallet-blockchain-networks/service/walletconnect';
+import { setWalletConnectTransactionSubmit } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
+import { tronWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
+import { solanaWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
+import { showToast } from '../../../src/utils/toast';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -54,7 +54,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
           result: tx,
           jsonrpc: '2.0',
         };
-        await connector.respondSessionRequest({topic, response});
+        await connector.respondSessionRequest({ topic, response });
       }
       dispatch(setWalletConnectTransactionSubmit(false));
     } catch (error) {
@@ -75,7 +75,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
           message: 'Transaction error',
         },
       };
-      connector.respondSessionRequest({topic, response});
+      connector.respondSessionRequest({ topic, response });
       // }
     }
   },

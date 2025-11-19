@@ -1,4 +1,4 @@
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import {
   fetchCoinGroupAPI,
   fetchCurrenciesAPI,
@@ -13,8 +13,8 @@ import {
   debounce,
   generateUniqueKeyForChain,
 } from 'dok-wallet-blockchain-networks/helper';
-import {showToast} from 'utils/toast';
-import {setCurrentCoin} from '../wallets/walletsSlice';
+import { showToast } from '../../../src/utils/toast';
+import { setCurrentCoin } from '../wallets/walletsSlice';
 
 const initialState = {
   loading: true,
@@ -47,7 +47,7 @@ export const fetchCurrencies = createAsyncThunk(
   async (payload, thunkAPI) => {
     const dispatch = thunkAPI.dispatch;
     dispatch(setCurrencyLoading(true));
-    const resp = await fetchCurrenciesAPI({...payload, status: true});
+    const resp = await fetchCurrenciesAPI({ ...payload, status: true });
     return Array?.isArray(resp?.data?.data) ? resp?.data?.data : [];
   },
 );
@@ -114,7 +114,7 @@ export const fetchGroupCoins = createAsyncThunk(
 export const checkNewCoinAvailable = createAsyncThunk(
   'currency/checkNewCoinAvailable',
   async (_, thunkAPI) => {
-    const resp = await fetchCurrenciesAPI({limit: 200, status: true});
+    const resp = await fetchCurrenciesAPI({ limit: 200, status: true });
     const newCoins = Array?.isArray(resp?.data?.data) ? resp?.data?.data : [];
     const currentState = thunkAPI.getState();
     const dispatch = thunkAPI.dispatch;
@@ -244,7 +244,7 @@ export const searchAndAddCoins = createAsyncThunk(
     const state = thunkAPI.getState();
     const dispatch = thunkAPI.dispatch;
     try {
-      const {currency} = payload;
+      const { currency } = payload;
       const [chainName, symbol] = currency?.split(':') || [];
 
       const userCoins = selectUserCoins(state).filter(
@@ -268,7 +268,7 @@ export const searchAndAddCoins = createAsyncThunk(
         coinsList.push(hasChain);
       } else {
         const fetched = await dispatch(
-          fetchCurrencies({search: chainName.replace(/_/g, ' ')}),
+          fetchCurrencies({ search: chainName.replace(/_/g, ' ') }),
         ).unwrap();
         const found = fetched.find(
           coin =>
@@ -289,7 +289,7 @@ export const searchAndAddCoins = createAsyncThunk(
         coinsList.push(hasToken);
       } else {
         const fetched = await dispatch(
-          fetchCurrencies({search: symbol}),
+          fetchCurrencies({ search: symbol }),
         ).unwrap();
         const found = fetched.find(
           coin =>
@@ -318,100 +318,100 @@ export const currencySlice = createSlice({
   name: 'currency',
   initialState,
   reducers: {
-    setCurrencies(state, {payload}) {
+    setCurrencies(state, { payload }) {
       state.currencies = payload;
       state.loading = false;
       state.error = null;
     },
-    setCurrencyError(state, {payload}) {
+    setCurrencyError(state, { payload }) {
       state.error = payload;
       state.loading = false;
     },
-    setCurrencyLoading(state, {payload}) {
+    setCurrencyLoading(state, { payload }) {
       state.loading = payload;
     },
-    setAllCoins(state, {payload}) {
+    setAllCoins(state, { payload }) {
       state.allCoins = payload;
       state.allCoinsLoading = false;
       state.allCoinError = null;
     },
-    setAllCoinsError(state, {payload}) {
+    setAllCoinsError(state, { payload }) {
       state.allCoinError = payload;
       state.allCoinsLoading = false;
     },
-    setAllCoinsLoading(state, {payload}) {
+    setAllCoinsLoading(state, { payload }) {
       state.allCoinsLoading = payload;
     },
-    setAllCoinsAvailable(state, {payload}) {
+    setAllCoinsAvailable(state, { payload }) {
       state.isAllCoinAvailable = payload;
     },
-    setGroupCoinsLoading(state, {payload}) {
+    setGroupCoinsLoading(state, { payload }) {
       state.groupCoinsLoading = payload;
     },
-    setAllGroupCoins(state, {payload}) {
+    setAllGroupCoins(state, { payload }) {
       state.allGroupCoins = payload;
       state.groupCoinsLoading = false;
     },
-    setAllGroupCoinAvailable(state, {payload}) {
+    setAllGroupCoinAvailable(state, { payload }) {
       state.isAllGroupCoinAvailable = payload;
     },
-    setIsAskedBackupModal(state, {payload}) {
+    setIsAskedBackupModal(state, { payload }) {
       state.isAskedBackedUpModal[payload] = true;
     },
-    setSearchAllGroupCoinsAvailable(state, {payload}) {
+    setSearchAllGroupCoinsAvailable(state, { payload }) {
       state.searchIsAllGroupCoinAvailable = payload;
     },
-    setSearchGroupCoinsLoading(state, {payload}) {
+    setSearchGroupCoinsLoading(state, { payload }) {
       state.searchAllGroupCoinsLoading = payload;
     },
-    setSearchAllGroupCoins(state, {payload}) {
+    setSearchAllGroupCoins(state, { payload }) {
       state.searchAllGroupCoins = payload;
       state.searchAllGroupCoinsLoading = false;
     },
-    setSearchAllCoins(state, {payload}) {
+    setSearchAllCoins(state, { payload }) {
       state.searchAllCoins = payload;
       state.searchAllCoinsLoading = false;
       state.allCoinError = null;
     },
-    setSearchAllCoinsError(state, {payload}) {
+    setSearchAllCoinsError(state, { payload }) {
       state.searchAllCoinError = payload;
       state.searchAllCoinsLoading = false;
     },
-    setSearchAllCoinsLoading(state, {payload}) {
+    setSearchAllCoinsLoading(state, { payload }) {
       state.searchAllCoinsLoading = payload;
     },
-    setSearchAllCoinsAvailable(state, {payload}) {
+    setSearchAllCoinsAvailable(state, { payload }) {
       state.searchIsAllCoinAvailable = payload;
     },
-    setNewCoins(state, {payload}) {
+    setNewCoins(state, { payload }) {
       state.newCoins = payload;
     },
-    setNewsMessage(state, {payload}) {
+    setNewsMessage(state, { payload }) {
       state.newsMessage = payload;
     },
-    setNewsModalVisible(state, {payload}) {
+    setNewsModalVisible(state, { payload }) {
       state.newsModalVisible = payload;
     },
-    setIsAddingGroup(state, {payload}) {
-      state.isAddingGroup = {...state.isAddingGroup, [payload]: true};
+    setIsAddingGroup(state, { payload }) {
+      state.isAddingGroup = { ...state.isAddingGroup, [payload]: true };
     },
-    setIsRemovingGroup(state, {payload}) {
-      state.isAddingGroup = {...state.isAddingGroup, [payload]: false};
+    setIsRemovingGroup(state, { payload }) {
+      state.isAddingGroup = { ...state.isAddingGroup, [payload]: false };
     },
     resetIsAddingGroup(state) {
       state.isAddingGroup = {};
     },
-    setMissingCoins(state, {payload}) {
+    setMissingCoins(state, { payload }) {
       state.missingCoins = payload;
     },
   },
   extraReducers: builder => {
-    builder.addCase(fetchCurrencies.fulfilled, (state, {payload}) => {
+    builder.addCase(fetchCurrencies.fulfilled, (state, { payload }) => {
       state.currencies = payload;
       state.loading = false;
       state.error = null;
     });
-    builder.addCase(fetchCurrencies.rejected, (state, {payload}) => {
+    builder.addCase(fetchCurrencies.rejected, (state, { payload }) => {
       state.error = payload;
       state.loading = false;
     });
