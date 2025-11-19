@@ -77,6 +77,7 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       bitcoin_cash_fee_multiplier: data?.bitcoin_cash_fee_multiplier || {},
       additional_l1_fees: data?.additional_l1_fees || {},
       is_max_wallet_limit_reached: data?.is_max_wallet_limit_reached || false,
+      android_latest_version: data?.android_latest_version || null,
     };
   },
 );
@@ -174,6 +175,7 @@ export const cryptoProviderSlice = createSlice({
         );
         state.is_max_wallet_limit_reached =
           payload?.is_max_wallet_limit_reached;
+        state.android_latest_version = payload?.android_latest_version;
       },
     );
     builder.addCase(
