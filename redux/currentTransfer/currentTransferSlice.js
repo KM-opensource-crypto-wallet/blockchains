@@ -1,25 +1,25 @@
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { getTransferData } from './currentTransferSelector';
 import {
   fetchBatchTransactionBalances,
   getNativeCoin,
-} from 'dok-wallet-blockchain-networks/service/wallet.service';
+} from '../../service/wallet.service';
 import {
   selectCurrentCoin,
   selectCurrentWallet,
   selectUserCoins,
-} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+} from '../wallets/walletsSelector';
 import BigNumber from 'bignumber.js';
-import {showToast} from 'utils/toast';
-import {ethers} from 'ethers';
+import { showToast } from '../../../src/utils/toast';
+import { ethers } from 'ethers';
 import {
   getAdditionalL1Fee,
   getBitcoinCashFeeMultiplier,
   getBitcoinFeeMultiplier,
   getDogecoinFeeMultiplier,
   getLitecoinFeeMultiplier,
-} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
-import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
+} from '../cryptoProviders/cryptoProvidersSelectors';
+import { parseBalance } from '../../helper';
 
 const initialUpdateTransactionData = {
   isLoading: false,
@@ -159,14 +159,14 @@ export const calculateEstimateFee = createAsyncThunk(
       const feeAmountBN = new BigNumber(fee);
       const finalFeesOptions = Array.isArray(feesOptions)
         ? feesOptions?.map(item => {
-            const etherAmount = new BigNumber(item.gasPrice).dividedBy(
-              new BigNumber(1000000000),
-            );
-            return {
-              ...item,
-              fiatGasPrice: etherAmount.multipliedBy(currencyRateBN).toFixed(2),
-            };
-          })
+          const etherAmount = new BigNumber(item.gasPrice).dividedBy(
+            new BigNumber(1000000000),
+          );
+          return {
+            ...item,
+            fiatGasPrice: etherAmount.multipliedBy(currencyRateBN).toFixed(2),
+          };
+        })
         : [];
       dispatch(
         setEstimateFees({
@@ -369,11 +369,11 @@ export const currentTransferSlice = createSlice({
   name: 'currentTransfer',
   initialState,
   reducers: {
-    setCurrentTransferData(state, {payload}) {
-      state.transferData = {...state.transferData, ...payload};
+    setCurrentTransferData(state, { payload }) {
+      state.transferData = { ...state.transferData, ...payload };
     },
-    updateCurrentTransferData(state, {payload}) {
-      state.transferData = {...initialState.transferData, ...payload};
+    updateCurrentTransferData(state, { payload }) {
+      state.transferData = { ...initialState.transferData, ...payload };
     },
     clearSelectedUTXOs(state) {
       state.transferData.selectedUTXOsValue = undefined;
@@ -382,24 +382,24 @@ export const currentTransferSlice = createSlice({
     resetCurrentTransferData() {
       return initialState;
     },
-    setCurrentTransferLoading(state, {payload}) {
+    setCurrentTransferLoading(state, { payload }) {
       state.transferData.isLoading = payload;
       state.transferData.success = false;
     },
-    setCurrentTransferSuccess(state, {payload}) {
+    setCurrentTransferSuccess(state, { payload }) {
       state.transferData.isLoading = false;
       state.transferData.success = payload;
       if (payload) {
         state.transferData.customError = '';
       }
     },
-    setCurrentTransferRefreshing(state, {payload}) {
+    setCurrentTransferRefreshing(state, { payload }) {
       state.transferData.isRefreshing = payload;
     },
-    setCurrentTransferSubmitting(state, {payload}) {
+    setCurrentTransferSubmitting(state, { payload }) {
       state.transferData.isSubmitting = payload;
     },
-    setEstimateFees(state, {payload}) {
+    setEstimateFees(state, { payload }) {
       state.transferData.transactionFee = payload?.transactionFee;
       state.transferData.isLoading = false;
       state.transferData.fiatEstimateFee = payload?.fiatEstimateFee;
@@ -413,13 +413,13 @@ export const currentTransferSlice = createSlice({
         state.transferData.nonce = payload?.nonce;
       }
     },
-    setCurrentTransferAmount(state, {payload}) {
+    setCurrentTransferAmount(state, { payload }) {
       state.transferData.amount = payload;
     },
-    setCurrentTransferCustomError(state, {payload}) {
+    setCurrentTransferCustomError(state, { payload }) {
       state.transferData.customError = payload;
     },
-    updateFees(state, {payload}) {
+    updateFees(state, { payload }) {
       const gasPrice = payload?.gasPrice;
       const l1Fees = state.transferData?.l1Fees;
       if (!gasPrice) {
@@ -473,23 +473,23 @@ export const currentTransferSlice = createSlice({
         state.transferData.isMax = false;
       }
     },
-    setPendingTransferLoading(state, {payload}) {
+    setPendingTransferLoading(state, { payload }) {
       state.pendingTransferData.isLoading = payload;
     },
-    setPendingTransferSubmitting(state, {payload}) {
+    setPendingTransferSubmitting(state, { payload }) {
       state.pendingTransferData.isSubmitting = payload;
     },
-    setPendingTransferData(state, {payload}) {
-      state.pendingTransferData = {...state.pendingTransferData, ...payload};
+    setPendingTransferData(state, { payload }) {
+      state.pendingTransferData = { ...state.pendingTransferData, ...payload };
     },
-    setUpdateTransactionLoading(state, {payload}) {
+    setUpdateTransactionLoading(state, { payload }) {
       state.updateTransactionData.isLoading = payload;
     },
-    setUpdateTransactionSubmitting(state, {payload}) {
+    setUpdateTransactionSubmitting(state, { payload }) {
       state.updateTransactionData.isSubmitting = payload;
     },
-    setUpdateTransactionData(state, {payload}) {
-      state.updateTransactionData = {...state.pendingTransferData, ...payload};
+    setUpdateTransactionData(state, { payload }) {
+      state.updateTransactionData = { ...state.pendingTransferData, ...payload };
     },
     resetUpdateTransactionData(state) {
       state.updateTransactionData = initialUpdateTransactionData;

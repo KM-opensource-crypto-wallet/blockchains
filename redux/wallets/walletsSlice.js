@@ -2,14 +2,14 @@ import {
   getCoin,
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import {
   clearSelectedUTXOs,
   setCurrentTransferSubmitting,
   setPendingTransferSubmitting,
   setUpdateTransactionSubmitting,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
-import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import { getPrice } from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
@@ -22,7 +22,8 @@ import {
   fetchBatchTransactionBalances,
   getCoinSnapshot,
   getNativeCoin,
-} from 'dok-wallet-blockchain-networks/service/wallet.service';
+  // } from 'dok-wallet-blockchain-networks/service/wallet.service';
+} from '../../../dok-wallet-blockchain-networks/service/wallet.service';
 import {
   _currentWalletIndexSelector,
   getCurrentWalletIndex,
@@ -37,7 +38,7 @@ import {
   selectCurrentWallet,
   selectUserCoins,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
-import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
+import { getTransferData } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {
   calculatePrice,
   checkValidChainForWalletImportWithPrivateKey,
@@ -62,23 +63,23 @@ import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import { config } from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
   addDeriveAddresses,
   generateMnemonics,
 } from 'myWallet/wallet.service';
-import {APP_VERSION} from 'utils/common';
-import {showToast} from 'utils/toast';
-import {MainNavigation} from 'utils/navigation';
-import {v4} from 'uuid';
+import { APP_VERSION } from 'utils/common';
+import { showToast } from 'utils/toast';
+import { MainNavigation } from 'utils/navigation';
+import { v4 } from 'uuid';
 import {
   setIsAddingGroup,
   setIsRemovingGroup,
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
-import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
-import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
+import { getIsMaxWalletLimitReached } from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
+import { clearTransactionsForSelectedChain } from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -139,12 +140,15 @@ const refreshCoinData = (dispatch, currentCoin) => {
 export const createWallet = createAsyncThunk(
   'wallets/createWallet',
   async (walletData, thunkAPI) => {
+    console.log("==============INSIDE CREATE WALLET THUUNK===============")
     //const {walletName, phrase} = walletData;
     const currentState = thunkAPI.getState();
-    const allWalletsName = selectAllWalletName(currentState);
-    const allWallets = selectAllWallets(currentState);
-    const currentWallet = selectCurrentWallet(currentState);
-    const isMaxWalletLimitReached = getIsMaxWalletLimitReached(currentState);
+    const { allWalletsName, allWallets, currentWallet, isMaxWalletLimitReached } = {
+      allWalletsName: selectAllWalletName(currentState),
+      allWallets: selectAllWallets(currentState),
+      currentWallet: selectCurrentWallet(currentState),
+      isMaxWalletLimitReached: getIsMaxWalletLimitReached(currentState),
+    };
     if (isMaxWalletLimitReached) {
       const message =
         'You have reached the maximum wallet limit, For more details ask contact support';
@@ -167,6 +171,7 @@ export const createWallet = createAsyncThunk(
     let chain_name = null;
     if (!walletData.phrase && !walletData?.privateKey) {
       const nativeWallet = await generateMnemonics();
+      console.log("nativeWallet=>", nativeWallet)
       walletData.phrase = nativeWallet.mnemonic.phrase;
     }
     let coins;
@@ -182,7 +187,7 @@ export const createWallet = createAsyncThunk(
         }
         const createdCoin = await createCoin(
           walletData,
-          {...newCoin, isInWallet: true},
+          { ...newCoin, isInWallet: true },
           currentState,
         );
         if (createdCoin?.address && createdCoin?.privateKey) {
@@ -407,7 +412,7 @@ export const refreshCoins = createAsyncThunk(
           );
         }),
       );
-      return {coinData: resp, currentWalletIndex};
+      return { coinData: resp, currentWalletIndex };
     } catch (e) {
       console.error('Error in refreshCoins', e);
       return thunkAPI.rejectWithValue('Something went wrong refreshCoins');
@@ -459,7 +464,7 @@ export const refreshCurrentCoin = createAsyncThunk(
         false,
       );
     }
-    return {updatedCurrentCoin, updatedNativeCoin};
+    return { updatedCurrentCoin, updatedNativeCoin };
   },
 );
 
@@ -475,7 +480,7 @@ export const syncCoinsWithServer = createAsyncThunk(
         autoHide: false,
       });
       const currentState = thunkAPI.getState();
-      const resp = await fetchCurrenciesAPI({limit: 200, status: true});
+      const resp = await fetchCurrenciesAPI({ limit: 200, status: true });
       const newCoins = Array?.isArray(resp?.data?.data) ? resp?.data?.data : [];
       const allWallets = selectAllWallets(currentState) || [];
       const finalAllCoins = [];
@@ -502,7 +507,7 @@ export const syncCoinsWithServer = createAsyncThunk(
           const item = needToAddNewCoins[i];
           const createdCoins = await createCoin(
             currentWallet,
-            {...item, isInWallet: true},
+            { ...item, isInWallet: true },
             currentState,
           );
           if (createdCoins) {
@@ -517,7 +522,7 @@ export const syncCoinsWithServer = createAsyncThunk(
         message: 'New coins are added to the wallets.',
         toastId,
       });
-      return {allNewCoins: finalAllCoins};
+      return { allNewCoins: finalAllCoins };
     } catch (e) {
       console.error('Error in sync', e);
       showToast({
@@ -538,7 +543,7 @@ const generateCoinsAndDeriveAddress = async (
 ) => {
   let newCoin = await createCoin(
     currentWallet,
-    {...coin, isInWallet: true},
+    { ...coin, isInWallet: true },
     currentState,
   );
   newCoin = addExistingDeriveAddress(currentWallet, newCoin);
@@ -603,7 +608,7 @@ export const addCoinGroup = createAsyncThunk(
         }
       }
       dispatch(setIsRemovingGroup(payload?._id));
-      return {newCoins, existingCoins, currentWalletIndex};
+      return { newCoins, existingCoins, currentWalletIndex };
     } catch (e) {
       console.error('Error in add coins', e);
       showToast({
@@ -641,11 +646,11 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
       }
     }
     if (!isNew) {
-      return {newCoin: null, existingCoinId: payload?._id};
+      return { newCoin: null, existingCoinId: payload?._id };
     } else {
       let newCoin = await createCoin(
         currentWallet,
-        {...payload, isInWallet: true},
+        { ...payload, isInWallet: true },
         currentState,
       );
       newCoin = addExistingDeriveAddress(currentWallet, newCoin);
@@ -663,7 +668,7 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
           is_imported: currentWallet?.isBackedup,
         });
       }
-      return {newCoin, existingCoinId: null};
+      return { newCoin, existingCoinId: null };
     }
   },
 );
@@ -700,23 +705,23 @@ export const sendFunds = createAsyncThunk(
       //
       const res = txData?.isNFT
         ? await nativeCoin?.sendNFT({
-            to: txData.to,
-            from: txData.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
-            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-            transactionFee: transferData?.transactionFee,
-            contract_type: txData?.contract_type,
-            tokenId: txData?.tokenId,
-            tokenAmount: txData.tokenAmount,
-            contractAddress: txData?.contractAddress,
-            mint: txData?.mint,
-            memo: txData?.memo,
-          })
+          to: txData.to,
+          from: txData.from,
+          amount: txData.amount,
+          gasFee: transferData?.gasFee,
+          estimateGas: transferData?.estimateGas,
+          nonce: transferData?.nonce,
+          maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+          transactionFee: transferData?.transactionFee,
+          contract_type: txData?.contract_type,
+          tokenId: txData?.tokenId,
+          tokenAmount: txData.tokenAmount,
+          contractAddress: txData?.contractAddress,
+          mint: txData?.mint,
+          memo: txData?.memo,
+        })
         : txData?.isCreateStaking
-        ? await nativeCoin.createStaking({
+          ? await nativeCoin.createStaking({
             from: txData?.from,
             amount: txData.amount,
             gasFee: transferData?.gasFee,
@@ -730,83 +735,83 @@ export const sendFunds = createAsyncThunk(
             resourceType: txData?.resourceType,
             memo: txData?.memo,
           })
-        : txData?.isCreateVote
-        ? await nativeCoin.createStakingWithValidator({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            numberOfStakeAccount: txData?.numberOfStakeAccount,
-            stakingBalance: txData?.stakingBalance,
-            resourceType: txData?.resourceType,
-            selectedVotes: txData?.selectedVotes,
-            memo: txData?.memo,
-          })
-        : txData?.isDeactivateStaking
-        ? await nativeCoin.deactivateStaking({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            transactionFee: transferData?.transactionFee,
-            nonce: transferData?.nonce,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            resourceType: txData?.resourceType,
-            memo: txData?.memo,
-          })
-        : txData?.isWithdrawStaking
-        ? await nativeCoin.withdrawStaking({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            memo: txData?.memo,
-          })
-        : txData?.isStakingRewards
-        ? await nativeCoin.stakingRewards({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            memo: txData?.memo,
-          })
-        : txData?.isBatchTransaction
-        ? await nativeCoin.sendBatchTransaction({
-            calls: txData.calls,
-            gasFee: transferData?.gasFee,
-            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-            estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-          })
-        : await nativeCoin.send({
-            to: txData.to,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-            isMax: transferData?.isMax,
-            estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            memo: txData?.memo,
-            selectedUTXOs: transferData?.selectedUTXOs,
-          });
+          : txData?.isCreateVote
+            ? await nativeCoin.createStakingWithValidator({
+              from: txData?.from,
+              amount: txData.amount,
+              gasFee: transferData?.gasFee,
+              estimateGas: transferData?.estimateGas,
+              nonce: transferData?.nonce,
+              transactionFee: transferData?.transactionFee,
+              phrase: txData?.phrase,
+              validatorPubKey: txData?.validatorPubKey,
+              numberOfStakeAccount: txData?.numberOfStakeAccount,
+              stakingBalance: txData?.stakingBalance,
+              resourceType: txData?.resourceType,
+              selectedVotes: txData?.selectedVotes,
+              memo: txData?.memo,
+            })
+            : txData?.isDeactivateStaking
+              ? await nativeCoin.deactivateStaking({
+                from: txData?.from,
+                amount: txData.amount,
+                gasFee: transferData?.gasFee,
+                estimateGas: transferData?.estimateGas,
+                transactionFee: transferData?.transactionFee,
+                nonce: transferData?.nonce,
+                phrase: txData?.phrase,
+                validatorPubKey: txData?.validatorPubKey,
+                stakingAddress: txData?.stakingAddress,
+                resourceType: txData?.resourceType,
+                memo: txData?.memo,
+              })
+              : txData?.isWithdrawStaking
+                ? await nativeCoin.withdrawStaking({
+                  from: txData?.from,
+                  amount: txData.amount,
+                  gasFee: transferData?.gasFee,
+                  estimateGas: transferData?.estimateGas,
+                  transactionFee: transferData?.transactionFee,
+                  phrase: txData?.phrase,
+                  validatorPubKey: txData?.validatorPubKey,
+                  stakingAddress: txData?.stakingAddress,
+                  memo: txData?.memo,
+                })
+                : txData?.isStakingRewards
+                  ? await nativeCoin.stakingRewards({
+                    from: txData?.from,
+                    amount: txData.amount,
+                    gasFee: transferData?.gasFee,
+                    estimateGas: transferData?.estimateGas,
+                    nonce: transferData?.nonce,
+                    transactionFee: transferData?.transactionFee,
+                    phrase: txData?.phrase,
+                    validatorPubKey: txData?.validatorPubKey,
+                    stakingAddress: txData?.stakingAddress,
+                    memo: txData?.memo,
+                  })
+                  : txData?.isBatchTransaction
+                    ? await nativeCoin.sendBatchTransaction({
+                      calls: txData.calls,
+                      gasFee: transferData?.gasFee,
+                      maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+                      estimateGas: transferData?.estimateGas,
+                      nonce: transferData?.nonce,
+                      transactionFee: transferData?.transactionFee,
+                    })
+                    : await nativeCoin.send({
+                      to: txData.to,
+                      amount: txData.amount,
+                      gasFee: transferData?.gasFee,
+                      maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+                      isMax: transferData?.isMax,
+                      estimateGas: transferData?.estimateGas,
+                      nonce: transferData?.nonce,
+                      transactionFee: transferData?.transactionFee,
+                      phrase: txData?.phrase,
+                      memo: txData?.memo,
+                      selectedUTXOs: transferData?.selectedUTXOs,
+                    });
       let confirmTransaction;
 
       if (res) {
@@ -842,12 +847,10 @@ export const sendFunds = createAsyncThunk(
 
         toastId = showToast({
           type: 'progressToast',
-          title: `${
-            txData?.isExchange ? 'Exchange ' : ''
-          }Transaction In-progress`,
-          message: `Your ${
-            txData?.isExchange ? 'exchange' : ''
-          } transaction submitted successfully. Once the transaction completed you will be notified.`,
+          title: `${txData?.isExchange ? 'Exchange ' : ''
+            }Transaction In-progress`,
+          message: `Your ${txData?.isExchange ? 'exchange' : ''
+            } transaction submitted successfully. Once the transaction completed you will be notified.`,
           autoHide: false,
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -859,7 +862,7 @@ export const sendFunds = createAsyncThunk(
           thunkAPI.dispatch(
             addPendingTransactions({
               key,
-              value: {hash: res.hash, date: new Date().toISOString()},
+              value: { hash: res.hash, date: new Date().toISOString() },
             }),
           );
         }
@@ -880,22 +883,21 @@ export const sendFunds = createAsyncThunk(
           showToast({
             type: 'successToast',
             title: 'Transaction Successful',
-            message: `Your transaction completed successfully.${
-              txData?.isBatchTransaction
-                ? 'Batch transactions are completed successfully.'
-                : txData?.isCreateStaking
+            message: `Your transaction completed successfully.${txData?.isBatchTransaction
+              ? 'Batch transactions are completed successfully.'
+              : txData?.isCreateStaking
                 ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
                 : txData?.isNFT
-                ? 'You just sent NFT'
-                : txData?.isCreateVote
-                ? 'Your Votes is submitted successfully'
-                : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
-            }`,
+                  ? 'You just sent NFT'
+                  : txData?.isCreateVote
+                    ? 'Your Votes is submitted successfully'
+                    : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
+              }`,
             toastId,
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
-        return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
+        return { tx_hash, status: confirmTransaction === 'pending' ? 2 : 3 };
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -905,7 +907,7 @@ export const sendFunds = createAsyncThunk(
           autoHide: true,
           toastId,
         });
-        return {tx_hash: '', status: 1};
+        return { tx_hash: '', status: 1 };
       }
     } catch (e) {
       console.error('Error in send fund', e);
@@ -1034,7 +1036,7 @@ export const sendPendingTransactions = createAsyncThunk(
             thunkAPI.dispatch(
               addPendingTransactions({
                 key,
-                value: {hash: res.hash, date: new Date().toISOString()},
+                value: { hash: res.hash, date: new Date().toISOString() },
               }),
             );
           }
@@ -1122,7 +1124,7 @@ export const fetchNft = createAsyncThunk(
   async (payload, thunkAPI) => {
     const currentState = thunkAPI.getState();
     const currentWalletIndex = _currentWalletIndexSelector(currentState);
-    const {selectedNftChain, cursor: previousCursor} = payload;
+    const { selectedNftChain, cursor: previousCursor } = payload;
     const dispatch = thunkAPI.dispatch;
     try {
       if (!NFT_SUPPORTED_CHAIN.includes(selectedNftChain)) {
@@ -1132,7 +1134,7 @@ export const fetchNft = createAsyncThunk(
       const currentWallet = selectCurrentWallet(currentState);
       const previousNftData = getSelectedNftData(currentState);
       dispatch(
-        setNftLoading({selectedNftChain, isLoading: true, currentWalletIndex}),
+        setNftLoading({ selectedNftChain, isLoading: true, currentWalletIndex }),
       );
       const our_chain = MORALIS_CHAIN_TO_CHAIN[selectedNftChain];
       const foundCoin = currentWallet?.coins?.find(
@@ -1156,19 +1158,19 @@ export const fetchNft = createAsyncThunk(
         isSolana && Array.isArray(resp)
           ? resp
           : Array.isArray(resp?.result)
-          ? resp?.result
-          : [];
+            ? resp?.result
+            : [];
       const cursor = resp?.cursor;
       if (previousCursor) {
         data = [...previousNftData, ...data];
       }
       dispatch(
-        setNft({currentWalletIndex, data, selectedNftChain, available: cursor}),
+        setNft({ currentWalletIndex, data, selectedNftChain, available: cursor }),
       );
     } catch (e) {
       console.error('Error in fetch nft', e);
       dispatch(
-        setNftLoading({selectedNftChain, isLoading: false, currentWalletIndex}),
+        setNftLoading({ selectedNftChain, isLoading: false, currentWalletIndex }),
       );
     }
   },
@@ -1185,7 +1187,7 @@ export const addEVMAndTronDeriveAddresses = createAsyncThunk(
       const currentWalletIndex =
         payload?.index ?? _currentWalletIndexSelector(currentState);
       dispatch(
-        updateIsEVMAddressesAdded({index: currentWalletIndex, value: true}),
+        updateIsEVMAddressesAdded({ index: currentWalletIndex, value: true }),
       );
       const wallet = payload?.wallet || selectCurrentWallet(currentState);
       toastId = showToast({
@@ -1360,7 +1362,7 @@ export const searchCoinFromCurrency = createAsyncThunk(
       throw new Error('currency not found in the selected wallet');
     }
     dispatch(setCurrentCoin(foundCoin?._id));
-    dispatch(refreshCurrentCoin({currentCoin: foundCoin}));
+    dispatch(refreshCurrentCoin({ currentCoin: foundCoin }));
   },
 );
 
@@ -1377,7 +1379,7 @@ export const walletsSlice = createSlice({
         currentWallet.coins = action?.payload;
       }
     },
-    setWalletPosition: (state, {payload}) => {
+    setWalletPosition: (state, { payload }) => {
       const index = validateNumber(payload?.index);
       const isMoveUp = payload?.isMoveUp;
       const previousAllWallets = state.allWallets;
@@ -1415,7 +1417,7 @@ export const walletsSlice = createSlice({
       }
       state.currentWalletIndex = previousCurrentWalletIndex;
     },
-    rearrangeWallet: (state, {payload}) => {
+    rearrangeWallet: (state, { payload }) => {
       const newWallets = payload?.allWallets;
       const newCurrentWalletIndex = validateNumber(payload?.currentWalletIndex);
       const previousAllWallets = state.allWallets;
@@ -1512,19 +1514,19 @@ export const walletsSlice = createSlice({
       currentWallet.coins = allCoins.filter(item => item?._id !== coinId);
       state.allWallets[currentWalletIndex] = currentWallet;
     },
-    setWalletConnect(state, {payload}) {
+    setWalletConnect(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       const previousSession = currentWallet?.session || {};
-      currentWallet.session = {...previousSession, ...payload};
+      currentWallet.session = { ...previousSession, ...payload };
     },
-    setWalletConnectWalletData(state, {payload}) {
+    setWalletConnectWalletData(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       const previousSession = currentWallet?.walletData || {};
-      currentWallet.walletData = {...previousSession, ...payload};
+      currentWallet.walletData = { ...previousSession, ...payload };
     },
-    setNftSelectedChain(state, {payload}) {
+    setNftSelectedChain(state, { payload }) {
       if (NFT_SUPPORTED_CHAIN.includes(payload)) {
         const allWallet = state.allWallets;
         const currentWalletIndex = state.currentWalletIndex;
@@ -1543,15 +1545,15 @@ export const walletsSlice = createSlice({
         selectedNft: null,
       }));
     },
-    setNftLoading(state, {payload}) {
-      const {currentWalletIndex, isLoading, selectedNftChain} = payload;
+    setNftLoading(state, { payload }) {
+      const { currentWalletIndex, isLoading, selectedNftChain } = payload;
       const allWallet = state.allWallets;
       const currentWallet = allWallet[currentWalletIndex];
       const nft = currentWallet.nft;
-      currentWallet.nft = {...nft, [`${selectedNftChain}_loading`]: isLoading};
+      currentWallet.nft = { ...nft, [`${selectedNftChain}_loading`]: isLoading };
     },
-    setNft(state, {payload}) {
-      const {currentWalletIndex, data, selectedNftChain, available} = payload;
+    setNft(state, { payload }) {
+      const { currentWalletIndex, data, selectedNftChain, available } = payload;
       if (Array.isArray(data)) {
         const allWallet = state.allWallets;
         const currentWallet = allWallet[currentWalletIndex];
@@ -1564,7 +1566,7 @@ export const walletsSlice = createSlice({
         };
       }
     },
-    setSelectedNft(state, {payload}) {
+    setSelectedNft(state, { payload }) {
       const allWallet = state.allWallets;
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = allWallet[currentWalletIndex];
@@ -1574,14 +1576,14 @@ export const walletsSlice = createSlice({
       const foundCoin = allCoins.find(
         item => item?.chain_name === ownChain && item?.type === 'coin',
       );
-      currentWallet.selectedNft = {...payload, coin: foundCoin};
+      currentWallet.selectedNft = { ...payload, coin: foundCoin };
     },
-    removeWalletConnectSession(state, {payload}) {
+    removeWalletConnectSession(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallets = state.allWallets[currentWalletIndex];
-      const tempSession = {...currentWallets.session};
+      const tempSession = { ...currentWallets.session };
       delete tempSession[payload];
-      const tempWalletData = {...currentWallets.walletData};
+      const tempWalletData = { ...currentWallets.walletData };
       delete tempWalletData[payload];
       currentWallets.session = tempSession;
       currentWallets.walletData = tempWalletData;
@@ -1592,12 +1594,12 @@ export const walletsSlice = createSlice({
       currentWallets.session = {};
       currentWallets.walletData = {};
     },
-    setIsAddMoreAddressPopupHidden(state, {payload}) {
+    setIsAddMoreAddressPopupHidden(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       currentWallet.isAddMoreAddressPopupHidden = payload;
     },
-    setIsAdding50MoreAddresses(state, {payload}) {
+    setIsAdding50MoreAddresses(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       currentWallet.isAdding50MoreAddresses = payload;
@@ -1609,7 +1611,7 @@ export const walletsSlice = createSlice({
         isAdding50MoreAddresses: false,
       }));
     },
-    setSelectedDeriveAddress(state, {payload}) {
+    setSelectedDeriveAddress(state, { payload }) {
       if (!payload?.chain_name) {
         console.warn('chain_name is required');
         return;
@@ -1618,7 +1620,7 @@ export const walletsSlice = createSlice({
         console.warn('address is required');
         return;
       }
-      const {chain_name, address} = payload;
+      const { chain_name, address } = payload;
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       currentWallet.coins = currentWallet?.coins.map(item => {
@@ -1638,7 +1640,7 @@ export const walletsSlice = createSlice({
         return item;
       });
     },
-    updateCurrentCoin(state, {payload}) {
+    updateCurrentCoin(state, { payload }) {
       const currentWalletIndex = state.currentWalletIndex;
       const currentWallet = state.allWallets[currentWalletIndex];
       const selectedCoinId = currentWallet?.selectedCoin;
@@ -1652,7 +1654,7 @@ export const walletsSlice = createSlice({
         return item;
       });
     },
-    deleteDeriveAddressInCurrentCoin(state, {payload}) {
+    deleteDeriveAddressInCurrentCoin(state, { payload }) {
       if (!payload?.address) {
         console.warn('address payload is required for delete derive address');
         return;
@@ -1693,7 +1695,7 @@ export const walletsSlice = createSlice({
       const currentWallet = allWallets[updateWalletIndex];
       currentWallet.isEVMAddressesAdded = value;
     },
-    rearrangeCurrentWalletCoins: (state, {payload}) => {
+    rearrangeCurrentWalletCoins: (state, { payload }) => {
       const allWallets = state.allWallets;
       const currentWallet = allWallets[state.currentWalletIndex] || {};
       const rearrangeCoins = payload?.rearrangeCoins;
@@ -1703,7 +1705,7 @@ export const walletsSlice = createSlice({
         console.log('rearrangeCoins is not valid array');
       }
     },
-    setCurrentWalletCoinsPosition: (state, {payload}) => {
+    setCurrentWalletCoinsPosition: (state, { payload }) => {
       const index = validateNumber(payload?.index);
       const isMoveUp = payload?.isMoveUp;
       const allWallets = state.allWallets;
@@ -1730,7 +1732,7 @@ export const walletsSlice = createSlice({
         currentWallet.coins = updateArr;
       }
     },
-    togglePrivacyMode: (state, {payload}) => {
+    togglePrivacyMode: (state, { payload }) => {
       const walletIndex = payload?.walletIndex;
       const allWallets = state.allWallets;
       const currentWallet = allWallets[walletIndex];
@@ -1740,7 +1742,7 @@ export const walletsSlice = createSlice({
         console.warn('No wallet found for privacy mode');
       }
     },
-    resetCoinsToDefaultAddressForPrivacyMode: (state, {payload}) => {
+    resetCoinsToDefaultAddressForPrivacyMode: (state, { payload }) => {
       const allWallets = Array.isArray(state.allWallets)
         ? [...state.allWallets]
         : [];
@@ -1847,7 +1849,7 @@ export const walletsSlice = createSlice({
     },
   },
   extraReducers: builder => {
-    builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
+    builder.addCase(refreshCoins.fulfilled, (state, { payload }) => {
       const coinData = payload.coinData;
       const currentWalletIndex = payload.currentWalletIndex;
       if (Array.isArray(coinData) && !isNaN(Number(currentWalletIndex))) {
@@ -1856,7 +1858,7 @@ export const walletsSlice = createSlice({
         currentWallets.coins = coinData;
       }
     });
-    builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {
+    builder.addCase(syncCoinsWithServer.fulfilled, (state, { payload }) => {
       const allNewCoins = payload?.allNewCoins;
       const tempAllWallets = state.allWallets || [];
       const allWallets = Array.isArray(tempAllWallets)
@@ -1875,7 +1877,7 @@ export const walletsSlice = createSlice({
         state.allWallets = allWallets;
       }
     });
-    builder.addCase(refreshCurrentCoin.fulfilled, (state, {payload}) => {
+    builder.addCase(refreshCurrentCoin.fulfilled, (state, { payload }) => {
       if (payload?.updatedCurrentCoin) {
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
@@ -1901,7 +1903,7 @@ export const walletsSlice = createSlice({
         }
       }
     });
-    builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {
+    builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, { payload }) => {
       const newCoin = payload.newCoin;
       const existingCoinId = payload.existingCoinId;
       const allWallets = state.allWallets;
@@ -1913,13 +1915,13 @@ export const walletsSlice = createSlice({
       } else if (existingCoinId) {
         currentWallet.coins = previousCoins.map(item => {
           if (item._id === existingCoinId) {
-            return {...item, isInWallet: !item?.isInWallet};
+            return { ...item, isInWallet: !item?.isInWallet };
           }
           return item;
         });
       }
     });
-    builder.addCase(addCoinGroup.fulfilled, (state, {payload}) => {
+    builder.addCase(addCoinGroup.fulfilled, (state, { payload }) => {
       const newCoins = Array.isArray(payload.newCoins) ? payload.newCoins : [];
       const existingCoins = Array.isArray(payload.existingCoins)
         ? payload.existingCoins
@@ -1939,7 +1941,7 @@ export const walletsSlice = createSlice({
               return currentKey === tempKey;
             });
             if (foundCoin) {
-              return {...item, ...foundCoin, isInWallet: true};
+              return { ...item, ...foundCoin, isInWallet: true };
             }
             return item;
           }),
@@ -1947,14 +1949,14 @@ export const walletsSlice = createSlice({
         ]);
       }
     });
-    builder.addCase(addToken.fulfilled, (state, {payload}) => {
+    builder.addCase(addToken.fulfilled, (state, { payload }) => {
       if (payload) {
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
       }
     });
-    builder.addCase(createWallet.fulfilled, (state, {payload}) => {
+    builder.addCase(createWallet.fulfilled, (state, { payload }) => {
       const newStoreWallet = payload?.newStoreWallet;
       const isFromImportWallet = payload?.isFromImportWallet;
       const privateKey = payload?.privateKey;
@@ -1983,7 +1985,7 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(
       addEVMAndTronDeriveAddresses.fulfilled,
-      (state, {payload}) => {
+      (state, { payload }) => {
         const currentWalletIndex = payload?.currentWalletIndex;
         const tronDeriveAddresses = payload?.tronDeriveAddresses;
         const evmDeriveAddresses = payload?.evmDeriveAddresses;
@@ -2034,7 +2036,7 @@ export const walletsSlice = createSlice({
     );
     builder.addCase(
       add50AddressesOnCurrentCoin.fulfilled,
-      (state, {payload}) => {
+      (state, { payload }) => {
         const currentWalletIndex = payload?.currentWalletIndex;
         const chainName = payload?.chain_name;
         const deriveAddresses = payload?.deriveAddresses;
@@ -2067,7 +2069,7 @@ export const walletsSlice = createSlice({
         }
       },
     );
-    builder.addCase(addCustomDeriveAddress.fulfilled, (state, {payload}) => {
+    builder.addCase(addCustomDeriveAddress.fulfilled, (state, { payload }) => {
       const currentWalletIndex = payload?.currentWalletIndex;
       const chain_name = payload?.chain_name;
       const account = payload?.account;
@@ -2102,7 +2104,7 @@ export const walletsSlice = createSlice({
                 subItem?.derivePath === account?.derivePath,
             );
             if (!foundAccount) {
-              deriveAddresses.push({...account, isCustom: true});
+              deriveAddresses.push({ ...account, isCustom: true });
             }
             return {
               ...item,
