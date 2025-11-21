@@ -1,13 +1,13 @@
-import { getCoin } from 'dok-wallet-blockchain-networks/cryptoChain';
-import { getTransferDataEstimateFee } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
-import { getPrice } from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import { getCoin } from '../cryptoChain';
+import { getTransferDataEstimateFee } from '../redux/currentTransfer/currentTransferSelector';
+import { getPrice } from '../service/coinMarketCap';
 import {
   getPendingTransactions,
   getPendingTransactionsWithKey,
   selectCurrentCoin,
   selectCurrentWallet,
-} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
-import { selectAllActiveCurrencies } from 'dok-wallet-blockchain-networks/redux/currency/currencySelectors';
+} from '../redux/wallets/walletsSelector';
+import { selectAllActiveCurrencies } from '../redux/currency/currencySelectors';
 import {
   calculatePrice,
   createBalanceKey,
@@ -18,8 +18,9 @@ import {
   isStakingChain,
   parseBalance,
   validateSupportedChain,
-} from 'dok-wallet-blockchain-networks/helper';
+} from '..//helper';
 import BigNumber from 'bignumber.js';
+// import { APP_VERSION } from 'utils/common';
 import { APP_VERSION } from '../../src/utils/common';
 
 export const getCoinSnapshot = async (

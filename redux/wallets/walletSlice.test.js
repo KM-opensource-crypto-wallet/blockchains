@@ -8,13 +8,13 @@ import {
   countTotalAssets,
   selectAllWalletName,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
-import { getCoin } from 'dok-wallet-blockchain-networks/cryptoChain';
-import { generateMnemonics as newWallet } from '../../service/wallet.service';
+import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {generateMnemonics as newWallet} from 'myWallet/wallet.service';
 import thunk from 'redux-thunk';
 import configureMockStore from 'redux-mock-store';
-import * as dataModule from '../data/currency';
-import { combineReducers, configureStore } from '@reduxjs/toolkit';
-import { settingsSlice } from 'dok-wallet-blockchain-networks/redux/settings/settingsSlice';
+import * as dataModule from 'data/currency';
+import {combineReducers, configureStore} from '@reduxjs/toolkit';
+import {settingsSlice} from 'dok-wallet-blockchain-networks/redux/settings/settingsSlice';
 import walletsSlice, {
   addToken,
   createWallet,
@@ -32,7 +32,7 @@ jest.mock('../../crypto', () => ({
 }));
 
 // Mock the module
-jest.mock('../data/currency');
+jest.mock('data/currency');
 
 describe('walletsSlice tesets', () => {
   describe('wallets selectors', () => {
@@ -185,16 +185,16 @@ describe('walletsSlice tesets', () => {
         {
           id: 'wallet1',
           coins: [
-            { _id: 'a', isInWallet: true, isSupported: true, page: 'a' },
-            { _id: 'b', isInWallet: false, isSupported: true, page: 'b' },
+            {_id: 'a', isInWallet: true, isSupported: true, page: 'a'},
+            {_id: 'b', isInWallet: false, isSupported: true, page: 'b'},
           ],
           selectedCoin: 'a',
         },
         {
           id: 'wallet2',
           coins: [
-            { _id: 'a', isInWallet: true, isSupported: true, page: 'a' },
-            { _id: 'b', isInWallet: false, isSupported: true, page: 'b' },
+            {_id: 'a', isInWallet: true, isSupported: true, page: 'a'},
+            {_id: 'b', isInWallet: false, isSupported: true, page: 'b'},
           ],
           selectedCoin: 'a',
         },
@@ -204,21 +204,21 @@ describe('walletsSlice tesets', () => {
     const walletsReducer = walletsSlice.reducer;
 
     it('should update wallet name', () => {
-      let state = { ...initialState };
-      const action = updateWalletName({ index: 0, walletName: 'new name' });
+      let state = {...initialState};
+      const action = updateWalletName({index: 0, walletName: 'new name'});
       const nextState = walletsReducer(state, action);
       expect(nextState.allWallets[0].walletName).toEqual('new name');
     });
 
     it('should set the current wallet by index.js', () => {
-      let state = { ...initialState };
+      let state = {...initialState};
       const action = setCurrentWalletIndex(1);
       const nextState = walletsReducer(state, action);
       expect(nextState.currentWalletIndex).toEqual(1);
     });
 
     it('should throw exception if passing non number index.js', () => {
-      let state = { ...initialState };
+      let state = {...initialState};
       const action = setCurrentWalletIndex('a');
       // const nextState = walletsReducer(state, action);
       expect(() => walletsReducer(state, action)).toThrow(
@@ -227,7 +227,7 @@ describe('walletsSlice tesets', () => {
     });
 
     it('should throw exception if passing index.js of non existing wallet', () => {
-      let state = { ...initialState };
+      let state = {...initialState};
       const action = setCurrentWalletIndex(25);
       // const nextState = walletsReducer(state, action);
       expect(() => walletsReducer(state, action)).toThrow(
@@ -237,8 +237,8 @@ describe('walletsSlice tesets', () => {
 
     describe('toggleCoinInWallet', () => {
       it('toggleCoinInWallet toggles the isInWallet property of a coin', async () => {
-        const state = { ...initialState };
-        const action = await addOrToggleCoinInWallet({ _id: 'a' });
+        const state = {...initialState};
+        const action = await addOrToggleCoinInWallet({_id: 'a'});
         const nextState = walletsSlice.reducer(state, action);
         console.log('next state', nextState);
         const foundCoin = nextState.allWallets[0].coins.find(
@@ -247,10 +247,10 @@ describe('walletsSlice tesets', () => {
         expect(foundCoin?.isInWallet).toBe(false);
       });
       it('toggleCoinInWallet toggles the isInWallet property of a coin back', () => {
-        const state = { ...initialState };
-        let action = addOrToggleCoinInWallet({ _id: 'a' });
+        const state = {...initialState};
+        let action = addOrToggleCoinInWallet({_id: 'a'});
         let nextState = walletsReducer(state, action);
-        action = addOrToggleCoinInWallet({ _id: 'a' });
+        action = addOrToggleCoinInWallet({_id: 'a'});
         nextState = walletsSlice.reducer(nextState, action);
         const foundCoin = nextState.allWallets[0].coins.find(
           item => item._id === 'a',
@@ -261,14 +261,14 @@ describe('walletsSlice tesets', () => {
 
     describe('setCurrentCoin', () => {
       it('setCurrentCoin sets the current coin of the current wallet', () => {
-        const state = { ...initialState };
+        const state = {...initialState};
         const action = setCurrentCoin('a');
         const nextState = walletsReducer(state, action);
         expect(nextState.allWallets[0].selectedCoin).toEqual('a');
       });
 
       it('setCurrentCoin can set the current coin back', () => {
-        const state = { ...initialState };
+        const state = {...initialState};
         let action = setCurrentCoin('b');
         let nextState = walletsReducer(state, action);
         action = setCurrentCoin('a');
@@ -277,7 +277,7 @@ describe('walletsSlice tesets', () => {
       });
 
       it('should throw exception if called without page', () => {
-        const state = { ...initialState };
+        const state = {...initialState};
         let action = setCurrentCoin();
         expect(() => walletsReducer(state, action)).toThrowError(
           'Coin id does not exist',
@@ -330,7 +330,7 @@ describe('walletsSlice tesets', () => {
       };
 
       // Mock the new wallet and coins
-      const mockWallet = { mnemonic: { phrase: 'test phrase' } };
+      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
       const mockCoins = [
         {
           chain_name: 'MockCoin',
@@ -377,7 +377,7 @@ describe('walletsSlice tesets', () => {
       const store = mockStore(initialState);
 
       // Dispatch the thunk
-      await store.dispatch(createWallet({ walletName: 'Test Wallet' }));
+      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
 
       // Get the actions dispatched by the store
       const actions = store.getActions();
@@ -449,7 +449,7 @@ describe('walletsSlice tesets', () => {
       };
 
       // Mock the new wallet and coins
-      const mockWallet = { mnemonic: { phrase: 'test phrase' } };
+      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
       const mockCoins = [
         {
           page: 'MockCoin',
@@ -510,9 +510,9 @@ describe('walletsSlice tesets', () => {
       });
 
       // Dispatch the thunk
-      await store.dispatch(createWallet({ walletName: 'Test Wallet' }));
+      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
 
-      await store.dispatch(createWallet({ walletName: 'Test Wallet' }));
+      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
       const state = store.getState();
       const wallets = state.wallets.allWallets;
       expect(wallets[1].walletName).toEqual('Wallet 2');
@@ -531,7 +531,7 @@ describe('walletsSlice tesets', () => {
       };
 
       // Mock the new wallet and coins
-      const mockWallet = { mnemonic: { phrase: 'test phrase' } };
+      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
       const mockCoins = [
         {
           page: 'MockCoin',
@@ -592,7 +592,7 @@ describe('walletsSlice tesets', () => {
       });
 
       // Dispatch the thunk
-      await store.dispatch(createWallet({ walletName: 'Test Wallet' }));
+      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
 
       await store.dispatch(
         createWallet({
@@ -644,8 +644,8 @@ describe('walletsSlice tesets', () => {
           allWallets: [
             {
               coins: [
-                { id: 'a', isInWallet: true, isSupported: true, page: 'A' },
-                { id: 'b', isInWallet: false, isSupported: true, page: 'B' },
+                {id: 'a', isInWallet: true, isSupported: true, page: 'A'},
+                {id: 'b', isInWallet: false, isSupported: true, page: 'B'},
               ],
               selectedCoinIndex: 0,
             },
@@ -685,7 +685,7 @@ describe('walletsSlice tesets', () => {
     });
     describe('wallets slice', () => {
       it('handles createWallet.fulfilled', async () => {
-        const store = configureStore({ reducer: walletsSlice.reducer });
+        const store = configureStore({reducer: walletsSlice.reducer});
 
         // Mock the payload
         const mockWallet = {
@@ -693,8 +693,8 @@ describe('walletsSlice tesets', () => {
             id: '1',
             walletName: 'Test Wallet',
             coins: [
-              { id: 1, name: 'Coin One', page: 'coin1' },
-              { id: 2, name: 'Coin Two', page: 'coin2' },
+              {id: 1, name: 'Coin One', page: 'coin1'},
+              {id: 2, name: 'Coin Two', page: 'coin2'},
             ],
           },
           replace: false,
@@ -722,14 +722,14 @@ describe('walletsSlice tesets', () => {
             {
               id: '1',
               coins: [
-                { id: 'a', isInWallet: true, isSupported: true },
-                { id: 'b', isInWallet: false, isSupported: true },
+                {id: 'a', isInWallet: true, isSupported: true},
+                {id: 'b', isInWallet: false, isSupported: true},
               ],
               selectedCoinIndex: 0,
             },
             {
               id: '2',
-              coins: [{ id: 'c', isInWallet: true, isSupported: true }],
+              coins: [{id: 'c', isInWallet: true, isSupported: true}],
               selectedCoinIndex: 0,
             },
           ],

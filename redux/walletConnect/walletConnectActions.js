@@ -2,9 +2,9 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { etherWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/etherWalletConnect';
 import { getWalletConnect } from 'dok-wallet-blockchain-networks/service/walletconnect';
 import { setWalletConnectTransactionSubmit } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
-import { tronWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
+// import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
 import { solanaWalletConnectTransaction } from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
-import { showToast } from '../../../src/utils/toast';
+import { showToast } from 'utils/toast';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -32,12 +32,12 @@ export const createWalletConnectTransaction = createAsyncThunk(
           signTypeData,
         );
       } else if (method?.includes('tron')) {
-        tx = await tronWalletConnectTransaction(
-          method,
-          transactionData,
-          privateKey,
-          signTypeData,
-        );
+        // tx = await tronWalletConnectTransaction(
+        //   method,
+        //   transactionData,
+        //   privateKey,
+        //   signTypeData,
+        // );
       } else {
         tx = await etherWalletConnectTransaction(
           method,

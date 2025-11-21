@@ -1,8 +1,7 @@
-import { config, IS_SANDBOX } from 'dok-wallet-blockchain-networks/config/config';
-import { ethers } from 'ethers';
-// import {createWallet} from '../../service/wallet.service';
-import { createWallet } from '../../service/wallet.service';
-import { HEDERA } from 'dok-wallet-blockchain-networks/service/Hedera';
+import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {ethers} from 'ethers';
+import {createWallet} from 'myWallet/wallet.service';
+import {HEDERA} from 'dok-wallet-blockchain-networks/service/Hedera';
 
 import {
   AccountCreateTransaction,
@@ -86,14 +85,14 @@ export const HederaChain = () => {
     };
   };
   return {
-    isValidAddress: ({ address }) => {
+    isValidAddress: ({address}) => {
       try {
         return !!AccountId.fromString(address).toString();
       } catch {
         return false;
       }
     },
-    isValidPrivateKey: async ({ privateKey }) => {
+    isValidPrivateKey: async ({privateKey}) => {
       try {
         const wallet = new ethers.Wallet(privateKey);
         return !!wallet?.address;
@@ -101,7 +100,7 @@ export const HederaChain = () => {
         return false;
       }
     },
-    getOrCreateHederaWallet: async ({ mnemonic }) => {
+    getOrCreateHederaWallet: async ({mnemonic}) => {
       try {
         const etherWallet = await createWallet('ethereum', mnemonic, false);
         return await createOrGetAccount(
@@ -113,7 +112,7 @@ export const HederaChain = () => {
         throw e;
       }
     },
-    createWalletByPrivateKey: async ({ privateKey }) => {
+    createWalletByPrivateKey: async ({privateKey}) => {
       try {
         const wallet = new ethers.Wallet(privateKey);
         return await createOrGetAccount(wallet?.address, wallet?.privateKey);
@@ -122,7 +121,7 @@ export const HederaChain = () => {
         throw e;
       }
     },
-    getBalance: async ({ address }) => {
+    getBalance: async ({address}) => {
       try {
         const resp = await HEDERA.getAccountInfo(address);
         return resp?.data?.balance?.balance?.toString() || '0';
@@ -150,7 +149,7 @@ export const HederaChain = () => {
       }
     },
 
-    getTransactions: async ({ address }) => {
+    getTransactions: async ({address}) => {
       try {
         const resp = await HEDERA?.getTransactions(address);
         if (Array.isArray(resp?.data)) {
@@ -209,7 +208,7 @@ export const HederaChain = () => {
       }
     },
 
-    send: async ({ to, from, amount, privateKey, memo, transactionFee }) => {
+    send: async ({to, from, amount, privateKey, memo, transactionFee}) => {
       try {
         const tempClient = getNewClient(from, privateKey);
         return await new TransferTransaction()
@@ -222,7 +221,7 @@ export const HederaChain = () => {
         console.error('Error in send hedera transaction', e);
       }
     },
-    waitForConfirmation: async ({ transaction }) => {
+    waitForConfirmation: async ({transaction}) => {
       try {
         const receipt = await transaction.getReceipt(client);
         if (receipt.status === Status.Success) {

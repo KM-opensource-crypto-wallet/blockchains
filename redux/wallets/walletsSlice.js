@@ -22,7 +22,8 @@ import {
   fetchBatchTransactionBalances,
   getCoinSnapshot,
   getNativeCoin,
-} from 'dok-wallet-blockchain-networks/service/wallet.service';
+  // } from 'dok-wallet-blockchain-networks/service/wallet.service';
+} from '../../../dok-wallet-blockchain-networks/service/wallet.service';
 import {
   _currentWalletIndexSelector,
   getCurrentWalletIndex,
@@ -68,10 +69,10 @@ import {
   addCustomDeriveAddressToWallet,
   addDeriveAddresses,
   generateMnemonics,
-} from '../../service/wallet.service';
-import { APP_VERSION } from '../../../src/utils/common';
-import { showToast } from '../../../src/utils/toast';
-import { MainNavigation } from '../../../src/utils/navigation';
+} from 'myWallet/wallet.service';
+import { APP_VERSION } from 'utils/common';
+import { showToast } from 'utils/toast';
+import { MainNavigation } from 'utils/navigation';
 import { v4 } from 'uuid';
 import {
   setIsAddingGroup,
@@ -139,12 +140,15 @@ const refreshCoinData = (dispatch, currentCoin) => {
 export const createWallet = createAsyncThunk(
   'wallets/createWallet',
   async (walletData, thunkAPI) => {
+    console.log("==============INSIDE CREATE WALLET THUUNK===============")
     //const {walletName, phrase} = walletData;
     const currentState = thunkAPI.getState();
-    const allWalletsName = selectAllWalletName(currentState);
-    const allWallets = selectAllWallets(currentState);
-    const currentWallet = selectCurrentWallet(currentState);
-    const isMaxWalletLimitReached = getIsMaxWalletLimitReached(currentState);
+    const { allWalletsName, allWallets, currentWallet, isMaxWalletLimitReached } = {
+      allWalletsName: selectAllWalletName(currentState),
+      allWallets: selectAllWallets(currentState),
+      currentWallet: selectCurrentWallet(currentState),
+      isMaxWalletLimitReached: getIsMaxWalletLimitReached(currentState),
+    };
     if (isMaxWalletLimitReached) {
       const message =
         'You have reached the maximum wallet limit, For more details ask contact support';
@@ -167,6 +171,7 @@ export const createWallet = createAsyncThunk(
     let chain_name = null;
     if (!walletData.phrase && !walletData?.privateKey) {
       const nativeWallet = await generateMnemonics();
+      console.log("nativeWallet=>", nativeWallet)
       walletData.phrase = nativeWallet.mnemonic.phrase;
     }
     let coins;

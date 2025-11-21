@@ -2,7 +2,7 @@ import BigNumber from 'bignumber.js';
 import { formatUnits, isHexString, parseUnits, toUtf8String } from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
-import { APP_VERSION } from '../../src/utils/common';
+import { APP_VERSION } from 'utils/common';
 import {
   config,
   SCAN_URL,

@@ -1,15 +1,14 @@
-// import {store} from 'redux/store';
-import { store } from '../../src/redux/store';
-import { Core } from '@walletconnect/core';
-import { WalletKit } from '@reown/walletkit';
+import {store} from 'redux/store';
+import {Core} from '@walletconnect/core';
+import {WalletKit} from '@reown/walletkit';
 import {
   resetWalletConnect,
   setWalletConnectRequestData,
   setWalletConnectRequestModal,
   setWalletConnectTransactionData,
 } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
-import { removeWalletConnectSession } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
-import { getSdkError } from '@walletconnect/utils';
+import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {getSdkError} from '@walletconnect/utils';
 
 let walletConnectSubscribe = false;
 
@@ -65,8 +64,8 @@ export const subscribeWalletConnect = async appSessions => {
         reason: getSdkError('USER_DISCONNECTED'),
       });
       walletConnect.core.pairing
-        .disconnect({ topic: topic })
-        .then(r => { })
+        .disconnect({topic: topic})
+        .then(r => {})
         .catch(e => {
           console.error('Error disconnecting session:', e);
         });
@@ -85,10 +84,10 @@ export const subscribeWalletConnectEvent = () => {
     return;
   }
   const onSessionProposal = proposal => {
-    const { id, params } = proposal;
+    const {id, params} = proposal;
 
     // console.log('propasdas', JSON.stringify(proposal));
-    const { proposer, pairingTopic } = params;
+    const {proposer, pairingTopic} = params;
     const sessionId = pairingTopic + '';
     const requiredNamespaces = params?.requiredNamespaces;
     const optionalNamespaces = params?.optionalNamespaces;
@@ -107,12 +106,12 @@ export const subscribeWalletConnectEvent = () => {
   };
   const onSessionRequest = async proposal => {
     try {
-      const { topic, params, id } = proposal;
+      const {topic, params, id} = proposal;
       if (requestIds[id]) {
         return;
       }
       requestIds[id] = true;
-      const { request } = params;
+      const {request} = params;
       if (request?.method?.includes('wallet_addEthereumChain')) {
         await walletConnect.respondSessionRequest({
           topic,
@@ -125,7 +124,7 @@ export const subscribeWalletConnectEvent = () => {
       } else {
         const requestSessionData =
           walletConnect.engine.signClient.session.get(topic);
-        const { pairingTopic } = requestSessionData;
+        const {pairingTopic} = requestSessionData;
         const sessionId = pairingTopic + '';
         store.dispatch(
           setWalletConnectTransactionData({
@@ -146,7 +145,7 @@ export const subscribeWalletConnectEvent = () => {
 
   const onSessionDelete = proposal => {
     try {
-      const { topic } = proposal;
+      const {topic} = proposal;
       const state = store.getState();
       const allWallets = state?.wallets?.allWallets || [];
       allWallets.forEach(currentWallet => {

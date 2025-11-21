@@ -1,14 +1,14 @@
-import { DokApi } from 'dok-wallet-blockchain-networks/config/dokApi';
-import { v4 } from 'uuid';
-import { IS_SANDBOX, isWeb } from 'dok-wallet-blockchain-networks/config/config';
-import { generateSHA256ForCoins } from '../../src/utils/common';
-import { getAIDFromLocalStorage } from 'utils/localStorageData';
-import { isEVMChain } from 'dok-wallet-blockchain-networks/helper';
+import {DokApi} from 'dok-wallet-blockchain-networks/config/dokApi';
+import {v4} from 'uuid';
+import {IS_SANDBOX, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {generateSHA256ForCoins} from 'utils/common';
+import {getAIDFromLocalStorage} from 'utils/localStorageData';
+import {isEVMChain} from 'dok-wallet-blockchain-networks/helper';
 
 export const addOTC = async payload => {
   try {
     const resp = await DokApi.post('/add-otc', payload);
-    return { status: resp?.status, data: resp?.data };
+    return {status: resp?.status, data: resp?.data};
   } catch (e) {
     console.error('Error in add OTP', JSON.stringify(e));
   }
@@ -38,7 +38,7 @@ export const registerUserAPI = async payload => {
       finalPayload.is_app = true;
     }
     const resp = await DokApi.post('/register', finalPayload);
-    return { status: resp?.status, data: resp?.data };
+    return {status: resp?.status, data: resp?.data};
   } catch (e) {
     console.error('Error in register user API', JSON.stringify(e));
   }
@@ -70,7 +70,7 @@ export const fetchCurrenciesAPI = async ({
       payload.search = search;
     }
     const resp = await DokApi.post('/list-crypto', payload);
-    return { status: resp?.status, data: resp?.data };
+    return {status: resp?.status, data: resp?.data};
   } catch (e) {
     console.error('Error in listCurrencyAPI', JSON.stringify(e));
     throw e;
@@ -96,7 +96,7 @@ export const fetchCoinGroupAPI = async ({
       payload.search = search;
     }
     const resp = await DokApi.post('/list-crypto-group', payload);
-    return { status: resp?.status, data: resp?.data };
+    return {status: resp?.status, data: resp?.data};
   } catch (e) {
     console.error('Error in fetchCoinGroupAPI', JSON.stringify(e));
     throw e;
@@ -134,21 +134,21 @@ export const fetchCoinByChainAPI = async ({
   }
 };
 
-export const signMoonPayUrl = async ({ url }) => {
+export const signMoonPayUrl = async ({url}) => {
   try {
     const payload = {
       type: IS_SANDBOX ? 'SANDBOX' : 'LIVE',
       url,
     };
     const resp = await DokApi.post('/sign-url', payload);
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in signMoonpayUrl', JSON.stringify(e));
     throw e;
   }
 };
 
-export const getBitcoinAddresses = async ({ chain_name, extended_pub_key }) => {
+export const getBitcoinAddresses = async ({chain_name, extended_pub_key}) => {
   try {
     const payload = {
       extended_pub_key,
@@ -156,7 +156,7 @@ export const getBitcoinAddresses = async ({ chain_name, extended_pub_key }) => {
       is_testnet: IS_SANDBOX,
     };
     const resp = await DokApi.post('/get-bitcoin-addresses', payload);
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getBitcoinAddresses', JSON.stringify(e));
     throw e;
@@ -165,8 +165,8 @@ export const getBitcoinAddresses = async ({ chain_name, extended_pub_key }) => {
 
 export const getNewsAPI = async key => {
   try {
-    const resp = await DokApi.post('/get-news-key', { key });
-    return { status: resp?.status, data: resp?.data?.data };
+    const resp = await DokApi.post('/get-news-key', {key});
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getNewsAPI', JSON.stringify(e));
     throw e;
@@ -175,8 +175,8 @@ export const getNewsAPI = async key => {
 
 export const getStakingByChain = async payload => {
   try {
-    const resp = await DokApi.post('/list-staking', { payload });
-    return { status: resp?.status, data: resp?.data?.data };
+    const resp = await DokApi.post('/list-staking', {payload});
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getStakingByChain', JSON.stringify(e));
     throw e;
@@ -190,7 +190,7 @@ export const getiOSBuyCryptoCountries = async payload => {
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getiOSBuyCryptoCountries', JSON.stringify(e));
     throw e;
@@ -199,8 +199,8 @@ export const getiOSBuyCryptoCountries = async payload => {
 
 export const fetchRpcUrls = async countryCode => {
   try {
-    const resp = await DokApi.post('/get-rpc-url', { is_sandbox: IS_SANDBOX });
-    return { status: resp?.status, data: resp?.data?.data };
+    const resp = await DokApi.post('/get-rpc-url', {is_sandbox: IS_SANDBOX});
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in fetchRpcUrls', JSON.stringify(e));
     throw e;
@@ -209,9 +209,9 @@ export const fetchRpcUrls = async countryCode => {
 export const fetchFeesInfo = async () => {
   try {
     const resp = await DokApi.get('/get-fees-info', {
-      params: { is_sandbox: IS_SANDBOX },
+      params: {is_sandbox: IS_SANDBOX},
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in fetchFeesInfo', JSON.stringify(e));
     throw e;
@@ -225,9 +225,9 @@ export const getBuyCryptoQuote = async payload => {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: { ...payload, ipAddress },
+      crypto_payload: {...payload, ipAddress},
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get Buy Crypto Quote', JSON.stringify(e));
     throw e;
@@ -241,9 +241,9 @@ export const getSellCryptoQuote = async payload => {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: { ...payload, ipAddress },
+      crypto_payload: {...payload, ipAddress},
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get Sell Crypto Quote', JSON.stringify(e));
     throw e;
@@ -256,7 +256,7 @@ export const getBuyCryptoUrl = async payload => {
       is_sandbox: IS_SANDBOX,
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get Buy Crypto Url', JSON.stringify(e));
     throw e;
@@ -269,7 +269,7 @@ export const getSellCryptoUrl = async payload => {
       is_sandbox: IS_SANDBOX,
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get Sell Crypto Url', JSON.stringify(e));
     throw e;
@@ -282,7 +282,7 @@ export const getSellCryptoPaymentDetails = async payload => {
       is_sandbox: IS_SANDBOX,
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get Sell Crypto Url', JSON.stringify(e));
     throw e;
@@ -296,7 +296,7 @@ export const fetchBitcoinBalances = async payload => {
       type: 'get_bitcoin_balances',
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in fetchBitcoinBalances', JSON.stringify(e));
     throw e;
@@ -310,7 +310,7 @@ export const fetchBitcoinUTXO = async payload => {
       type: 'get_bitcoin_utxos',
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in fetchBitcoinUTXO', JSON.stringify(e));
     throw e;
@@ -324,7 +324,7 @@ export const fetchBitcoinTransactionDetails = async payload => {
       type: 'get_transaction_details',
       ...payload,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in fetchBitcoinTransactionDetails', JSON.stringify(e));
     throw e;
@@ -336,7 +336,7 @@ export const getWhiteLabelInfo = async domain => {
     const resp = await DokApi.post('/get-white-label', {
       domain,
     });
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getWhiteLabelInfo', JSON.stringify(e));
     throw e;
@@ -345,7 +345,7 @@ export const getWhiteLabelInfo = async domain => {
 export const getCurrencyRate = async payload => {
   try {
     const resp = await DokApi.post('/get-currency-rate', payload);
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get getCurrencyRate', JSON.stringify(e));
     throw e;
@@ -355,7 +355,7 @@ export const getCurrencyRate = async payload => {
 export const getExchangeQuote = async payload => {
   try {
     const resp = await DokApi.post('/exchange-quote', payload);
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in get getExchangeQuote', JSON.stringify(e));
     throw e;
@@ -364,7 +364,7 @@ export const getExchangeQuote = async payload => {
 export const createExchange = async payload => {
   try {
     const resp = await DokApi.post('/create-exchange', payload);
-    return { status: resp?.status, data: resp?.data?.data };
+    return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in createExchange', JSON.stringify(e));
     throw e;

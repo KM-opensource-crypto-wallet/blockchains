@@ -1,18 +1,18 @@
-import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { selectCurrentWallet } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {selectCurrentWallet} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {
   fetchBatchTransactionBalances,
   getNativeCoin,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
-import { showToast } from '../../../src/utils/toast';
+import {showToast} from 'utils/toast';
 import BigNumber from 'bignumber.js';
 import {
   getBatchTransactions,
   getBatchTransactionsBalances,
 } from './batchTransactionSelectors';
-import { createBalanceKey } from 'dok-wallet-blockchain-networks/helper';
-import { getPrice } from 'dok-wallet-blockchain-networks/service/coinMarketCap';
-import { getLocalCurrency } from 'dok-wallet-blockchain-networks/redux/settings/settingsSelectors';
+import {createBalanceKey} from 'dok-wallet-blockchain-networks/helper';
+import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import {getLocalCurrency} from 'dok-wallet-blockchain-networks/redux/settings/settingsSelectors';
 import structuredClone from '@ungap/structured-clone';
 
 const initialState = {
@@ -44,7 +44,7 @@ export const initializeFilters = createAsyncThunk(
       let invalid_reason = '';
       let priceObj = {};
       const currentState = thunkAPI.getState();
-      const { transactions, selectedChain, selectedAddress } = payload || {};
+      const {transactions, selectedChain, selectedAddress} = payload || {};
       let balances = getBatchTransactionsBalances(currentState);
       let allWalletTransactions = transactions;
       if (!allWalletTransactions || !allWalletTransactions?.length) {
@@ -120,7 +120,7 @@ export const initializeFilters = createAsyncThunk(
           priceObj = await getPrice(allSymbols, localCurrency);
         }
 
-        balances = { ...balances, ...fetchedBalances };
+        balances = {...balances, ...fetchedBalances};
       }
       const tempBalances = {};
       const finalFilterTransactions = filteredTransactions.map(item => {
@@ -145,9 +145,9 @@ export const initializeFilters = createAsyncThunk(
           const priceBN = new BigNumber(priceObj[coinSymbol] || '0');
           const amountBN = new BigNumber(tempItem?.transferData.amount || 0);
           const fiatAmount = priceBN.multipliedBy(amountBN).toFixed(2);
-          tempItem.transferData = { ...tempItem.transferData, fiatAmount };
+          tempItem.transferData = {...tempItem.transferData, fiatAmount};
         }
-        return { ...tempItem, ...extra };
+        return {...tempItem, ...extra};
       });
 
       return {
@@ -275,8 +275,8 @@ export const batchTransactionSlice = createSlice({
   name: 'batchTransaction',
   initialState,
   reducers: {
-    removeBatchTransaction: (state, { payload }) => {
-      const { transactionIds, wallet_id } = payload;
+    removeBatchTransaction: (state, {payload}) => {
+      const {transactionIds, wallet_id} = payload;
 
       if (state.transactions?.[wallet_id]) {
         const transactions = state.transactions[wallet_id];
@@ -286,7 +286,7 @@ export const batchTransactionSlice = createSlice({
         for (let i = transactions.length - 1; i >= 0; i--) {
           if (transactionIdsSet.has(transactions[i].transactionId)) {
             const transactionToRemove = transactions[i];
-            const { chain_name } = transactionToRemove;
+            const {chain_name} = transactionToRemove;
             // Direct mutation is fine in RTK
             transactions.splice(i, 1);
 
@@ -311,8 +311,8 @@ export const batchTransactionSlice = createSlice({
         }
       }
     },
-    clearAllBatchTransactions: (state, { payload }) => {
-      const { wallet_id } = payload;
+    clearAllBatchTransactions: (state, {payload}) => {
+      const {wallet_id} = payload;
 
       if (wallet_id) {
         if (state.transactions?.[wallet_id]) {
@@ -327,8 +327,8 @@ export const batchTransactionSlice = createSlice({
       state.ui.selectedChain = '';
       state.ui.selectedAddress = '';
     },
-    clearTransactionsForSelectedChain: (state, { payload }) => {
-      const { wallet_id, chain_name, address } = payload;
+    clearTransactionsForSelectedChain: (state, {payload}) => {
+      const {wallet_id, chain_name, address} = payload;
       if (state.transactions?.[wallet_id]) {
         const transactions = state.transactions[wallet_id];
 
@@ -365,19 +365,19 @@ export const batchTransactionSlice = createSlice({
       state.ui.selectedChain = '';
       state.ui.selectedAddress = '';
     },
-    setSelectedChain: (state, { payload }) => {
+    setSelectedChain: (state, {payload}) => {
       state.ui.selectedChain = payload;
     },
-    setSelectedAddress: (state, { payload }) => {
+    setSelectedAddress: (state, {payload}) => {
       state.ui.selectedAddress = payload;
     },
-    setIsSelectionMode: (state, { payload }) => {
+    setIsSelectionMode: (state, {payload}) => {
       state.ui.isSelectionMode = payload;
     },
-    setSelectedItems: (state, { payload }) => {
+    setSelectedItems: (state, {payload}) => {
       state.ui.selectedItems = payload;
     },
-    toggleSelectedItem: (state, { payload }) => {
+    toggleSelectedItem: (state, {payload}) => {
       const transactionId = payload;
       const index = state.ui.selectedItems.indexOf(transactionId);
       if (index >= 0) {
@@ -399,7 +399,7 @@ export const batchTransactionSlice = createSlice({
         state.filteredData.loading = true;
         state.filteredData.error = null;
       })
-      .addCase(initializeFilters.fulfilled, (state, { payload }) => {
+      .addCase(initializeFilters.fulfilled, (state, {payload}) => {
         state.filteredData.loading = false;
         state.filteredData.filteredTransactions = payload.filteredTransactions;
         state.filteredData.uniqueChains = payload.uniqueChains;
@@ -407,16 +407,16 @@ export const batchTransactionSlice = createSlice({
         state.ui.selectedChain = payload.selectedChain;
         state.ui.selectedAddress = payload.selectedAddress;
         state.filteredData.error = null;
-        state.balances = { ...state.balances, ...(payload?.balances || {}) };
+        state.balances = {...state.balances, ...(payload?.balances || {})};
         state.isValid = payload?.isValid;
         state.invalid_reason = payload?.invalid_reason;
       })
-      .addCase(initializeFilters.rejected, (state, { payload }) => {
+      .addCase(initializeFilters.rejected, (state, {payload}) => {
         state.filteredData.loading = false;
         state.filteredData.error = payload || 'Failed to initialize filters';
       })
-      .addCase(addBatchTransaction.fulfilled, (state, { payload }) => {
-        const { wallet_id, chain_name, transaction } = payload;
+      .addCase(addBatchTransaction.fulfilled, (state, {payload}) => {
+        const {wallet_id, chain_name, transaction} = payload;
         if (!state.transactions) {
           state.transactions = {};
         }

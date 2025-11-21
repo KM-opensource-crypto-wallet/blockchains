@@ -1,8 +1,8 @@
-import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { resetWallet } from '../wallets/walletsSlice';
-import { resetCurrentTransferData } from '../currentTransfer/currentTransferSlice';
-import { resetBatchTransactions } from '../batchTransaction/batchTransactionSlice';
-import { showToast } from '../../../src/utils/toast';
+import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {resetWallet} from '../wallets/walletsSlice';
+import {resetCurrentTransferData} from '../currentTransfer/currentTransferSlice';
+import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice';
+import {showToast} from 'utils/toast';
 
 export const handleAttempts = createAsyncThunk(
   'auth/handleAttempts',
@@ -10,7 +10,7 @@ export const handleAttempts = createAsyncThunk(
     try {
       const currentState = thunkAPI.getState();
       const {
-        auth: { attempts, maxAttempt },
+        auth: {attempts, maxAttempt},
       } = currentState;
       const threshold = maxAttempt - 1;
       const failureCount = attempts.length;
@@ -34,13 +34,13 @@ export const handleAttempts = createAsyncThunk(
           console.log('navigation reset');
           navigation?.reset({
             index: 0,
-            routes: [{ name: 'CarouselCards' }],
+            routes: [{name: 'CarouselCards'}],
           });
         } else if (router) {
           router.replace('/');
         }
         thunkAPI.dispatch(loadingOff());
-        return { successful_deleted: true };
+        return {successful_deleted: true};
       } else {
         if (attemptsLeft === 1) {
           thunkAPI.dispatch(setLastAttempt(true));
@@ -104,7 +104,7 @@ export const authSlice = createSlice({
     loadingOff: state => {
       state.loading = false;
     },
-    setLastUpdateCheckTimestamp(state, { payload }) {
+    setLastUpdateCheckTimestamp(state, {payload}) {
       state.lastUpdateCheckTimestamp = payload;
     },
     recordFailureAttempts: state => {
@@ -125,7 +125,7 @@ export const authSlice = createSlice({
       state.attempts = [];
       state.lastAttempt = false;
     },
-    setLastAttempt: (state, { payload }) => {
+    setLastAttempt: (state, {payload}) => {
       state.lastAttempt = payload;
     },
   },

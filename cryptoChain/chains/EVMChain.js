@@ -5,7 +5,7 @@ import {
   GAS_ORACLE_CONTRACT_ADDRESS,
   IS_SANDBOX,
   SCAN_URL,
-} from 'dok-wallet-blockchain-networks/config/config';
+} from '../../config/config';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import bep20Abi from 'dok-wallet-blockchain-networks/abis/bep20.json';
 import erc721Abi from 'dok-wallet-blockchain-networks/abis/erc721.json';
@@ -36,7 +36,6 @@ import {
   getMaxPriorityFee,
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
-import {store } from "../../../src/redux/store"
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -289,6 +288,7 @@ export const EVMChain = chain_name => {
   };
 
   const getPendingTransactions = async ({ pendingTransactions, key }) => {
+    const { store } = require('redux/store');
     const {
       setPendingTransactions,
     } = require('dok-wallet-blockchain-networks/redux/wallets/walletsSlice');

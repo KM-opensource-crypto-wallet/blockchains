@@ -3,7 +3,7 @@ import {
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import { config } from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   TonClient,
   WalletContractV4,
@@ -14,11 +14,11 @@ import {
   beginCell,
   toNano,
 } from '@ton/ton';
-import { keyPairFromSeed } from '@ton/crypto';
-import { getRPCUrl } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {keyPairFromSeed} from '@ton/crypto';
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import BigNumber from 'bignumber.js';
-import { TonScan } from 'dok-wallet-blockchain-networks/service/tonScan';
-import { WL_APP_NAME } from '../../../src/utils/wlData';
+import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
+import {WL_APP_NAME} from 'utils/wlData';
 
 export const TonChain = () => {
   const tonClient = new TonClient({
@@ -27,14 +27,14 @@ export const TonChain = () => {
   });
 
   return {
-    isValidAddress: ({ address }) => {
+    isValidAddress: ({address}) => {
       try {
         return !!Address.parse(address);
       } catch (e) {
         return false;
       }
     },
-    isValidPrivateKey: async ({ privateKey }) => {
+    isValidPrivateKey: async ({privateKey}) => {
       try {
         // eslint-disable-next-line no-undef
         return !!keyPairFromSeed(Buffer.from(privateKey, 'hex'));
@@ -42,7 +42,7 @@ export const TonChain = () => {
         return false;
       }
     },
-    createWalletByPrivateKey: async ({ privateKey }) => {
+    createWalletByPrivateKey: async ({privateKey}) => {
       // eslint-disable-next-line no-undef
       const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
       const wallet = WalletContractV4.create({
@@ -54,7 +54,7 @@ export const TonChain = () => {
         privateKey: privateKey,
       };
     },
-    getBalance: async ({ address }) => {
+    getBalance: async ({address}) => {
       try {
         const balance = await tonClient.getBalance(address);
         return balance?.toString() || '0';
@@ -63,7 +63,7 @@ export const TonChain = () => {
         return '0';
       }
     },
-    getTokenBalance: async ({ address, contractAddress }) => {
+    getTokenBalance: async ({address, contractAddress}) => {
       try {
         const parseContractAddress = Address.parse(contractAddress);
         const parseAddress = Address.parse(address);
@@ -83,7 +83,7 @@ export const TonChain = () => {
         return '0';
       }
     },
-    getEstimateFee: async ({ toAddress, amount, privateKey, memo }) => {
+    getEstimateFee: async ({toAddress, amount, privateKey, memo}) => {
       try {
         // eslint-disable-next-line no-undef
         const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
@@ -112,7 +112,7 @@ export const TonChain = () => {
         });
         const fees = await tonClient.estimateExternalMessageFee(
           wallet.address,
-          { body: transfer },
+          {body: transfer},
         );
         const sourceFees = fees?.source_fees;
         const total =
@@ -191,7 +191,7 @@ export const TonChain = () => {
         transfer.hash();
         const fees = await tonClient.estimateExternalMessageFee(
           wallet.address,
-          { body: transfer },
+          {body: transfer},
         );
         const sourceFees = fees?.source_fees;
         const total =
@@ -210,7 +210,7 @@ export const TonChain = () => {
         throw e;
       }
     },
-    getTransactions: async ({ address }) => {
+    getTransactions: async ({address}) => {
       try {
         const transactions = await tonClient.getTransactions(address, {
           limit: 20,
@@ -251,7 +251,7 @@ export const TonChain = () => {
         return [];
       }
     },
-    getTokenTransactions: async ({ address, contractAddress }) => {
+    getTokenTransactions: async ({address, contractAddress}) => {
       try {
         const res = await TonScan.getTokenTransactions({
           address,
@@ -276,7 +276,7 @@ export const TonChain = () => {
         return [];
       }
     },
-    send: async ({ to, from, amount, privateKey, transactionFee, memo }) => {
+    send: async ({to, from, amount, privateKey, transactionFee, memo}) => {
       try {
         // eslint-disable-next-line no-undef
         const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
@@ -288,7 +288,7 @@ export const TonChain = () => {
         const totalAmount = new BigNumber(amount).plus(
           new BigNumber(transactionFee),
         );
-        const balance = await TonChain().getBalance({ address: from });
+        const balance = await TonChain().getBalance({address: from});
         const parsedBalance = new BigNumber(parseBalance(balance, 9));
         const walletContract = tonClient.open(wallet);
         const seqno = await walletContract.getSeqno();
@@ -311,7 +311,7 @@ export const TonChain = () => {
           ],
         });
         await walletContract.send(transfer);
-        return { seqno, walletContract };
+        return {seqno, walletContract};
       } catch (e) {
         console.error('Error in send ton transaction', e);
       }
@@ -372,13 +372,13 @@ export const TonChain = () => {
             }),
           ],
         });
-        return { seqno, walletContract };
+        return {seqno, walletContract};
       } catch (e) {
         console.error('Error in send ton transaction', e);
         throw e;
       }
     },
-    waitForConfirmation: async ({ transaction }) => {
+    waitForConfirmation: async ({transaction}) => {
       if (!transaction?.seqno || !transaction?.walletContract) {
         console.error('No transaction id found for tron');
         return null;

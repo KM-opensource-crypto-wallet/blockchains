@@ -1,14 +1,14 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { getTransferData } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
+import { getTransferData } from './currentTransferSelector';
 import {
   fetchBatchTransactionBalances,
   getNativeCoin,
-} from 'dok-wallet-blockchain-networks/service/wallet.service';
+} from '../../service/wallet.service';
 import {
   selectCurrentCoin,
   selectCurrentWallet,
   selectUserCoins,
-} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+} from '../wallets/walletsSelector';
 import BigNumber from 'bignumber.js';
 import { showToast } from '../../../src/utils/toast';
 import { ethers } from 'ethers';
@@ -18,8 +18,8 @@ import {
   getBitcoinFeeMultiplier,
   getDogecoinFeeMultiplier,
   getLitecoinFeeMultiplier,
-} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
-import { parseBalance } from 'dok-wallet-blockchain-networks/helper';
+} from '../cryptoProviders/cryptoProvidersSelectors';
+import { parseBalance } from '../../helper';
 
 const initialUpdateTransactionData = {
   isLoading: false,

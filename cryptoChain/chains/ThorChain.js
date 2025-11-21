@@ -1,17 +1,16 @@
-import { assetAmount, assetToBase } from '@xchainjs/xchain-util';
-import { decode } from 'bech32-buffer';
-import { ThorChainService } from 'dok-wallet-blockchain-networks/service/thorChain';
-import { parseBalance } from 'dok-wallet-blockchain-networks/helper';
-import { config } from 'dok-wallet-blockchain-networks/config/config';
-// import {WL_APP_NAME} from '../../../src/utils/wlData';
-import { WL_APP_NAME } from '../../../src/utils/wlData';
+import {assetAmount, assetToBase} from '@xchainjs/xchain-util';
+import {decode} from 'bech32-buffer';
+import {ThorChainService} from 'dok-wallet-blockchain-networks/service/thorChain';
+import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {WL_APP_NAME} from 'utils/wlData';
 
 export const ThorChain = () => {
   return {
-    isValidAddress: ({ address }) => {
+    isValidAddress: ({address}) => {
       return decode(address).prefix === 'thor';
     },
-    getBalance: async ({ address }) => {
+    getBalance: async ({address}) => {
       try {
         const resp = await ThorChainService.getThorBalance(address);
         return resp?.data.toString();
@@ -33,7 +32,7 @@ export const ThorChain = () => {
         throw e;
       }
     },
-    send: async ({ to, amount, phrase, memo }) => {
+    send: async ({to, amount, phrase, memo}) => {
       return new Promise((resolve, reject) => {
         setTimeout(async () => {
           try {
@@ -41,7 +40,7 @@ export const ThorChain = () => {
               AssetRuneNative,
               Client,
             } = require('@xchainjs/xchain-thorchain');
-            const thorClient = new Client({ phrase });
+            const thorClient = new Client({phrase});
             const finalAmount = assetToBase(assetAmount(amount, 8));
             const txid = await thorClient.transfer({
               amount: finalAmount,
@@ -58,7 +57,7 @@ export const ThorChain = () => {
       });
     },
 
-    getTransactions: async ({ address }) => {
+    getTransactions: async ({address}) => {
       try {
         const transactions = await ThorChainService.getThorTransactions(
           address,
