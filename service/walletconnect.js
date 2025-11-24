@@ -121,6 +121,21 @@ export const subscribeWalletConnectEvent = () => {
             result: request?.params?.[0]?.chainId,
           },
         });
+      } else if (request?.method?.includes('wallet_getCapabilities')) {
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            result: {
+              [request?.params?.[0]?.chainId]: {
+                atomic: {
+                  status: 'unsupported',
+                },
+              },
+            },
+          },
+        });
       } else {
         const requestSessionData =
           walletConnect.engine.signClient.session.get(topic);
