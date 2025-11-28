@@ -41,6 +41,7 @@ export const EtherScan = {
               sort: 'desc',
             },
           });
+          console.log('resp data status', resp.data?.status);
           if (resp?.data?.status === '0') {
             throw new Error(resp?.data?.result);
           }

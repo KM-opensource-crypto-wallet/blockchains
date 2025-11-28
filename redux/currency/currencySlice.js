@@ -14,7 +14,6 @@ import {
   generateUniqueKeyForChain,
 } from 'dok-wallet-blockchain-networks/helper';
 import {showToast} from 'utils/toast';
-import {setCurrentCoin} from '../wallets/walletsSlice';
 
 const initialState = {
   loading: true,
@@ -255,8 +254,7 @@ export const searchAndAddCoins = createAsyncThunk(
         coin => coin.type === 'coin' && coin.symbol === symbol,
       );
       if (hasExactCoin) {
-        dispatch(setCurrentCoin(hasExactCoin?._id));
-        return;
+        return {coinId: hasExactCoin?._id};
       }
 
       const coinsList = [];
@@ -285,8 +283,8 @@ export const searchAndAddCoins = createAsyncThunk(
         coin => coin.type === 'token' && coin.symbol === symbol,
       );
       if (hasToken) {
-        dispatch(setCurrentCoin(hasToken?._id));
         coinsList.push(hasToken);
+        return {coinId: hasToken?._id};
       } else {
         const fetched = await dispatch(
           fetchCurrencies({search: symbol}),
