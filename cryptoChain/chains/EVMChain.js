@@ -1,18 +1,18 @@
-import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
+import { ethers, FetchRequest, JsonRpcProvider, Transaction } from 'ethers';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
   CHAIN_ID,
   GAS_ORACLE_CONTRACT_ADDRESS,
   IS_SANDBOX,
   SCAN_URL,
-} from 'dok-wallet-blockchain-networks/config/config';
+} from '../../config/config';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import bep20Abi from 'dok-wallet-blockchain-networks/abis/bep20.json';
 import erc721Abi from 'dok-wallet-blockchain-networks/abis/erc721.json';
 import gasOracleAbi from 'dok-wallet-blockchain-networks/abis/opbnb_gas_oracle.json';
 import BigNumber from 'bignumber.js';
 import erc1155Abi from 'dok-wallet-blockchain-networks/abis/erc1155.json';
-import {EvmServices} from 'dok-wallet-blockchain-networks/service/evmServices';
+import { EvmServices } from 'dok-wallet-blockchain-networks/service/evmServices';
 import {
   getFreeRPCUrl,
   getRPCUrl,
@@ -30,7 +30,7 @@ import {
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
-import {ErrorDecoder} from 'ethers-decode-error';
+import { ErrorDecoder } from 'ethers-decode-error';
 import {
   getFeesMultiplier,
   getMaxPriorityFee,
@@ -147,7 +147,7 @@ export const EVMChain = chain_name => {
     try {
       const iface = new ethers.Interface(localErc20ABI);
 
-      const decodeTx = iface.parseTransaction({data: input});
+      const decodeTx = iface.parseTransaction({ data: input });
 
       return (
         {
@@ -230,7 +230,7 @@ export const EVMChain = chain_name => {
           );
         }
       }
-      dispatch(setPendingTransactions({key, value: transactionDataArray}));
+      dispatch(setPendingTransactions({ key, value: transactionDataArray }));
 
       if (fetchTransactionsData.length) {
         let transactionResp = await Promise.all(fetchTransactionsData);
@@ -280,20 +280,20 @@ export const EVMChain = chain_name => {
           pendingTransactionsHash: transactionDataArray,
         };
       }
-      dispatch(setPendingTransactions({key, value: []}));
-      return {pendingTransactionsData: [], pendingTransactionsHash: []};
+      dispatch(setPendingTransactions({ key, value: [] }));
+      return { pendingTransactionsData: [], pendingTransactionsHash: [] };
     } else {
-      return {pendingTransactionsData: [], pendingTransactionsHash: []};
+      return { pendingTransactionsData: [], pendingTransactionsHash: [] };
     }
   };
 
-  const getPendingTransactions = async ({pendingTransactions, key}) => {
-    const {store} = require('redux/store');
+  const getPendingTransactions = async ({ pendingTransactions, key }) => {
+    const { store } = require('redux/store');
     const {
       setPendingTransactions,
     } = require('dok-wallet-blockchain-networks/redux/wallets/walletsSlice');
     const dispatch = store.dispatch;
-    const {pendingTransactionsHash, pendingTransactionsData} =
+    const { pendingTransactionsHash, pendingTransactionsData } =
       await fetchPendingTransactions({
         pendingTransactions,
         key,
@@ -346,7 +346,7 @@ export const EVMChain = chain_name => {
         });
         const finalWal = finalWallet.connect(tempProvider);
         const tr = await finalWal.sendTransaction(tx);
-        return {resp: tr, error: null};
+        return { resp: tr, error: null };
       } catch (e) {
         if (
           e.message?.includes('already known') ||
@@ -357,7 +357,7 @@ export const EVMChain = chain_name => {
             `[EVM] Duplicate transaction detected for RPC ${rpcUrl}, hash: ${txHash}`,
           );
           if (txHash) {
-            return {resp: txHash, error: null};
+            return { resp: txHash, error: null };
           }
         } else if (
           e.message?.toLowerCase()?.includes('missing response for request')
@@ -367,10 +367,10 @@ export const EVMChain = chain_name => {
             `[EVM] Missing response but transaction likely submitted, hash: ${txHash}`,
           );
           if (txHash) {
-            return {resp: txHash, error: null};
+            return { resp: txHash, error: null };
           }
         }
-        return {resp: null, error: e};
+        return { resp: null, error: e };
       }
     });
   };
@@ -406,7 +406,7 @@ export const EVMChain = chain_name => {
     }
   };
 
-  const isValidNameEth = async ({name}) =>
+  const isValidNameEth = async ({ name }) =>
     retryFunc(async evmProvider => {
       try {
         return await ethers.resolveAddress(name, evmProvider);
@@ -418,7 +418,7 @@ export const EVMChain = chain_name => {
       }
     }, false);
 
-  const isValidNameBNB = async ({name}) => {
+  const isValidNameBNB = async ({ name }) => {
     try {
       const resp = await axios.get('https://api.prd.space.id/v1/getAddress', {
         params: {
@@ -478,18 +478,18 @@ export const EVMChain = chain_name => {
       transaction =
         contract_type === 'ERC1155'
           ? await nftContract[
-              'safeTransferFrom(address,address,uint256,uint256,bytes)'
-            ].populateTransaction(
-              from,
-              to,
-              Number(tokenId),
-              Number(tokenAmount),
-              '0x',
-              options,
-            )
+            'safeTransferFrom(address,address,uint256,uint256,bytes)'
+          ].populateTransaction(
+            from,
+            to,
+            Number(tokenId),
+            Number(tokenAmount),
+            '0x',
+            options,
+          )
           : await nftContract[
-              'safeTransferFrom(address,address,uint256)'
-            ].populateTransaction(from, to, Number(tokenId), options);
+            'safeTransferFrom(address,address,uint256)'
+          ].populateTransaction(from, to, Number(tokenId), options);
     }
     tx.type = 2;
     tx.to = transaction?.to || to;
@@ -534,7 +534,7 @@ export const EVMChain = chain_name => {
     existingNonce,
     ignoreFetchingNonce,
   }) => {
-    const {gasPrice, feesOptions, maxPriorityFeePerGas} =
+    const { gasPrice, feesOptions, maxPriorityFeePerGas } =
       await getEtherGasPrice(feesType, evmProvider);
     let level1Fees = 0n;
 
@@ -583,16 +583,16 @@ export const EVMChain = chain_name => {
   };
 
   return {
-    isValidAddress: ({address}) => {
+    isValidAddress: ({ address }) => {
       return ethers.isAddress(address);
     },
-    isValidName: async ({name}) => {
-      return validNameChain[chain_name]({name});
+    isValidName: async ({ name }) => {
+      return validNameChain[chain_name]({ name });
     },
-    getWallet: ({privateKey}) => {
+    getWallet: ({ privateKey }) => {
       return new ethers.Wallet(privateKey);
     },
-    isValidPrivateKey: ({privateKey}) => {
+    isValidPrivateKey: ({ privateKey }) => {
       try {
         const wallet = new ethers.Wallet(privateKey);
         return !!wallet?.address;
@@ -600,14 +600,14 @@ export const EVMChain = chain_name => {
         return false;
       }
     },
-    createWalletByPrivateKey: ({privateKey}) => {
+    createWalletByPrivateKey: ({ privateKey }) => {
       const wallet = new ethers.Wallet(privateKey);
       return {
         address: wallet.address,
         privateKey: privateKey,
       };
     },
-    getContract: async ({contractAddress}) =>
+    getContract: async ({ contractAddress }) =>
       retryFunc(async evmProvider => {
         try {
           const contract = new ethers.Contract(
@@ -631,7 +631,7 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, {}),
-    getBalance: async ({address}) =>
+    getBalance: async ({ address }) =>
       retryFunc(async evmProvider => {
         try {
           const balanceWei = await evmProvider.getBalance(address);
@@ -761,17 +761,17 @@ export const EVMChain = chain_name => {
           const estimateGas =
             contract_type === 'ERC1155'
               ? await contract[
-                  'safeTransferFrom(address,address,uint256,uint256,bytes)'
-                ].estimateGas(
-                  fromAddress,
-                  toAddress,
-                  Number(tokenId),
-                  Number(tokenAmount),
-                  '0x',
-                )
+                'safeTransferFrom(address,address,uint256,uint256,bytes)'
+              ].estimateGas(
+                fromAddress,
+                toAddress,
+                Number(tokenId),
+                Number(tokenAmount),
+                '0x',
+              )
               : await contract[
-                  'safeTransferFrom(address,address,uint256)'
-                ].estimateGas(fromAddress, toAddress, Number(tokenId));
+                'safeTransferFrom(address,address,uint256)'
+              ].estimateGas(fromAddress, toAddress, Number(tokenId));
 
           return await calculateTotalFees({
             estimateGas,
@@ -826,7 +826,7 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, null),
-    createCall: async ({toAddress, amount, decimals}) => {
+    createCall: async ({ toAddress, amount, decimals }) => {
       try {
         return [toAddress, convertToSmallAmount(amount, decimals || 18), '0x'];
       } catch (e) {
@@ -834,7 +834,7 @@ export const EVMChain = chain_name => {
         throw e;
       }
     },
-    createTokenCall: async ({contractAddress, toAddress, amount, decimals}) => {
+    createTokenCall: async ({ contractAddress, toAddress, amount, decimals }) => {
       try {
         const erc20Interface = new ethers.Interface(erc20Abi);
         const finalAmount = convertToSmallAmount(amount, decimals);
@@ -867,17 +867,17 @@ export const EVMChain = chain_name => {
           '0',
           contract_type === 'ERC1155'
             ? nftInterface.encodeFunctionData('safeTransferFrom', [
-                fromAddress,
-                toAddress,
-                Number(tokenId),
-                Number(tokenAmount),
-                '0x',
-              ])
+              fromAddress,
+              toAddress,
+              Number(tokenId),
+              Number(tokenAmount),
+              '0x',
+            ])
             : nftInterface.encodeFunctionData('safeTransferFrom', [
-                fromAddress,
-                toAddress,
-                Number(tokenId),
-              ]),
+              fromAddress,
+              toAddress,
+              Number(tokenId),
+            ]),
         ];
       } catch (e) {
         console.error('Error in createNFTCall', e);
@@ -913,12 +913,12 @@ export const EVMChain = chain_name => {
             additionalL1Fee,
           });
         } catch (e) {
-          const {reason} = await errorDecoder.decode(e);
+          const { reason } = await errorDecoder.decode(e);
           console.error('Error in getEstimateFeeForPendingTransaction', reason);
           throw new Error(reason);
         }
       }, null),
-    getTokenBalance: async ({address, contractAddress}) =>
+    getTokenBalance: async ({ address, contractAddress }) =>
       retryFunc(async evmProvider => {
         try {
           const contract = new ethers.Contract(
@@ -936,14 +936,14 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, '0'),
-    getTransactions: async ({address, pendingTransactions, key}) => {
+    getTransactions: async ({ address, pendingTransactions, key }) => {
       try {
         const {
           pendingTransactionsData,
           pendingTransactionsHash,
           dispatch,
           setPendingTransactions,
-        } = await getPendingTransactions({pendingTransactions, key});
+        } = await getPendingTransactions({ pendingTransactions, key });
         let tempPendingTransactions = pendingTransactionsData;
         const transactions = await EvmServices[chain_name]?.getTransactions({
           chain_name,
@@ -962,7 +962,7 @@ export const EVMChain = chain_name => {
             );
 
             if (foundIndex !== -1) {
-              const {deletedObject, updatedArray} = deleteItemAtIndex(
+              const { deletedObject, updatedArray } = deleteItemAtIndex(
                 tempPendingTransactions,
                 foundIndex,
               );
@@ -993,7 +993,7 @@ export const EVMChain = chain_name => {
                 ) === -1,
             );
             dispatch(
-              setPendingTransactions({key, value: deletedPendingTransactions}),
+              setPendingTransactions({ key, value: deletedPendingTransactions }),
             );
           }
           const finalTransactions = [
@@ -1008,7 +1008,7 @@ export const EVMChain = chain_name => {
         return [];
       }
     },
-    getTransactionForUpdate: async ({from, txHash, decimals}) => {
+    getTransactionForUpdate: async ({ from, txHash, decimals }) => {
       const foundTransactions = await safeGetTransactionStatus(txHash);
       if (foundTransactions) {
         throw new Error('Transaction is already succeed');
@@ -1077,7 +1077,7 @@ export const EVMChain = chain_name => {
           pendingTransactionsHash,
           dispatch,
           setPendingTransactions,
-        } = await getPendingTransactions({pendingTransactions, key});
+        } = await getPendingTransactions({ pendingTransactions, key });
         let tempPendingTransactions = pendingTransactionsData;
         const transactions = await EvmServices[chain_name]?.getTransactions({
           address,
@@ -1098,7 +1098,7 @@ export const EVMChain = chain_name => {
             );
 
             if (foundIndex !== -1) {
-              const {deletedObject, updatedArray} = deleteItemAtIndex(
+              const { deletedObject, updatedArray } = deleteItemAtIndex(
                 tempPendingTransactions,
                 foundIndex,
               );
@@ -1130,7 +1130,7 @@ export const EVMChain = chain_name => {
                 ) === -1,
             );
             dispatch(
-              setPendingTransactions({key, value: deletedPendingTransactions}),
+              setPendingTransactions({ key, value: deletedPendingTransactions }),
             );
           }
           const finalTransactions = [
@@ -1214,11 +1214,11 @@ export const EVMChain = chain_name => {
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
         console.error('Error in send ether transaction', e);
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         throw new Error(reason);
       }
     },
-    cancelTransaction: async ({from, nonce, privateKey, feesType}) => {
+    cancelTransaction: async ({ from, nonce, privateKey, feesType }) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[0]);
         fetchRequest.timeout = TIMEOUT;
@@ -1232,7 +1232,7 @@ export const EVMChain = chain_name => {
           to: from,
           data: '0x',
         });
-        const {gasPrice} = await getEtherGasPrice(feesType, evmProvider);
+        const { gasPrice } = await getEtherGasPrice(feesType, evmProvider);
         const twiceGasPrice = gasPrice * 2n;
         const tx = {
           type: 2,
@@ -1252,7 +1252,7 @@ export const EVMChain = chain_name => {
         }
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         console.error('Error in cancel ether transaction', reason);
         throw new Error(reason);
       }
@@ -1280,7 +1280,7 @@ export const EVMChain = chain_name => {
           data: data,
           value: value,
         });
-        const {gasPrice} = await getEtherGasPrice(feesType, evmProvider);
+        const { gasPrice } = await getEtherGasPrice(feesType, evmProvider);
         const twiceGasPrice = gasPrice * 2n;
         const tx = {
           type: 2,
@@ -1301,7 +1301,7 @@ export const EVMChain = chain_name => {
         }
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         console.error(
           'Error in accelerate ether Transaction  transaction',
           reason,
@@ -1386,7 +1386,7 @@ export const EVMChain = chain_name => {
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
         console.error('Error in send ether batch transaction', e);
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         throw new Error(reason);
       }
     },
@@ -1452,7 +1452,7 @@ export const EVMChain = chain_name => {
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
         console.error('Error in send ether token transaction', e);
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         throw new Error(reason);
       }
     },
@@ -1488,17 +1488,17 @@ export const EVMChain = chain_name => {
           finalEstimateGas =
             contract_type === 'ERC1155'
               ? await contract[
-                  'safeTransferFrom(address,address,uint256,uint256,bytes)'
-                ].estimateGas(
-                  from,
-                  to,
-                  Number(tokenId),
-                  Number(tokenAmount),
-                  '0x',
-                )
+                'safeTransferFrom(address,address,uint256,uint256,bytes)'
+              ].estimateGas(
+                from,
+                to,
+                Number(tokenId),
+                Number(tokenAmount),
+                '0x',
+              )
               : await contract[
-                  'safeTransferFrom(address,address,uint256)'
-                ].estimateGas(from, to, Number(tokenId));
+                'safeTransferFrom(address,address,uint256)'
+              ].estimateGas(from, to, Number(tokenId));
         }
         let finalGasPrice = gasFee;
         let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -1527,26 +1527,26 @@ export const EVMChain = chain_name => {
         const tx =
           contract_type === 'ERC1155'
             ? await contract[
-                'safeTransferFrom(address,address,uint256,uint256,bytes)'
-              ].populateTransaction(
-                from,
-                to,
-                Number(tokenId),
-                Number(tokenAmount),
-                '0x',
-                options,
-              )
+              'safeTransferFrom(address,address,uint256,uint256,bytes)'
+            ].populateTransaction(
+              from,
+              to,
+              Number(tokenId),
+              Number(tokenAmount),
+              '0x',
+              options,
+            )
             : await contract[
-                'safeTransferFrom(address,address,uint256)'
-              ].populateTransaction(from, to, Number(tokenId), options);
+              'safeTransferFrom(address,address,uint256)'
+            ].populateTransaction(from, to, Number(tokenId), options);
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
         console.error('Error in send ether nft token transaction', e);
-        const {reason} = await errorDecoder.decode(e);
+        const { reason } = await errorDecoder.decode(e);
         throw new Error(reason);
       }
     },
-    getNonce: async ({address}) => {
+    getNonce: async ({ address }) => {
       let nonce = await EVMChain(chain_name).getSafelyPendingNonce({
         address,
       });
@@ -1561,7 +1561,7 @@ export const EVMChain = chain_name => {
       return nonce;
     },
 
-    getSafelyPendingNonce: ({address}) =>
+    getSafelyPendingNonce: ({ address }) =>
       retryFunc(async evmProvider => {
         try {
           return await evmProvider.getTransactionCount(address, 'pending');
@@ -1570,7 +1570,7 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, 'not_found_pending_nonce'),
-    getSafelyLatestNonce: ({address}) =>
+    getSafelyLatestNonce: ({ address }) =>
       retryFunc(async evmProvider => {
         try {
           return await evmProvider.getTransactionCount(address);
@@ -1579,14 +1579,14 @@ export const EVMChain = chain_name => {
           throw e;
         }
       }, 'not_found_latest_nonce'),
-    waitForConfirmation: async ({transaction, retries, interval}) =>
+    waitForConfirmation: async ({ transaction, retries, interval }) =>
       retryFunc(async evmProvider => {
         if (transaction?.wait) {
           try {
             console.log('wait for transaction', transaction?.hash);
             return await transaction?.wait(null, 60000);
           } catch (e) {
-            const {reason} = await errorDecoder.decode(e);
+            const { reason } = await errorDecoder.decode(e);
             if (reason === 'wait for transaction timeout') {
               return 'pending';
             }
@@ -1614,7 +1614,7 @@ export const EVMChain = chain_name => {
             } catch (e) {
               // Continue waiting
               if (attempts === retries - 1) {
-                const {reason} = await errorDecoder.decode(e);
+                const { reason } = await errorDecoder.decode(e);
                 if (reason === 'wait for transaction timeout') {
                   return 'pending';
                 }

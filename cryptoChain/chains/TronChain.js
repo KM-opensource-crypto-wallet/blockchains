@@ -1,9 +1,9 @@
-import {TronWeb} from 'tronweb';
-import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {convertToSmallAmount} from 'dok-wallet-blockchain-networks/helper';
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+// import {TronWeb} from 'tronweb';
+import { getRPCUrl } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import { convertToSmallAmount } from 'dok-wallet-blockchain-networks/helper';
+import { config, isWeb } from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
-import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
+import { TronScan } from 'dok-wallet-blockchain-networks/service/tronScan';
 import dayjs from 'dayjs';
 
 let accountInfo = {};
@@ -64,7 +64,7 @@ export const TronChain = () => {
     }
   };
 
-  const getAccount = async ({tronWeb, address}) => {
+  const getAccount = async ({ tronWeb, address }) => {
     if (
       accountInfo?.address !== tronWeb?.address.toHex(address) ||
       !lastCallTimeStamp ||
@@ -75,9 +75,9 @@ export const TronChain = () => {
     }
     return accountInfo;
   };
-  const checkNewAccount = async ({tronWeb, address}) => {
+  const checkNewAccount = async ({ tronWeb, address }) => {
     try {
-      const resp = await getAccount({tronWeb, address});
+      const resp = await getAccount({ tronWeb, address });
       return !(resp?.create_time || resp?.latest_opration_time);
     } catch (e) {
       return true;
@@ -214,7 +214,7 @@ export const TronChain = () => {
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
     const transaction = await tronWeb.transactionBuilder.vote(
-      {...selectedVotes},
+      { ...selectedVotes },
       fromAddress,
     );
     return tronWeb.trx.sign(transaction, updatePrivateKey);
@@ -271,10 +271,10 @@ export const TronChain = () => {
     getIconName: async () => {
       return 'TRX';
     },
-    isValidAddress: ({address}) => {
+    isValidAddress: ({ address }) => {
       return defaultTronWeb?.isAddress(address);
     },
-    isValidPrivateKey: ({privateKey}) => {
+    isValidPrivateKey: ({ privateKey }) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
         const address = defaultTronWeb.address.toHex(
@@ -286,7 +286,7 @@ export const TronChain = () => {
       }
     },
 
-    createWalletByPrivateKey: ({privateKey}) => {
+    createWalletByPrivateKey: ({ privateKey }) => {
       const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
       const address = defaultTronWeb.address.toHex(
         defaultTronWeb.address.fromPrivateKey(updatePrivateKey),
@@ -296,7 +296,7 @@ export const TronChain = () => {
         address: defaultTronWeb.address.fromHex(address),
       };
     },
-    getContract: async ({contractAddress}) =>
+    getContract: async ({ contractAddress }) =>
       retryFunc(async tronWeb => {
         try {
           tronWeb.setAddress(contractAddress);
@@ -319,10 +319,10 @@ export const TronChain = () => {
           throw e;
         }
       }, {}),
-    getBalance: async ({address}) =>
+    getBalance: async ({ address }) =>
       retryFunc(async tronWeb => {
         try {
-          const json = await getAccount({tronWeb, address});
+          const json = await getAccount({ tronWeb, address });
           const bal = json?.balance || 0;
 
           return bal?.toString() || '0';
@@ -331,16 +331,16 @@ export const TronChain = () => {
           throw e;
         }
       }, '0'),
-    getStakingBalance: async ({address}) =>
+    getStakingBalance: async ({ address }) =>
       retryFunc(
         async tronWeb => {
           try {
-            const json = await getAccount({tronWeb, address});
+            const json = await getAccount({ tronWeb, address });
             const stakeAmounts = Array.isArray(json?.frozenV2)
               ? json?.frozenV2
               : [];
             const totals = stakeAmounts.reduce(
-              (acc, {amount, type}) => {
+              (acc, { amount, type }) => {
                 const amountBN = new BigNumber(amount || 0);
                 acc.totalStakeBalance = acc.totalStakeBalance.plus(amountBN);
                 if (type === 'ENERGY') {
@@ -375,20 +375,20 @@ export const TronChain = () => {
           bandwidthBalance: '0',
         },
       ),
-    getStaking: async ({address}) =>
+    getStaking: async ({ address }) =>
       retryFunc(async tronWeb => {
         try {
           const resp = await TronScan.getAllValidators();
           const data = resp?.data;
           if (Array.isArray(data)) {
-            const json = await getAccount({tronWeb, address});
+            const json = await getAccount({ tronWeb, address });
             const availableValidators = Array.isArray(json?.votes)
               ? json?.votes.map(item => {
-                  return {
-                    ...item,
-                    vote_address: TronWeb.address.fromHex(item?.vote_address),
-                  };
-                })
+                return {
+                  ...item,
+                  vote_address: TronWeb.address.fromHex(item?.vote_address),
+                };
+              })
               : [];
             return availableValidators.map(validator => {
               const foundValidator = data.find(
@@ -428,16 +428,16 @@ export const TronChain = () => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
 
-          const {transactionFee, energyFee, memoFee} = await getChainData(
+          const { transactionFee, energyFee, memoFee } = await getChainData(
             tronWeb,
           );
           const sunAmount = convertToSmallAmount(amount, decimals);
-          const {bandwidth: availableBandwidth, energy: currentAccountEnergy} =
+          const { bandwidth: availableBandwidth, energy: currentAccountEnergy } =
             await getAccountResourcesData(tronWeb, fromAddress);
           const toAddressHex = tronWeb.address.toHex(toAddress);
           let typesValues = [
-            {type: 'address', value: toAddressHex},
-            {type: 'uint256', value: sunAmount},
+            { type: 'address', value: toAddressHex },
+            { type: 'uint256', value: sunAmount },
           ];
           const tx = await tronWeb.transactionBuilder.triggerConstantContract(
             tronWeb.address.toHex(contractAddress),
@@ -486,7 +486,7 @@ export const TronChain = () => {
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {accountCreationFee, newAccountFee, transactionFee, memoFee} =
+          const { accountCreationFee, newAccountFee, transactionFee, memoFee } =
             await getChainData(tronWeb);
           const sunAmount = tronWeb.toSun(amount);
           const isNewAccount = await checkNewAccount({
@@ -498,7 +498,7 @@ export const TronChain = () => {
             totalFee += newAccountFee;
             totalFee += accountCreationFee;
           } else {
-            const {bandwidth: availableBandwidth} =
+            const { bandwidth: availableBandwidth } =
               await getAccountResourcesData(tronWeb, fromAddress);
             const txData = await createTransactionForFees(
               tronWeb,
@@ -536,8 +536,8 @@ export const TronChain = () => {
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {transactionFee} = await getChainData(tronWeb);
-          const {bandwidth: availableBandwidth} = await getAccountResourcesData(
+          const { transactionFee } = await getChainData(tronWeb);
+          const { bandwidth: availableBandwidth } = await getAccountResourcesData(
             tronWeb,
             fromAddress,
           );
@@ -573,8 +573,8 @@ export const TronChain = () => {
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {transactionFee} = await getChainData(tronWeb);
-          const {bandwidth: availableBandwidth} = await getAccountResourcesData(
+          const { transactionFee } = await getChainData(tronWeb);
+          const { bandwidth: availableBandwidth } = await getAccountResourcesData(
             tronWeb,
             fromAddress,
           );
@@ -609,8 +609,8 @@ export const TronChain = () => {
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {transactionFee} = await getChainData(tronWeb);
-          const {bandwidth: availableBandwidth} = await getAccountResourcesData(
+          const { transactionFee } = await getChainData(tronWeb);
+          const { bandwidth: availableBandwidth } = await getAccountResourcesData(
             tronWeb,
             fromAddress,
           );
@@ -635,12 +635,12 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    getEstimateFeeForWithdrawStaking: async ({fromAddress, privateKey}) =>
+    getEstimateFeeForWithdrawStaking: async ({ fromAddress, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {transactionFee} = await getChainData(tronWeb);
-          const {bandwidth: availableBandwidth} = await getAccountResourcesData(
+          const { transactionFee } = await getChainData(tronWeb);
+          const { bandwidth: availableBandwidth } = await getAccountResourcesData(
             tronWeb,
             fromAddress,
           );
@@ -664,12 +664,12 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    getEstimateFeeForStakingRewards: async ({fromAddress, privateKey}) =>
+    getEstimateFeeForStakingRewards: async ({ fromAddress, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const {transactionFee} = await getChainData(tronWeb);
-          const {bandwidth: availableBandwidth} = await getAccountResourcesData(
+          const { transactionFee } = await getChainData(tronWeb);
+          const { bandwidth: availableBandwidth } = await getAccountResourcesData(
             tronWeb,
             fromAddress,
           );
@@ -693,7 +693,7 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    getTokenBalance: async ({address, contractAddress}) =>
+    getTokenBalance: async ({ address, contractAddress }) =>
       retryFunc(async tronWeb => {
         try {
           tronWeb.setAddress(contractAddress);
@@ -704,12 +704,12 @@ export const TronChain = () => {
           throw e;
         }
       }, '0'),
-    getTransactions: async ({address}) =>
+    getTransactions: async ({ address }) =>
       retryFunc(async tronWeb => {
         try {
           const resp = await tronWeb.fullNode.request(
             `v1/accounts/${address}/transactions`,
-            {limit: 20},
+            { limit: 20 },
             'get',
           );
           return resp?.data?.map(transaction => {
@@ -734,7 +734,7 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
-    getStakingInfo: async ({staking, stakingBalance, address}) =>
+    getStakingInfo: async ({ staking, stakingBalance, address }) =>
       retryFunc(async tronWeb => {
         try {
           let totalValue = new BigNumber(0);
@@ -745,7 +745,7 @@ export const TronChain = () => {
           tempStaking.forEach(item => {
             totalValue = totalValue.plus(new BigNumber(item.amount));
           });
-          const json = await getAccount({tronWeb, address});
+          const json = await getAccount({ tronWeb, address });
           let rewards = 0;
           const lastWithdrawTime = json?.latest_withdraw_time;
           if (
@@ -754,13 +754,13 @@ export const TronChain = () => {
           ) {
             rewards = await tronWeb.trx.getUnconfirmedReward(address);
           }
-          const {count: availableUnfreezeCount} =
+          const { count: availableUnfreezeCount } =
             await tronWeb.trx.getAvailableUnfreezeCount(address);
           const unfrozenV2 = Array.isArray(json?.unfrozenV2)
             ? json?.unfrozenV2
             : [];
           const totalWithdrawAmount = unfrozenV2.reduce(
-            (totalBalance, {unfreeze_amount, unfreeze_expire_time}) => {
+            (totalBalance, { unfreeze_amount, unfreeze_expire_time }) => {
               if (dayjs(unfreeze_expire_time).isBefore(dayjs())) {
                 const amountBN = unfreeze_amount
                   ? new BigNumber(unfreeze_amount)
@@ -817,20 +817,20 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
-    getStakingValidators: async ({address}) =>
+    getStakingValidators: async ({ address }) =>
       retryFunc(async tronWeb => {
         try {
           const resp = await TronScan.getAllValidators();
           const validators = Array.isArray(resp?.data) ? resp.data : [];
 
-          const json = await getAccount({tronWeb, address});
+          const json = await getAccount({ tronWeb, address });
           const availableValidators = Array.isArray(json?.votes)
             ? json?.votes.map(item => {
-                return {
-                  ...item,
-                  vote_address: TronWeb.address.fromHex(item?.vote_address),
-                };
-              })
+              return {
+                ...item,
+                vote_address: TronWeb.address.fromHex(item?.vote_address),
+              };
+            })
             : [];
           const votedValidators = [];
           const otherValidators = [];
@@ -854,7 +854,7 @@ export const TronChain = () => {
           });
           const selectedVotes = availableValidators.reduce(
             (obj, item) =>
-              Object.assign(obj, {[item.vote_address]: item.vote_count}),
+              Object.assign(obj, { [item.vote_address]: item.vote_count }),
             {},
           );
           return {
@@ -867,12 +867,12 @@ export const TronChain = () => {
         }
       }, []),
 
-    getTokenTransactions: async ({address, contractAddress}) =>
+    getTokenTransactions: async ({ address, contractAddress }) =>
       retryFunc(async tronWeb => {
         try {
           const res = await tronWeb.fullNode.request(
             `v1/accounts/${address}/transactions/trc20`,
-            {limit: 20, contract_address: contractAddress},
+            { limit: 20, contract_address: contractAddress },
             'get',
           );
           const data = res?.data;
@@ -896,7 +896,7 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
-    send: async ({to, from, amount, memo, privateKey}) =>
+    send: async ({ to, from, amount, memo, privateKey }) =>
       retryFunc(async tronWeb => {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
         let transaction = await tronWeb.transactionBuilder.sendTrx(
@@ -954,7 +954,7 @@ export const TronChain = () => {
         const signedTx = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
         return await tronWeb.trx.sendRawTransaction(signedTx);
       }, null),
-    createStaking: async ({from, amount, privateKey, resourceType}) =>
+    createStaking: async ({ from, amount, privateKey, resourceType }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -977,7 +977,7 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    createStakingWithValidator: async ({from, privateKey, selectedVotes}) =>
+    createStakingWithValidator: async ({ from, privateKey, selectedVotes }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -998,7 +998,7 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    deactivateStaking: async ({from, amount, privateKey, resourceType}) =>
+    deactivateStaking: async ({ from, amount, privateKey, resourceType }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -1021,7 +1021,7 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    withdrawStaking: async ({from, privateKey}) =>
+    withdrawStaking: async ({ from, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -1041,7 +1041,7 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    stakingRewards: async ({from, privateKey}) =>
+    stakingRewards: async ({ from, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -1061,31 +1061,31 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    signmessageV2: async ({payload, privateKey}) =>
+    signmessageV2: async ({ payload, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const signature = tronWeb.trx.signMessageV2(payload, privateKey);
-          return {signature};
+          return { signature };
         } catch (e) {
           console.error('Error in sign tron message', e);
           return Promise.reject(e?.message);
         }
       }, null),
-    signTransaction: async ({payload, privateKey}) =>
+    signTransaction: async ({ payload, privateKey }) =>
       retryFunc(async tronWeb => {
         try {
           const transactionData = await tronWeb.trx.sign(
-            {...payload},
+            { ...payload },
             privateKey,
           );
-          return {result: transactionData};
+          return { result: transactionData };
         } catch (e) {
           console.error('Error in sign tron transaction', e);
           return Promise.reject(e?.message);
         }
       }, null),
 
-    waitForConfirmation: async ({transaction, interval = 3000, retries = 5}) =>
+    waitForConfirmation: async ({ transaction, interval = 3000, retries = 5 }) =>
       retryFunc(async tronWeb => {
         const transactionID = transaction?.txid;
         if (!transactionID) {

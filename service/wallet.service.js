@@ -1,13 +1,13 @@
-import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
-import {getTransferDataEstimateFee} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
-import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import { getCoin } from '../cryptoChain';
+import { getTransferDataEstimateFee } from '../redux/currentTransfer/currentTransferSelector';
+import { getPrice } from '../service/coinMarketCap';
 import {
   getPendingTransactions,
   getPendingTransactionsWithKey,
   selectCurrentCoin,
   selectCurrentWallet,
-} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
-import {selectAllActiveCurrencies} from 'dok-wallet-blockchain-networks/redux/currency/currencySelectors';
+} from '../redux/wallets/walletsSelector';
+import { selectAllActiveCurrencies } from '../redux/currency/currencySelectors';
 import {
   calculatePrice,
   createBalanceKey,
@@ -18,9 +18,10 @@ import {
   isStakingChain,
   parseBalance,
   validateSupportedChain,
-} from 'dok-wallet-blockchain-networks/helper';
+} from '..//helper';
 import BigNumber from 'bignumber.js';
-import {APP_VERSION} from 'utils/common';
+// import { APP_VERSION } from 'utils/common';
+import { APP_VERSION } from '../../src/utils/common';
 
 export const getCoinSnapshot = async (
   state,
@@ -227,7 +228,7 @@ const updateDeriveAddressesInCoin = (parentCoin, newCoin) => {
   const deriveAddresses = parentCoin?.deriveAddresses;
   const address = parentCoin?.address;
   if (Array.isArray(deriveAddresses) && deriveAddresses?.length) {
-    return {...newCoin, deriveAddresses, address};
+    return { ...newCoin, deriveAddresses, address };
   }
   console.warn('derive address not found while adding coin');
   return newCoin;
@@ -288,7 +289,7 @@ export const fetchBatchTransactionBalances = async (
     const address = item?.address;
     const contractAddress = item?.contractAddress;
     const decimal = item?.decimal;
-    const balance = await chain?.getBalance?.({address, contractAddress});
+    const balance = await chain?.getBalance?.({ address, contractAddress });
     return parseBalance(balance, decimal);
   });
 
@@ -310,10 +311,9 @@ export const fetchBatchTransactionBalances = async (
 
       if (availableBalance.isLessThan(requiredAmount)) {
         throw new Error(
-          `Insufficient balance for ${coinInfo?.symbol || 'token'} on ${
-            coinInfo?.chain_display_name || coinInfo?.chain_name
+          `Insufficient balance for ${coinInfo?.symbol || 'token'} on ${coinInfo?.chain_display_name || coinInfo?.chain_name
           }. ` +
-            `Required: ${requiredAmount.toString()}, Available: ${availableBalance.toString()}`,
+          `Required: ${requiredAmount.toString()}, Available: ${availableBalance.toString()}`,
         );
       }
     }

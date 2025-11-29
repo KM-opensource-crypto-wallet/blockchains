@@ -7,19 +7,19 @@ export const tronWalletConnectTransaction = async (
   privateKey,
   signTypeData,
 ) => {
-  const {
-    TronChain,
-  } = require('dok-wallet-blockchain-networks/cryptoChain/chains/TronChain');
+  // const {
+  //   TronChain,
+  // } = require('dok-wallet-blockchain-networks/cryptoChain/chains/TronChain');
   let tx = null;
-  switch (method) {
-    case TRON_SIGN_TRANSACTION:
-      tx = await TronChain().signTransaction({payload, privateKey});
-      break;
-    case TRON_SIGN_MESSAGE:
-      tx = await TronChain().signmessageV2({payload: signTypeData, privateKey});
-      break;
-    default:
-      break;
-  }
+  // switch (method) {
+  //   case TRON_SIGN_TRANSACTION:
+  //     tx = await TronChain().signTransaction({payload, privateKey});
+  //     break;
+  //   case TRON_SIGN_MESSAGE:
+  //     tx = await TronChain().signmessageV2({payload: signTypeData, privateKey});
+  //     break;
+  //   default:
+  //     break;
+  // }
   return tx;
 };
