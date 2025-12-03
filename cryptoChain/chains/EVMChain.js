@@ -102,7 +102,7 @@ export const EVMChain = chain_name => {
     const feeData = await evmProvider.getFeeData();
     let data = resp?.data;
 
-    const gasPrice = data || feeData?.gasPrice;
+    const gasPrice = data && Number(data) > 0 ? data : feeData?.gasPrice;
     const gasPriceNumber = validateNumber(gasPrice);
     if (!gasPriceNumber) {
       throw new Error('Fee data not available');
