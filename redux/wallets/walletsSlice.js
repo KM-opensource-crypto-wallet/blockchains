@@ -811,7 +811,7 @@ export const sendFunds = createAsyncThunk(
 
       if (res) {
         if (navigation) {
-          navigation.navigate('Sidebar', {
+          navigation.popTo('Sidebar', {
             screen: 'Home',
           });
         } else if (router) {
@@ -1006,7 +1006,7 @@ export const sendPendingTransactions = createAsyncThunk(
 
       if (res) {
         if (navigation) {
-          navigation.navigate('Sidebar', {
+          navigation.popTo('Sidebar', {
             screen: 'Home',
           });
         } else if (router) {
