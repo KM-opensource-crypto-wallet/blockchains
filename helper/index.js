@@ -1,8 +1,8 @@
 import BigNumber from 'bignumber.js';
-import {formatUnits, isHexString, parseUnits, toUtf8String} from 'ethers';
+import { formatUnits, isHexString, parseUnits, toUtf8String } from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
-import {APP_VERSION} from 'utils/common';
+import { APP_VERSION } from 'utils/common';
 import {
   config,
   SCAN_URL,
@@ -12,9 +12,8 @@ import bs58 from 'bs58';
 dayjs.extend(duration);
 
 export function getCustomizePublicAddress(str) {
-  return `${str?.substring(0, 8) || ''}...${
-    str?.substring(str.length - 7, str.length) || ''
-  }`;
+  return `${str?.substring(0, 8) || ''}...${str?.substring(str.length - 7, str.length) || ''
+    }`;
 }
 
 export function capitalizeFirstLetter(str) {
@@ -48,7 +47,7 @@ export function debounce(callback, timer) {
 export function parseCryptoQrCodeString(qrCodeString) {
   const parts = qrCodeString.split(':');
   if (parts.length !== 2) {
-    return {address: qrCodeString};
+    return { address: qrCodeString };
   }
 
   const scheme = parts[0]?.toUpperCase();
@@ -499,10 +498,10 @@ export const checkValidChainForWalletImportWithPrivateKey = ({
 export const getNativeCoinByTokenCoin = (allCoins, tokenCoin) => {
   return tokenCoin?.type === 'token'
     ? allCoins.find(
-        item =>
-          item.symbol === tokenCoin?.chain_symbol &&
-          item.chain_name === tokenCoin?.chain_name,
-      )
+      item =>
+        item.symbol === tokenCoin?.chain_symbol &&
+        item.chain_name === tokenCoin?.chain_name,
+    )
     : null;
 };
 
@@ -526,9 +525,8 @@ export const differentInCurrentTime = date => {
   const endDate = dayjs(date);
   const diff = endDate.diff(currentDate);
   let res = dayjs.duration(diff);
-  return `${
-    res.days() > 0 ? `${res.days()} day(s)` : ''
-  } ${res.hours()} hour(s)`;
+  return `${res.days() > 0 ? `${res.days()} day(s)` : ''
+    } ${res.hours()} hour(s)`;
 };
 
 export const isValidObject = data => {
@@ -902,21 +900,18 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
         ? 'polygon_blockscout'
         : 'polygon_scan';
     }
-    return `${SCAN_URL[chain_name]}/address/${address}${
-      type === 'token' ? '#tokentxns' : ''
-    }`;
+    return `${SCAN_URL[chain_name]}/address/${address}${type === 'token' ? '#tokentxns' : ''
+      }`;
   } else if (chain_name === 'tron') {
-    return `${config.TRON_SCAN_URL}/address/${address}/${
-      type === 'token' ? 'transfers' : ''
-    }`;
+    return `${config.TRON_SCAN_URL}/address/${address}/${type === 'token' ? 'transfers' : ''
+      }`;
   } else if (chain_name === 'bitcoin') {
     return `${config.BITCOIN_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'litecoin') {
     return `${config.LITECOIN_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'solana') {
-    return `${config.SOLANA_SCAN_URL}/address/${address}${
-      IS_SANDBOX ? '?cluster=devnet' : ''
-    }`;
+    return `${config.SOLANA_SCAN_URL}/address/${address}${IS_SANDBOX ? '?cluster=devnet' : ''
+      }`;
   } else if (chain_name === 'stellar') {
     return `${config.STELLAR_SCAN_URL}/accounts/${address}`;
   } else if (chain_name === 'ripple') {
@@ -930,17 +925,15 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
   } else if (chain_name === 'polkadot') {
     return `${config.POLKADOT_SCAN_URL}/account/${address}?tab=transfer`;
   } else if (chain_name === 'ton') {
-    return `${config.TON_SCAN_URL}/address/${address}${
-      type === 'token' ? '#tokentxns' : ''
-    }`;
+    return `${config.TON_SCAN_URL}/address/${address}${type === 'token' ? '#tokentxns' : ''
+      }`;
   } else if (chain_name === 'dogecoin') {
     return `${config.DOGECOIN_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'bitcoin_cash') {
     return `${config.BITCOIN_CASH_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'aptos') {
-    return `${config.APTOS_SCAN_URL}/account/${address}?network=${
-      IS_SANDBOX ? 'testnet' : 'mainnet'
-    }`;
+    return `${config.APTOS_SCAN_URL}/account/${address}?network=${IS_SANDBOX ? 'testnet' : 'mainnet'
+      }`;
   } else if (chain_name === 'hedera') {
     return `${config.HEDERA_SCAN_URL}/account/${address}`;
   } else if (chain_name === 'cardano') {
@@ -1128,7 +1121,7 @@ export function formatExchangeArray(arr) {
   return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)}`;
 }
 
-export const createPendingTransactionKey = ({chain_name, symbol, address}) => {
+export const createPendingTransactionKey = ({ chain_name, symbol, address }) => {
   return `${chain_name}_${symbol}_${address}`;
 };
 
@@ -1287,7 +1280,7 @@ export function customFetchWithTimeout(url, options = {}) {
   const timeoutMs = 20000; // Timeout duration in milliseconds (5 seconds)
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  const updatedOptions = {...options, signal: controller.signal};
+  const updatedOptions = { ...options, signal: controller.signal };
 
   return fetch(url, updatedOptions)
     .then(response => {
@@ -1308,7 +1301,7 @@ export const isNewerVersion = (v1, v2) => {
   const b = v2.split('.').map(Number);
   return a.some((part, i) => part !== (b[i] || 0))
     ? a.find((part, i) => part !== (b[i] || 0)) >
-        (b[a.findIndex((part, i) => part !== (b[i] || 0))] || 0)
+    (b[a.findIndex((part, i) => part !== (b[i] || 0))] || 0)
     : false;
 };
 

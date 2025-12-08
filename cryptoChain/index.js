@@ -1,65 +1,66 @@
-import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronChain';
-import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
+// import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronChain';
+// import { EVMChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
+import { EVMChain } from '../cryptoChain/chains/EVMChain';
 import {
   isAddressOrPrivateKeyExists,
   validateSupportedChain,
-} from 'dok-wallet-blockchain-networks/helper';
-import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-import {BitcoinChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
-import {SolanaChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/SolanaChain';
-import {StellarChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/StellarChain';
-import {RippleChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/RippleChain';
-import {ThorChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/ThorChain';
-import {TezosChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TezosChain';
-import {CosmosChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/CosmosChain';
-import {createWallet} from 'myWallet/wallet.service';
-import {PolkadotChain} from './chains/PolkadotChain';
-import {TonChain} from './chains/TonChain';
-import {DogecoinOrLitecoinChain} from './chains/DogecoinOrLitecoinChain';
-import {AptosChain} from './chains/AptosChain';
-import {HederaChain} from './chains/HederaChain';
-import {CardanoChain} from './chains/CardanoChain';
-import {FilecoinChain} from './chains/FilecoinChain';
+} from '../helper';
+// import { IS_SANDBOX } from 'dok-wallet-blockchain-networks/config/config';
+// import { BitcoinChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
+// import { SolanaChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/SolanaChain';
+// import { StellarChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/StellarChain';
+// import { RippleChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/RippleChain';
+// import { ThorChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/ThorChain';
+// import { TezosChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/TezosChain';
+// import { CosmosChain } from 'dok-wallet-blockchain-networks/cryptoChain/chains/CosmosChain';
+// import { createWallet } from 'myWallet/wallet.service';
+// import { PolkadotChain } from './chains/PolkadotChain';
+// import { TonChain } from './chains/TonChain';
+// import { DogecoinOrLitecoinChain } from './chains/DogecoinOrLitecoinChain';
+// import { AptosChain } from './chains/AptosChain';
+// import { HederaChain } from './chains/HederaChain';
+// import { CardanoChain } from './chains/CardanoChain';
+// import { FilecoinChain } from './chains/FilecoinChain';
 
 const chains = {
-  tron: TronChain,
+  // tron: TronChain,
   ethereum: EVMChain,
   binance_smart_chain: EVMChain,
-  bitcoin: BitcoinChain, // this is native segwit
-  bitcoin_legacy: BitcoinChain,
-  bitcoin_segwit: BitcoinChain,
+  // bitcoin: BitcoinChain, // this is native segwit
+  // bitcoin_legacy: BitcoinChain,
+  // bitcoin_segwit: BitcoinChain,
   // bitcoin_taproot: BitcoinChain,
-  solana: SolanaChain,
+  // solana: SolanaChain,
   polygon: EVMChain,
   base: EVMChain,
   arbitrum: EVMChain,
   optimism: EVMChain,
-  litecoin: DogecoinOrLitecoinChain,
-  stellar: StellarChain,
-  ripple: RippleChain,
-  thorchain: ThorChain,
-  tezos: TezosChain,
-  optimism_binance_smart_chain: EVMChain,
+  // litecoin: DogecoinOrLitecoinChain,
+  // stellar: StellarChain,
+  // ripple: RippleChain,
+  // thorchain: ThorChain,
+  // tezos: TezosChain,
+  // optimism_binance_smart_chain: EVMChain,
   avalanche: EVMChain,
-  cosmos: CosmosChain,
+  // cosmos: CosmosChain,
   fantom: EVMChain,
   gnosis: EVMChain,
   viction: EVMChain,
-  polkadot: PolkadotChain,
-  ton: TonChain,
-  dogecoin: DogecoinOrLitecoinChain,
-  aptos: AptosChain,
+  // polkadot: PolkadotChain,
+  // ton: TonChain,
+  // dogecoin: DogecoinOrLitecoinChain,
+  // aptos: AptosChain,
   linea: EVMChain,
   zksync: EVMChain,
-  ethereum_classic: EVMChain,
-  ethereum_pow: EVMChain,
+  // ethereum_classic: EVMChain,
+  // ethereum_pow: EVMChain,
   kava: EVMChain,
-  bitcoin_cash: DogecoinOrLitecoinChain,
-  hedera: HederaChain,
+  // bitcoin_cash: DogecoinOrLitecoinChain,
+  // hedera: HederaChain,
   ink: EVMChain,
   sei: EVMChain,
-  cardano: CardanoChain,
-  filecoin: FilecoinChain,
+  // // cardano: CardanoChain,
+  // filecoin: FilecoinChain,
 };
 
 export const getChain = chain => {
@@ -149,7 +150,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         address: wallet.address,
       }),
     getStakingValidators: async payload =>
-      await chain.getStakingValidators({address: wallet.address, ...payload}),
+      await chain.getStakingValidators({ address: wallet.address, ...payload }),
     getStaking: async () =>
       await chain?.getStaking({
         address: wallet.address,
@@ -255,7 +256,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         decimals: coin.decimal,
         ...payload,
       }),
-    isValidAddress: ({address}) => chain?.isValidAddress({address}),
+    isValidAddress: ({ address }) => chain?.isValidAddress({ address }),
     getNFTEstimateFee: async payload =>
       await chain.getEstimateFeeForNFT({
         ...payload,
@@ -341,7 +342,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         address: wallet.address,
       }),
     getStakingValidators: async payload =>
-      await chain.getStakingValidators({address: wallet.address, ...payload}),
+      await chain.getStakingValidators({ address: wallet.address, ...payload }),
     getStakingInfo: async payload =>
       await chain?.getStakingInfo({
         address: wallet.address,
@@ -444,7 +445,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         decimals: token.decimal,
         ...payload,
       }),
-    isValidAddress: ({address}) => chain?.isValidAddress({address}),
+    isValidAddress: ({ address }) => chain?.isValidAddress({ address }),
     getNFTEstimateFee: async payload =>
       await chain.getEstimateFeeForNFT({
         ...payload,
