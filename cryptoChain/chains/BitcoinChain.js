@@ -605,7 +605,6 @@ const buildUTXO = async ({
     // Sign inputs
     for (let i = 0; i < inputData.length; i++) {
       const derivePath = inputData[i].derivePath;
-      console.log('keypairss', keyPairs[derivePath]);
       await tx.signInput(i, keyPairs[derivePath]);
     }
     const validator = (pubkey, msghash, signature) =>
