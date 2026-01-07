@@ -22,8 +22,8 @@ const allRPCUrl = {
     testnet: 'wss://s.altnet.rippletest.net:51233',
   },
   tezos: {
-    mainnet: 'https://tzkt.io',
-    testnet: 'https://ghostnet.tzkt.io',
+    mainnet: 'https://mainnet.tezos.ecadinfra.com',
+    testnet: 'https://ghostnet.ecadinfra.com',
   },
   stellar: {
     mainnet: 'https://horizon.stellar.org',
@@ -54,8 +54,8 @@ const allRPCUrl = {
     testnet: 'https://cosmos-rpc.publicnode.com:443',
   },
   polkadot: {
-    mainnet: 'wss://1rpc.io/dot',
-    testnet: 'wss://1rpc.io/dot',
+    mainnet: 'https://dot-rpc.stakeworld.io/assethub',
+    testnet: 'https://dot-rpc.stakeworld.io/assethub',
   },
   ton: {
     mainnet: 'https://toncenter.com/api/v2/jsonRPC',
@@ -80,9 +80,7 @@ const allFreeRpcUrl = {
     ],
     testnet: [
       'https://1rpc.io/sepolia',
-      'https://rpc.sepolia.org',
       'https://ethereum-sepolia-rpc.publicnode.com',
-      'https://eth-sepolia.public.blastapi.io',
     ],
   },
   arbitrum: {
@@ -90,10 +88,7 @@ const allFreeRpcUrl = {
       'https://arbitrum-one-rpc.publicnode.com',
       'https://arbitrum.drpc.org',
     ],
-    testnet: [
-      'https://arbitrum-sepolia.blockpi.network/v1/rpc/public',
-      'https://sepolia-rollup.arbitrum.io/rpc',
-    ],
+    testnet: ['https://sepolia-rollup.arbitrum.io/rpc'],
   },
   base: {
     mainnet: [
@@ -102,7 +97,6 @@ const allFreeRpcUrl = {
       'https://base.llamarpc.com',
     ],
     testnet: [
-      'https://base-sepolia.blockpi.network/v1/rpc/public',
       'https://base-sepolia-rpc.publicnode.com',
       'https://sepolia.base.org',
     ],
@@ -110,7 +104,6 @@ const allFreeRpcUrl = {
   optimism: {
     mainnet: [
       'https://optimism-rpc.publicnode.com',
-      'https://optimism-mainnet.public.blastapi.io',
       'https://optimism.drpc.org',
     ],
     testnet: ['https://sepolia.optimism.io'],
@@ -121,10 +114,7 @@ const allFreeRpcUrl = {
       'https://polygon.drpc.org',
       'https://polygon-public.nodies.app',
     ],
-    testnet: [
-      'https://polygon-amoy-bor-rpc.publicnode.com',
-      'https://polygon-amoy.therpc.io',
-    ],
+    testnet: ['https://polygon-amoy-bor-rpc.publicnode.com'],
   },
   binance_smart_chain: {
     mainnet: [
@@ -133,10 +123,7 @@ const allFreeRpcUrl = {
       'https://binance.llamarpc.com',
       'https://binance-smart-chain-public.nodies.app',
     ],
-    testnet: [
-      'https://bsc-testnet.public.blastapi.io',
-      'https://bsc-testnet.publicnode.com',
-    ],
+    testnet: ['https://bsc-testnet.publicnode.com'],
   },
   optimism_binance_smart_chain: {
     mainnet: ['https://opbnb-rpc.publicnode.com', 'https://opbnb.drpc.org'],
@@ -150,7 +137,6 @@ const allFreeRpcUrl = {
     mainnet: [
       'https://avalanche-c-chain-rpc.publicnode.com',
       'https://avalanche.drpc.org',
-      'https://ava-mainnet.public.blastapi.io/ext/bc/C/rpc',
     ],
     testnet: [
       'https://avalanche-fuji-c-chain-rpc.publicnode.com',
@@ -167,11 +153,7 @@ const allFreeRpcUrl = {
     testnet: ['https://fantom-testnet.drpc.org'],
   },
   gnosis: {
-    mainnet: [
-      'https://gnosis-rpc.publicnode.com',
-      'https://gnosis-mainnet.public.blastapi.io',
-      'https://gnosis.drpc.org',
-    ],
+    mainnet: ['https://gnosis-rpc.publicnode.com', 'https://gnosis.drpc.org'],
     testnet: [
       'https://1rpc.io/gnosis',
       'https://gnosis-chiado-rpc.publicnode.com',
@@ -179,16 +161,12 @@ const allFreeRpcUrl = {
     ],
   },
   viction: {
-    mainnet: [
-      'https://viction.drpc.org',
-      'https://viction.blockpi.network/v1/rpc/public',
-    ],
+    mainnet: ['https://viction.drpc.org'],
     testnet: ['https://rpc-testnet.viction.xyz'],
   },
   linea: {
     mainnet: ['https://linea-rpc.publicnode.com', 'https://linea.drpc.org'],
     testnet: [
-      'https://linea-sepolia.blockpi.network/v1/rpc/public',
       'https://rpc.sepolia.linea.build',
       'https://linea-sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
     ],
@@ -225,7 +203,7 @@ const allFreeRpcUrl = {
     testnet: ['https://rpc-gel-sepolia.inkonchain.com'],
   },
   sei: {
-    mainnet: ['https://sei.therpc.io', 'https://sei.drpc.org'],
+    mainnet: ['https://sei.drpc.org'],
     testnet: [
       'https://evm-rpc-testnet.sei-apis.com',
       'https://sei-testnet-public.nodies.app',

@@ -526,9 +526,15 @@ const buildUTXO = async ({
         keyPairs[derivePath] = ECPair.fromWIF(tempPrivateKey, customNetwork);
       } else if (!keyPairs[derivePath] && !tempPrivateKey) {
         const root = bip32.fromBase58(extendedPrivateKey, customNetwork);
-        keyPairs[derivePath] = root
+        const childNode = root
           .derive(getLastIndexOfDerivations(derivePath))
           .derive(0);
+        // Convert BIP32 node to ECPair for React Native compatibility
+        keyPairs[derivePath] = ECPair.fromPrivateKey(
+          // eslint-disable-next-line no-undef
+          Buffer.from(childNode.privateKey),
+          {network: customNetwork},
+        );
       }
     }
 
@@ -599,6 +605,7 @@ const buildUTXO = async ({
     // Sign inputs
     for (let i = 0; i < inputData.length; i++) {
       const derivePath = inputData[i].derivePath;
+      console.log('keypairss', keyPairs[derivePath]);
       await tx.signInput(i, keyPairs[derivePath]);
     }
     const validator = (pubkey, msghash, signature) =>

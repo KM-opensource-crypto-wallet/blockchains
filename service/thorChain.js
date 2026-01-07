@@ -26,36 +26,20 @@ export const ThorChainService = {
   },
   getThorTransactions: async address => {
     try {
-      const resp = await Promise.all([
-        axios.get(getThorTransactionUrl(address, true)),
-        axios.get(getThorTransactionUrl(address, false)),
-      ]);
-      const allTransactions = [];
-      for (let item of resp) {
-        if (Array.isArray(item?.data?.txs)) {
-          allTransactions.push(...item.data.txs);
-        }
-      }
-      allTransactions.sort(
-        (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
-      );
-
-      const arrayUniqueByKey = [];
-      allTransactions.filter(function (item) {
-        const i = arrayUniqueByKey.findIndex(x => x.txhash === item.txhash);
-        if (i === -1) {
-          arrayUniqueByKey.push(item);
-        }
-        return null;
+      const resp = await axios.get(getThorTransactionUrl(address));
+      const allTransactions = resp.data.actions;
+      return allTransactions.map(item => {
+        return {
+          txhash: item?.in?.[0]?.txID,
+          from: item?.in?.[0]?.address,
+          to: item?.out?.[0]?.address,
+          amount: item?.in?.[0]?.coins?.find?.(
+            subItem => subItem.asset === 'THOR.RUNE',
+          )?.amount,
+          timestamp: item?.date?.slice(0, -6),
+          status: item?.status?.toUpperCase(),
+        };
       });
-      const last20Transactions = arrayUniqueByKey.slice(0, 20);
-      return last20Transactions.map(item => ({
-        txhash: item?.txhash,
-        from: item?.tx?.value?.msg[0]?.value?.from_address,
-        to: item?.tx?.value?.msg[0]?.value?.to_address,
-        amount: item?.tx?.value?.msg[0]?.value?.amount[0]?.amount,
-        timestamp: item?.timestamp,
-      }));
     } catch (e) {
       console.error('Error in getThortransaction', e);
       return [];
@@ -64,17 +48,15 @@ export const ThorChainService = {
   getTransactionStatus: async txHash => {
     try {
       const resp = await axios.get(
-        `https://thornode-v1.ninerealms.com/txs/${txHash}`,
+        `https://midgard.ninerealms.com/v2/actions?txid=${txHash}`,
       );
-      return !!resp?.data;
+      return !!resp?.data?.actions?.length;
     } catch (e) {
       console.error('Error in get transaction status', e);
       return false;
     }
   },
 };
-const getThorTransactionUrl = (address, isSend) => {
-  return `https://thornode-v1.ninerealms.com/txs?limit=20&page=1&transfer.${
-    isSend ? 'sender' : 'recipient'
-  }=${address}&message.action=send`;
+const getThorTransactionUrl = address => {
+  return `https://midgard.ninerealms.com/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
 };
