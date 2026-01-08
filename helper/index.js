@@ -119,6 +119,7 @@ const supportedChain = [
   'cardano',
   'filecoin',
   // 'bitcoin_taproot'
+  'bitcoin_lightning'
 ];
 
 export function validateSupportedChain(chain_name) {
