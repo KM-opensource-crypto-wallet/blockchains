@@ -21,6 +21,9 @@ import {HederaChain} from './chains/HederaChain';
 import {CardanoChain} from './chains/CardanoChain';
 import {FilecoinChain} from './chains/FilecoinChain';
 
+import  { BitcoinLightningChain } from './chains/BitcoinLightningChain';
+
+// TODO - 7
 const chains = {
   tron: TronChain,
   ethereum: EVMChain,
@@ -28,6 +31,7 @@ const chains = {
   bitcoin: BitcoinChain, // this is native segwit
   bitcoin_legacy: BitcoinChain,
   bitcoin_segwit: BitcoinChain,
+  bitcoin_lightning: BitcoinLightningChain,
   // bitcoin_taproot: BitcoinChain,
   solana: SolanaChain,
   polygon: EVMChain,
@@ -91,7 +95,15 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
     wallet = await BitcoinChain().createBitcoinSegwitWallet({
       mnemonic: phrase,
     });
+  } else if (phrase && chainName === 'bitcoin_lightning') {
+    const lightningChain = await BitcoinLightningChain({
+      mnemonic: phrase,
+    });
+
+    wallet = await lightningChain.generateInvoiceViaBitcoinAddress();
   }
+  // NOTE: Add lightning case
+
   // else if (phrase && chainName === 'bitcoin_taproot') {
   //   wallet = await BitcoinChain().createBitcoinTaprootWallet({
   //     mnemonic: phrase,
