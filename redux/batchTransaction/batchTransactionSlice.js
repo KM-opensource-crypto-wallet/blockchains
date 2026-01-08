@@ -249,7 +249,7 @@ export const addBatchTransaction = createAsyncThunk(
       const navigation = payload?.navigation;
       const router = payload?.router;
       if (navigation) {
-        navigation.navigate('Sidebar', {
+        navigation.popTo('Sidebar', {
           screen: 'Home',
         });
       } else if (router) {

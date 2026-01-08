@@ -4,7 +4,7 @@ import {
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
-import {ApiPromise, HttpProvider} from '@polkadot/api';
+import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
 import {decodeAddress} from '@polkadot/util-crypto';
 import {PolkadotScan} from 'dok-wallet-blockchain-networks/service/PolkadotScan';
@@ -16,7 +16,9 @@ const createOrGetPolkadotProvider = async () => {
     if (polkadotProvider) {
       return polkadotProvider;
     }
-    const provider = new HttpProvider(getRPCUrl('polkadot'));
+    const rpcUrl = getRPCUrl('polkadot');
+    const isWs = rpcUrl?.startsWith('ws');
+    const provider = isWs ? new WsProvider(rpcUrl) : new HttpProvider(rpcUrl);
     polkadotProvider = await ApiPromise.create({provider: provider});
     return polkadotProvider;
   } catch (e) {
