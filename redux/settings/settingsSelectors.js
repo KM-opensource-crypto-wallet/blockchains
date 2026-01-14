@@ -19,3 +19,8 @@ export const getPaymentUrlAmount = state => state.settings.paymentUrlAmount;
 export const getPaymentUrlCurrencyAmount = state =>
   state.settings.paymentUrlCurrencyAmount;
 export const getPaymentUrlCoin = state => state.settings.paymentUrlCoin;
+export const getCoinsSortOption = state =>
+  state.settings.coinsSortOption || 'value_desc';
+
+export const getWalletsSortOption = state =>
+  state.settings.walletsSortOption || 'default';
