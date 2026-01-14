@@ -1717,6 +1717,11 @@ export const walletsSlice = createSlice({
 
       let sortedCoins;
       switch (sortOption) {
+        case 'default':
+          sortedCoins = coins.sort(
+            (a, b) => parseFloat(a.order || 0) - parseFloat(b.order || 0),
+          );
+          break;
         case 'value_desc':
           sortedCoins = coins.sort(
             (a, b) =>
@@ -1794,6 +1799,74 @@ export const walletsSlice = createSlice({
       );
       if (updateArr) {
         currentWallet.coins = updateArr;
+      }
+    },
+    sortWallets: (state, {payload}) => {
+      const sortOption = payload?.sortOption;
+      const wallets = Array.isArray(state.allWallets)
+        ? [...state.allWallets]
+        : [];
+
+      if (wallets.length <= 1) {
+        return;
+      }
+
+      // Save the currently selected wallet's clientId to find it after sorting
+      const currentWallet = wallets[state.currentWalletIndex];
+      const currentWalletId = currentWallet?.clientId || currentWallet?.id;
+
+      // Helper function to calculate wallet total balance
+      const getWalletTotalBalance = coins => {
+        let total = 0;
+        coins?.forEach(coin => {
+          if (coin?.isInWallet) {
+            const value = isNaN(Number(coin.totalCourse))
+              ? 0
+              : Number(coin.totalCourse);
+            total += value;
+          }
+        });
+        return total;
+      };
+
+      let sortedWallets;
+      switch (sortOption) {
+        case 'value_desc':
+          sortedWallets = wallets.sort(
+            (a, b) =>
+              getWalletTotalBalance(b?.coins) - getWalletTotalBalance(a?.coins),
+          );
+          break;
+        case 'value_asc':
+          sortedWallets = wallets.sort(
+            (a, b) =>
+              getWalletTotalBalance(a?.coins) - getWalletTotalBalance(b?.coins),
+          );
+          break;
+        case 'name_asc':
+          sortedWallets = wallets.sort((a, b) =>
+            (a?.walletName || '').localeCompare(b?.walletName || ''),
+          );
+          break;
+        case 'name_desc':
+          sortedWallets = wallets.sort((a, b) =>
+            (b?.walletName || '').localeCompare(a?.walletName || ''),
+          );
+          break;
+        default:
+          sortedWallets = wallets;
+      }
+
+      state.allWallets = sortedWallets;
+
+      // Find the new index of the currently selected wallet
+      const newIndex = sortedWallets.findIndex(
+        wallet => (wallet?.clientId || wallet?.id) === currentWalletId,
+      );
+
+      // Update currentWalletIndex to the new position
+      if (newIndex !== -1) {
+        state.currentWalletIndex = newIndex;
       }
     },
     togglePrivacyMode: (state, {payload}) => {
@@ -2219,6 +2292,7 @@ export const {
   rearrangeCurrentWalletCoins,
   sortCurrentWalletCoins,
   setCurrentWalletCoinsPosition,
+  sortWallets,
   togglePrivacyMode,
   resetCoinsToDefaultAddressForPrivacyMode,
   setMasterClientId,
