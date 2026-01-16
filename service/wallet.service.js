@@ -177,9 +177,15 @@ export const getNativeCoin = async (state, coinSnapshot, walletSnapshot) => {
   }
   return getCoin(wallet.phrase, coin, transactionFee, wallet);
 };
-export const createCoins = async (wallet, state, skipData) => {
+export const createCoins = async (
+  wallet,
+  state,
+  skipData,
+  customCoinList = null,
+) => {
   const coins = [];
-  const allActiveCurrency = selectAllActiveCurrencies(state);
+  // Use custom coin list if provided, otherwise use selectAllActiveCurrencies
+  const allActiveCurrency = customCoinList || selectAllActiveCurrencies(state);
   const allSymbols = allActiveCurrency?.map(item => item.symbol)?.join(',');
   const localCurrency = state.settings.localCurrency || 'USD';
   let priceObj = {};

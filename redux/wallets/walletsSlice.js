@@ -195,7 +195,22 @@ export const createWallet = createAsyncThunk(
           return thunkAPI.rejectWithValue('coin not created');
         }
       } else {
-        coins = await createCoins(walletData, currentState, true);
+        // Check if selectedCoins is provided (from SelectCoins screen)
+
+        if (
+          walletData?.selectedCoins &&
+          Array.isArray(walletData.selectedCoins) &&
+          walletData.selectedCoins.length > 0
+        ) {
+          coins = await createCoins(
+            walletData,
+            currentState,
+            true,
+            walletData.selectedCoins,
+          );
+        } else {
+          coins = await createCoins(walletData, currentState, true);
+        }
       }
     } catch (error) {
       console.error('error in createCoins', error);
@@ -203,9 +218,19 @@ export const createWallet = createAsyncThunk(
       // throw error;
     }
     newStoreWallet.coins = coins;
-    coins
-      .filter(item => item?.status)
-      .forEach(item => (item.isInWallet = true));
+    // If selectedCoins were provided, mark all of them as isInWallet
+    // Otherwise, only mark coins with status: true
+    if (
+      walletData?.selectedCoins &&
+      Array.isArray(walletData.selectedCoins) &&
+      walletData.selectedCoins.length > 0
+    ) {
+      coins.forEach(item => (item.isInWallet = true));
+    } else {
+      coins
+        .filter(item => item?.status)
+        .forEach(item => (item.isInWallet = true));
+    }
     if (walletData?.phrase) {
       newStoreWallet.phrase = walletData.phrase;
     }
@@ -237,6 +262,11 @@ export const createWallet = createAsyncThunk(
       is_create_wallet: true,
       is_imported: isFromImportWallet,
     });
+    if (isFromImportWallet) {
+      setTimeout(() => {
+        thunkAPI.dispatch(refreshCoins());
+      }, 1000);
+    }
     return {
       newStoreWallet: newStoreWallet,
       replace: walletData.replace,
@@ -1750,22 +1780,30 @@ export const walletsSlice = createSlice({
           break;
         case 'name_asc':
           sortedCoins = coins.sort((a, b) =>
-            (a.name || '').localeCompare(b.name || ''),
+            (a.name || '').localeCompare(b.name || '', undefined, {
+              numeric: true,
+            }),
           );
           break;
         case 'name_desc':
           sortedCoins = coins.sort((a, b) =>
-            (b.name || '').localeCompare(a.name || ''),
+            (b.name || '').localeCompare(a.name || '', undefined, {
+              numeric: true,
+            }),
           );
           break;
         case 'symbol_asc':
           sortedCoins = coins.sort((a, b) =>
-            (a.symbol || '').localeCompare(b.symbol || ''),
+            (a.symbol || '').localeCompare(b.symbol || '', undefined, {
+              numeric: true,
+            }),
           );
           break;
         case 'symbol_desc':
           sortedCoins = coins.sort((a, b) =>
-            (b.symbol || '').localeCompare(a.symbol || ''),
+            (b.symbol || '').localeCompare(a.symbol || '', undefined, {
+              numeric: true,
+            }),
           );
           break;
         default:
@@ -1773,6 +1811,7 @@ export const walletsSlice = createSlice({
       }
 
       currentWallet.coins = sortedCoins;
+      currentWallet.coinsSortOption = sortOption;
     },
     setCurrentWalletCoinsPosition: (state, {payload}) => {
       const index = validateNumber(payload?.index);
@@ -1845,12 +1884,24 @@ export const walletsSlice = createSlice({
           break;
         case 'name_asc':
           sortedWallets = wallets.sort((a, b) =>
-            (a?.walletName || '').localeCompare(b?.walletName || ''),
+            (a?.walletName || '').localeCompare(
+              b?.walletName || '',
+              undefined,
+              {
+                numeric: true,
+              },
+            ),
           );
           break;
         case 'name_desc':
           sortedWallets = wallets.sort((a, b) =>
-            (b?.walletName || '').localeCompare(a?.walletName || ''),
+            (b?.walletName || '').localeCompare(
+              a?.walletName || '',
+              undefined,
+              {
+                numeric: true,
+              },
+            ),
           );
           break;
         default:
@@ -2109,6 +2160,7 @@ export const walletsSlice = createSlice({
       newStoreWallet.address = address;
       newStoreWallet.chain_name = chain_name;
       newStoreWallet.isEVMAddressesAdded = false;
+      newStoreWallet.coinsSortOption = 'default';
 
       // coinsAdapter.addMany(newCoinsState, payload.newStoreWallet.coins);
       // Add the new wallet to the wallets state
