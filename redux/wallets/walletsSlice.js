@@ -262,6 +262,11 @@ export const createWallet = createAsyncThunk(
       is_create_wallet: true,
       is_imported: isFromImportWallet,
     });
+    if (isFromImportWallet) {
+      setTimeout(() => {
+        thunkAPI.dispatch(refreshCoins());
+      }, 1000);
+    }
     return {
       newStoreWallet: newStoreWallet,
       replace: walletData.replace,
