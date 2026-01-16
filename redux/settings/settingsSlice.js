@@ -15,7 +15,6 @@ const state = {
   chatsOptions: false,
   searchInHomeScreen: true,
   isWalletReset: false,
-  coinsSortOption: 'value_desc',
   walletsSortOption: 'default',
 };
 
@@ -65,9 +64,6 @@ export const settingsSlice = createSlice({
     setResetWallet(state, {payload}) {
       state.isWalletReset = payload;
     },
-    setCoinsSortOption(state, {payload}) {
-      state.coinsSortOption = payload;
-    },
     setWalletsSortOption(state, {payload}) {
       state.walletsSortOption = payload;
     },
@@ -88,6 +84,5 @@ export const {
   setPaymentUrlCurrencyAmount,
   updateSearchInHomeScreen,
   setResetWallet,
-  setCoinsSortOption,
   setWalletsSortOption,
 } = settingsSlice.actions;
