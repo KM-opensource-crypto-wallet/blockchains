@@ -4,7 +4,7 @@ import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
 
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export function getSecureRandomValues(length = 16) {
   const result = new Uint8Array(length);
@@ -405,6 +405,9 @@ export const config = {
   BITCOIN_SCAN_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet'
     : 'https://mempool.space',
+  BITCOIN_LIGHTNING_URL: IS_SANDBOX
+    ? 'https://blockstream.info/liquid'
+    : 'https://blockstream.info/liquid',
   BITCOIN_BASE_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet/api'
     : 'https://mempool.space/api',

@@ -125,6 +125,7 @@ const supportedChain = [
   'cardano',
   'filecoin',
   // 'bitcoin_taproot'
+  'bitcoin_lightning',
 ];
 
 export function validateSupportedChain(chain_name) {
@@ -483,6 +484,8 @@ export const isAddressOrPrivateKeyExists = coin => {
       const prefix = IS_SANDBOX ? 'tltc' : 'ltc';
       return coin?.address?.startsWith(prefix);
     }
+    return false;
+  } else if (coin?.address && chain_name === 'bitcoin_lightning') {
     return false;
   }
   return false;
