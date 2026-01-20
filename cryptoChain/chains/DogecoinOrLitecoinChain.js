@@ -3,8 +3,8 @@ import ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
-import {ethers} from 'ethers';
 import {
+  convertToSmallAmount,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -223,7 +223,7 @@ const buildUTXO = async ({
     const keyPair = ECPair.fromWIF(privateKey, network);
     const tx = new bitcoin.Psbt({network: network});
     if (fee) {
-      const feeBn = ethers.parseUnits(fee, 8);
+      const feeBn = convertToSmallAmount(fee, 8);
       fees = new BigNumber(feeBn ? feeBn?.toString() : 10000);
       amountWithFees = amountWithFees.plus(fees);
     }
