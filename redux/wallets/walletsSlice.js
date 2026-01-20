@@ -282,6 +282,9 @@ export const createWallet = createAsyncThunk(
 export const createWalletsBatch = createAsyncThunk(
   'wallets/createWalletsBatch',
   async (walletsDataArray, thunkAPI) => {
+    if (!Array.isArray(walletsDataArray) || walletsDataArray.length === 0) {
+      return thunkAPI.rejectWithValue('Invalid or empty wallets data array');
+    }
     const currentState = thunkAPI.getState();
     const allWalletsName = selectAllWalletName(currentState);
     const existingWallets = selectAllWallets(currentState);
