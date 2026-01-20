@@ -158,7 +158,7 @@ export const createWallet = createAsyncThunk(
 
     const newStoreWallet = {
       walletName: walletData.walletName ?? currentWallet.walletName,
-      clientId: v4(),
+      clientId: walletData.clientId || v4(),
     };
     let isFromImportWallet = !!walletData.phrase || !!walletData?.privateKey;
     let isImportWalletWithPrivateKey = !!walletData?.privateKey;
@@ -275,6 +275,170 @@ export const createWallet = createAsyncThunk(
       address,
       privateKey,
       chain_name,
+    };
+  },
+);
+
+export const createWalletsBatch = createAsyncThunk(
+  'wallets/createWalletsBatch',
+  async (walletsDataArray, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const allWalletsName = selectAllWalletName(currentState);
+    const existingWallets = selectAllWallets(currentState);
+    const isMaxWalletLimitReached = getIsMaxWalletLimitReached(currentState);
+    const masterClientId = getMasterClientId(currentState);
+
+    if (existingWallets.length + walletsDataArray.length > 50) {
+      if (isMaxWalletLimitReached) {
+        const message = 'Max wallet limit reached.';
+        showToast({type: 'errorToast', title: message});
+        return thunkAPI.rejectWithValue(message);
+      }
+    }
+
+    // Pre-calculate unique names to avoid race conditions during parallel processing
+    let currentWalletIndex = existingWallets.length + 1;
+    const reservedNames = new Set([...allWalletsName]);
+
+    const walletsWithNames = walletsDataArray.map(walletData => {
+      let newWalletName = walletData.walletName;
+
+      if (!newWalletName || reservedNames.has(newWalletName)) {
+        do {
+          newWalletName = `Wallet ${currentWalletIndex}`;
+          currentWalletIndex++;
+        } while (reservedNames.has(newWalletName));
+      }
+
+      reservedNames.add(newWalletName);
+
+      return {
+        ...walletData,
+        walletName: newWalletName,
+        clientId: walletData.clientId || v4(),
+      };
+    });
+
+    const successfulWallets = [];
+    const failedWallets = [];
+
+    const processWallet = async walletData => {
+      try {
+        const newStoreWallet = {
+          walletName: walletData.walletName,
+          clientId: walletData.clientId || v4(),
+          isBackedup: true,
+          isFromImportWallet: true,
+          updateTimestamp: Date.now(),
+          coinsSortOption: 'default',
+          isEVMAddressesAdded: false,
+        };
+
+        let coins = [];
+        let address = null;
+        let privateKey = null;
+        let chain_name = null;
+
+        // Recovery and Validation for Restoration
+        const recoveredChainName =
+          walletData.chain_name || walletData.coins?.[0]?.chain_name || null;
+
+        // Scenario 1: Phrase-based wallet (Mnemonic)
+        if (walletData.phrase) {
+          try {
+            const coinListTemplate =
+              Array.isArray(walletData.coins) && walletData.coins.length > 0
+                ? walletData.coins
+                : null;
+
+            coins = await createCoins(
+              walletData,
+              currentState,
+              true,
+              coinListTemplate,
+            );
+
+            coins
+              .filter(item => item?.status)
+              .forEach(item => (item.isInWallet = true));
+            newStoreWallet.phrase = walletData.phrase;
+            newStoreWallet.isImportWalletWithPrivateKey = false;
+          } catch (phraseError) {
+            throw phraseError;
+          }
+        }
+        // Scenario 2: Private Key-based wallet
+        else if (walletData.privateKey) {
+          if (!recoveredChainName) {
+            throw new Error(
+              `Missing chain information for private key wallet: ${walletData.walletName}. Please perform a new backup to ensure this data is saved.`,
+            );
+          }
+
+          try {
+            const newCoin = await fetchCoinByChainAPI({
+              chain_name: recoveredChainName,
+            });
+            if (!newCoin)
+              throw new Error(
+                `Coin not found for chain: ${recoveredChainName}`,
+              );
+
+            const createdCoin = await createCoin(
+              {...walletData, chain_name: recoveredChainName},
+              {...newCoin, isInWallet: true},
+              currentState,
+            );
+
+            if (createdCoin?.address && createdCoin?.privateKey) {
+              address = createdCoin.address;
+              privateKey = createdCoin.privateKey;
+              chain_name = recoveredChainName;
+              coins = [createdCoin];
+
+              newStoreWallet.isImportWalletWithPrivateKey = true;
+              newStoreWallet.privateKey = privateKey;
+              newStoreWallet.address = address;
+              newStoreWallet.chain_name = chain_name;
+            } else {
+              throw new Error('Coin creation failed for private key wallet');
+            }
+          } catch (pkError) {
+            throw pkError;
+          }
+        } else {
+          throw new Error(
+            `Invalid wallet data: Missing phrase or private key for ${walletData.walletName}`,
+          );
+        }
+
+        newStoreWallet.coins = coins;
+
+        await registerUserAPI({
+          coins: newStoreWallet.coins,
+          clientId: newStoreWallet.clientId,
+          masterClientId,
+          is_imported: true,
+        });
+
+        successfulWallets.push(newStoreWallet);
+      } catch (error) {
+        failedWallets.push({...walletData, error: error.message || error});
+      }
+    };
+
+    // Parallel processing with pre-calculated names
+    await Promise.all(walletsWithNames.map(processWallet));
+
+    if (successfulWallets.length > 0) {
+      setTimeout(() => {
+        thunkAPI.dispatch(refreshCoins());
+      }, 1000);
+    }
+
+    return {
+      newWallets: successfulWallets,
+      failedWallets: failedWallets,
     };
   },
 );
@@ -2142,6 +2306,13 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
+      }
+    });
+    builder.addCase(createWalletsBatch.fulfilled, (state, {payload}) => {
+      const newWallets = payload?.newWallets || [];
+      if (newWallets.length > 0) {
+        state.allWallets = [...state.allWallets, ...newWallets];
+        state.currentWalletIndex = state.allWallets.length - 1;
       }
     });
     builder.addCase(createWallet.fulfilled, (state, {payload}) => {
