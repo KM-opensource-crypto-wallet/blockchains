@@ -288,12 +288,10 @@ export const createWalletsBatch = createAsyncThunk(
     const isMaxWalletLimitReached = getIsMaxWalletLimitReached(currentState);
     const masterClientId = getMasterClientId(currentState);
 
-    if (existingWallets.length + walletsDataArray.length > 50) {
-      if (isMaxWalletLimitReached) {
-        const message = 'Max wallet limit reached.';
-        showToast({type: 'errorToast', title: message});
-        return thunkAPI.rejectWithValue(message);
-      }
+    if (isMaxWalletLimitReached) {
+      const message = 'Max wallet limit reached.';
+      showToast({type: 'errorToast', title: message});
+      return thunkAPI.rejectWithValue(message);
     }
 
     // Pre-calculate unique names to avoid race conditions during parallel processing
