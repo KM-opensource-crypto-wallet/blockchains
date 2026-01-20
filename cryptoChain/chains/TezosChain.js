@@ -1,11 +1,11 @@
 import {TezosToolkit} from '@taquito/taquito';
 import {validateAddress, ValidationResult} from '@taquito/utils';
 import {InMemorySigner} from '@taquito/signer';
-import {ethers} from 'ethers';
 import BigNumber from 'bignumber.js';
 import {Tzkt} from 'dok-wallet-blockchain-networks/service/tzkt';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
 
 export const TezosChain = () => {
   const tezosProvider = new TezosToolkit(getRPCUrl('tezos'));
@@ -46,7 +46,7 @@ export const TezosChain = () => {
           estimate?.suggestedFeeMutez,
           estimate?.totalCost,
         );
-        const fees = ethers.formatUnits(finalFee, 6) || '0';
+        const fees = parseBalance(finalFee, 6) || '0';
 
         return {
           fee: fees,

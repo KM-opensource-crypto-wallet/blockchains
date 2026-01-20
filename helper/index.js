@@ -139,8 +139,8 @@ export function parseBalance(tokenPrice, tokenDecimals) {
     if (!tokenPrice || !tokenDecimals) {
       return '0';
     }
-    const price = BigInt(tokenPrice?.toString());
-    return formatUnits(price, Number(tokenDecimals));
+    const bnTokenPrice = new BigNumber(tokenPrice).toFixed(0);
+    return formatUnits(bnTokenPrice, Number(tokenDecimals));
   } catch (e) {
     console.error('Error in price', e);
     return '0';
@@ -152,8 +152,8 @@ export function calculatePrice(tokenPrice, tokenDecimals, realPrice) {
     if (!tokenPrice || !tokenDecimals || !realPrice) {
       return '0';
     }
-    const price = BigInt(tokenPrice);
-    const parseBalString = formatUnits(price, Number(tokenDecimals));
+    const sanitizedPrice = new BigNumber(tokenPrice).toFixed(0);
+    const parseBalString = formatUnits(sanitizedPrice, Number(tokenDecimals));
     const parseBal = new BigNumber(parseBalString);
     const currentPriceBigNumber = new BigNumber(realPrice);
     const finalPrice = parseBal.multipliedBy(currentPriceBigNumber);
@@ -169,9 +169,13 @@ export function convertToSmallAmount(tokenPrice, tokenDecimals) {
     if (!tokenPrice || !tokenDecimals) {
       return '0';
     }
-    return parseUnits(tokenPrice, Number(tokenDecimals)).toString();
+    // Use toFixed to prevent scientific notation and ensure proper decimal handling
+    const sanitizedPrice = new BigNumber(tokenPrice).toFixed(
+      Number(tokenDecimals),
+    );
+    return parseUnits(sanitizedPrice, Number(tokenDecimals)).toString();
   } catch (e) {
-    console.error('Error in calculatePrice', e);
+    console.error('Error in convertToSmallAmount', e);
     return '0';
   }
 }
@@ -307,6 +311,7 @@ export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
 
 const OPTIONS_GAS_FEES_CHAIN = [
   'ethereum',
+  'binance_smart_chain',
   'fantom',
   'avalanche',
   'gnosis',
