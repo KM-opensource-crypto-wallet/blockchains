@@ -97,7 +97,6 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
     const lightningChain = await BitcoinLightningChain(chainName, phrase);
 
     wallet = await lightningChain.generateSparkAddress();
-    console.log('wallet:', wallet);
   }
   // else if (phrase && chainName === 'bitcoin_taproot') {
   //   wallet = await BitcoinChain().createBitcoinTaprootWallet({

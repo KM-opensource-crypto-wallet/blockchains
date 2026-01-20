@@ -58,7 +58,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
         storageDir: workingDir,
       });
       sdkMap.set(mnemonic, sdkInstance);
-      console.log('✅ Breez SDK connected');
       return sdkInstance;
     } catch (err) {
       console.error('❌ Connection error:', err);
@@ -69,11 +68,9 @@ export const BitcoinLightningChain = (chain, phrase) => {
   };
 
   async function connectToSdk() {
-    console.log('phrase:', phrase);
     let mnemonic = phrase;
     if (sdkInstance) {
       if (sdkMap.has(mnemonic)) {
-        console.log('♻️ Reusing SDK');
         return sdkMap.get(mnemonic);
       } else {
         // Initialize sdkInstance for the new mnemonic
@@ -95,7 +92,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
 
   async function getBalance() {
     const sdk = await connectToSdk();
-    console.log('getBalance sdk:', sdk);
     const obj1 = Object.fromEntries(sdkMap);
     console.log('sdkMap as object:', obj1);
     const info = await sdk.getInfo({});
@@ -137,7 +133,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
         offset: undefined,
         limit: 20,
       });
-      console.log('Payments loaded:', response.payments.length);
       return {
         paymentDetails: response.payments,
       };
@@ -153,12 +148,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
       Alert.alert('Error', 'SDK not connected');
       return;
     }
-    // if (invoiceGenerated) return;
-    // invoiceGenerated = true;
-
     try {
-      // const amountSats = invoiceAmount ? BigInt(invoiceAmount) : undefined;
-
       const response = await sdk.receivePayment({
         paymentMethod: new ReceivePaymentMethod.Bolt11Invoice({
           // description: invoiceDescription || 'Payment',
@@ -288,7 +278,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
     try {
       const {lightningFee} = await prepareAndSendPayment(toAddress, amount);
       const fee = satoshiToBtc(lightningFee);
-      console.log('fee:', fee);
       return {
         fee: fee,
         estimateGas: 0,
@@ -378,7 +367,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
 
           if (resolved) return;
 
-          if (event.tag === 'PaymentSucceeded') {
+          if (event.tag === 'PaymentSucceeded' || event.tag === 'Synced') {
             resolved = true;
 
             // 🧹 cleanup
@@ -438,7 +427,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
         limit: 20,
       });
       const transactions = response.payments;
-      console.log('transactions:', transactions);
       if (Array.isArray(transactions)) {
         return transactions.map(item => {
           const txHash = item?.details.inner?.paymentHash || item?.id || 'N/A';
