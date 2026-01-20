@@ -714,7 +714,10 @@ export const EVMChain = chain_name => {
             localErc20ABI,
             walletSigner,
           );
-          const value = ethers.parseUnits(amount, Number(decimals));
+          const sanitizedAmount = new BigNumber(amount).toFixed(
+            Number(decimals),
+          );
+          const value = ethers.parseUnits(sanitizedAmount, Number(decimals));
           const estimateGas = await contract[
             'transfer(address,uint256)'
           ].estimateGas(toAddress, value);
@@ -1416,10 +1419,12 @@ export const EVMChain = chain_name => {
         );
         const decimals = await contract.decimals();
         let finalEstimateGas = estimateGas;
+        const sanitizedAmount = new BigNumber(amount).toFixed(Number(decimals));
+        const value = ethers.parseUnits(sanitizedAmount, Number(decimals));
         if (typeof finalEstimateGas !== 'bigint') {
           finalEstimateGas = await contract[
             'transfer(address,uint256)'
-          ].estimateGas(to, ethers.parseUnits(amount, decimals));
+          ].estimateGas(to, value);
         }
         let finalGasPrice = gasFee;
         let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -1444,9 +1449,13 @@ export const EVMChain = chain_name => {
           delete options.maxFeePerGas;
           options.gasPrice = finalGasPrice;
         }
+        const sanitizedAmount2 = new BigNumber(amount).toFixed(
+          Number(decimals),
+        );
+        const value2 = ethers.parseUnits(sanitizedAmount2, Number(decimals));
         const tx = await contract.transfer.populateTransaction(
           to,
-          ethers.parseUnits(amount.toString(), decimals),
+          value2,
           options,
         );
         return await createSendTransaction(walletSigner, tx);
