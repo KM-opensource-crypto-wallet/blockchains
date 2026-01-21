@@ -93,7 +93,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
   async function getBalance() {
     const sdk = await connectToSdk();
     const obj1 = Object.fromEntries(sdkMap);
-    console.log('sdkMap as object:', obj1);
     const info = await sdk.getInfo({});
     return info.balanceSats;
   }
@@ -151,9 +150,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
     try {
       const response = await sdk.receivePayment({
         paymentMethod: new ReceivePaymentMethod.Bolt11Invoice({
-          // description: invoiceDescription || 'Payment',
           description: 'Payment',
-          // amountSats,
         }),
       });
       return {
@@ -344,7 +341,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
       throw error;
     }
   }
-  // sparkrt1pgssx7kqf6hdkaqlunlpavcl84kf06jc6tqyc8nqqg6msqhwr0xm7438cx53wd
+
   async function waitForConfirmation({transaction}) {
     const transactionID = transaction;
     console.log('transactionID:', transactionID);
@@ -363,8 +360,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
 
       try {
         const eventListener = new JsEventListener(async event => {
-          console.log('event:', event);
-
           if (resolved) return;
 
           if (event.tag === 'PaymentSucceeded' || event.tag === 'Synced') {
@@ -383,7 +378,6 @@ export const BitcoinLightningChain = (chain, phrase) => {
         });
 
         listenerId = await sdk.addEventListener(eventListener);
-        console.log('Event listener registered:', listenerId);
 
         // ⏱️ 90 seconds timeout
         timeoutId = setTimeout(() => {
@@ -439,6 +433,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
             from: item?.details.inner?.preimage,
             to: item?.details.inner?.destinationPubKey,
             totalCourse: '0$',
+            paymentType: item.paymentType,
           };
         });
       }
