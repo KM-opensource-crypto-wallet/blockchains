@@ -32,6 +32,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
     return await generateLightningInvoiceViaBitcoinAddress(phrase);
   }
 
+  
   async function getEstimateFee({
     fromAddress,
     toAddress,
