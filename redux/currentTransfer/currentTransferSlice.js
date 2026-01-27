@@ -11,6 +11,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import BigNumber from 'bignumber.js';
 import {showToast} from 'utils/toast';
+import {ethers} from 'ethers';
 import {
   getAdditionalL1Fee,
   getBitcoinCashFeeMultiplier,
@@ -18,10 +19,7 @@ import {
   getDogecoinFeeMultiplier,
   getLitecoinFeeMultiplier,
 } from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
-import {
-  convertToSmallAmount,
-  parseBalance,
-} from 'dok-wallet-blockchain-networks/helper';
+import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
 
 const initialUpdateTransactionData = {
   isLoading: false,
@@ -431,7 +429,7 @@ export const currentTransferSlice = createSlice({
       const isEVM = payload?.convertedChainName === 'ethereum';
       const gasPriceBN = new BigNumber(
         isEVM
-          ? convertToSmallAmount(gasPrice?.toString(), 9)?.toString()
+          ? ethers.parseUnits(gasPrice?.toString(), 9)?.toString()
           : gasPrice?.toString(),
       );
       const estimateGasBN = new BigNumber(state.transferData.estimateGas);

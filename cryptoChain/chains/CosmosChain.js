@@ -1,9 +1,9 @@
 import BigNumber from 'bignumber.js';
+import {ethers} from 'ethers';
 import {
   convertToSmallAmount,
   getCosmosRequiredFeeAmount,
   isValidStringWithValue,
-  parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   coins,
@@ -114,7 +114,7 @@ export const CosmosChain = () => {
         if (requireAmount) {
           const finalFee = Math.round(Number(requireAmount * 1.4))?.toString();
           return {
-            fee: parseBalance(finalFee, 6) || '0',
+            fee: ethers.formatUnits(finalFee, 6) || '0',
             estimateGas: finalEstimateGas?.toFixed(0),
             gasFee: {
               amount: [

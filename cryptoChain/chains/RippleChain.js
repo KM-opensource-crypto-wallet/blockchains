@@ -1,13 +1,11 @@
+import {ethers} from 'ethers';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {Client} from 'xrpl';
 import {sign} from 'ripple-keypairs';
 import {encodeForSigning} from 'ripple-binary-codec';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {
-  convertToSmallAmount,
-  validateNumber,
-} from 'dok-wallet-blockchain-networks/helper';
+import {validateNumber} from 'dok-wallet-blockchain-networks/helper';
 
 export const RippleChain = () => {
   let rippleProvider;
@@ -108,8 +106,8 @@ export const RippleChain = () => {
         const transaction = {
           TransactionType: 'Payment',
           Account: from,
-          Fee: convertToSmallAmount(gasFee, 6).toString(),
-          Amount: convertToSmallAmount(amount, 6).toString(),
+          Fee: ethers.parseUnits(gasFee, 6).toString(),
+          Amount: ethers.parseUnits(amount, 6).toString(),
           Destination: to,
         };
         if (validateNumber(memo)) {
