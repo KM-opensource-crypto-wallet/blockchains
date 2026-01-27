@@ -45,28 +45,9 @@ export const fetchCurrencies = createAsyncThunk(
   'currency/fetchCurrencies',
   async (payload, thunkAPI) => {
     const dispatch = thunkAPI.dispatch;
-    const {checkNewCoins, ...apiPayload} = payload || {};
     dispatch(setCurrencyLoading(true));
-    const resp = await fetchCurrenciesAPI({...apiPayload, status: true});
-    const currencies = Array?.isArray(resp?.data?.data) ? resp?.data?.data : [];
-
-    if (checkNewCoins) {
-      const currentState = thunkAPI.getState();
-      const allCoins = selectAllCoinsWalletByMnemonic(currentState) || [];
-      if (allCoins.length) {
-        const addedCoins = currencies?.filter(
-          item =>
-            allCoins.findIndex(
-              subItem =>
-                item.chain_name === subItem.chain_name &&
-                item.symbol === subItem.symbol,
-            ) === -1,
-        );
-        dispatch(setNewCoins(addedCoins));
-      }
-    }
-
-    return currencies;
+    const resp = await fetchCurrenciesAPI({...payload, status: true});
+    return Array?.isArray(resp?.data?.data) ? resp?.data?.data : [];
   },
 );
 

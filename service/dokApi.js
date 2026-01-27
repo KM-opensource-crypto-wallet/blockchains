@@ -51,17 +51,14 @@ export const fetchCurrenciesAPI = async ({
   orderBy,
   status,
   search,
-  ignoreLimit,
 }) => {
   try {
     const payload = {
+      limit: limit || 20,
       orderBy: orderBy || 'order',
       order: order || 1,
       page: page || 1,
     };
-    if (!ignoreLimit) {
-      payload.limit = limit || 20;
-    }
     if (
       status !== undefined &&
       status !== null &&

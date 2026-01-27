@@ -75,13 +75,6 @@ export const selectWalletChainName = state => {
   return currentWallet?.chain_name;
 };
 
-export const selectCurrentWalletSortOption = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
-  return currentWallet?.coinsSortOption || 'default';
-};
-
 export const selectCoinsForCurrentWallet = state => {
   const currentWallet = selectCurrentWallet(state);
   return currentWallet?.coins || [];
