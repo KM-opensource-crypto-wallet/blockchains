@@ -15,11 +15,8 @@ const state = {
   chatsOptions: false,
   searchInHomeScreen: true,
   isWalletReset: false,
-<<<<<<< HEAD
   isCustomDerivedChecked: false,
-=======
   coinsSortOption: 'value_desc',
->>>>>>> 396d25f (Revert "- implemented select wallet coin (#36)")
   walletsSortOption: 'default',
 };
 
@@ -71,12 +68,6 @@ export const settingsSlice = createSlice({
     },
     setResetWallet(state, {payload}) {
       state.isWalletReset = payload;
-    },
-    setCoinsSortOption(state, {payload}) {
-      state.coinsSortOption = payload;
-    },
-    setWalletsSortOption(state, {payload}) {
-      state.walletsSortOption = payload;
     },
   },
 });

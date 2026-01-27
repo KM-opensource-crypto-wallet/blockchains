@@ -1749,77 +1749,6 @@ export const walletsSlice = createSlice({
         console.log('rearrangeCoins is not valid array');
       }
     },
-    sortCurrentWalletCoins: (state, {payload}) => {
-      const sortOption = payload?.sortOption;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[state.currentWalletIndex] || {};
-      const coins = Array.isArray(currentWallet?.coins)
-        ? [...currentWallet.coins]
-        : [];
-
-      if (coins.length <= 1) {
-        return;
-      }
-
-      let sortedCoins;
-      switch (sortOption) {
-        case 'default':
-          sortedCoins = coins.sort(
-            (a, b) => parseFloat(a.order || 0) - parseFloat(b.order || 0),
-          );
-          break;
-        case 'value_desc':
-          sortedCoins = coins.sort(
-            (a, b) =>
-              parseFloat(b.totalBalanceCourse || 0) -
-              parseFloat(a.totalBalanceCourse || 0),
-          );
-          break;
-        case 'value_asc':
-          sortedCoins = coins.sort(
-            (a, b) =>
-              parseFloat(a.totalBalanceCourse || 0) -
-              parseFloat(b.totalBalanceCourse || 0),
-          );
-          break;
-        case 'balance_desc':
-          sortedCoins = coins.sort(
-            (a, b) =>
-              parseFloat(b.totalBalance || 0) - parseFloat(a.totalBalance || 0),
-          );
-          break;
-        case 'balance_asc':
-          sortedCoins = coins.sort(
-            (a, b) =>
-              parseFloat(a.totalBalance || 0) - parseFloat(b.totalBalance || 0),
-          );
-          break;
-        case 'name_asc':
-          sortedCoins = coins.sort((a, b) =>
-            (a.name || '').localeCompare(b.name || ''),
-          );
-          break;
-        case 'name_desc':
-          sortedCoins = coins.sort((a, b) =>
-            (b.name || '').localeCompare(a.name || ''),
-          );
-          break;
-        case 'symbol_asc':
-          sortedCoins = coins.sort((a, b) =>
-            (a.symbol || '').localeCompare(b.symbol || ''),
-          );
-          break;
-        case 'symbol_desc':
-          sortedCoins = coins.sort((a, b) =>
-            (b.symbol || '').localeCompare(a.symbol || ''),
-          );
-          break;
-        default:
-          sortedCoins = coins;
-      }
-
-      currentWallet.coins = sortedCoins;
-    },
     setCurrentWalletCoinsPosition: (state, {payload}) => {
       const index = validateNumber(payload?.index);
       const isMoveUp = payload?.isMoveUp;
@@ -2330,9 +2259,7 @@ export const {
   removePendingTransactions,
   setIsAdding50MoreAddresses,
   rearrangeCurrentWalletCoins,
-  sortCurrentWalletCoins,
   setCurrentWalletCoinsPosition,
-  sortWallets,
   togglePrivacyMode,
   resetCoinsToDefaultAddressForPrivacyMode,
   setMasterClientId,
