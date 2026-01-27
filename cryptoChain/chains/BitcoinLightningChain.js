@@ -20,19 +20,19 @@ export const BitcoinLightningChain = (chain, phrase) => {
     return await isLightningAddressValid(address, phrase)
   }
 
-  async function generateInvoiceViaBolt11() {
-    return await generateLightningInvoiceViaBolt11(phrase)
+  async function generateInvoiceViaBolt11(currentPhhrase) {
+    return await generateLightningInvoiceViaBolt11(phrase ?? currentPhhrase)
   }
 
-  async function generateSparkAddress() {
-    return await generateLightningSparkAddress(phrase);
+  async function generateSparkAddress(currentPhhrase) {
+    return await generateLightningSparkAddress(phrase ?? currentPhhrase);
   }
 
-  async function generateInvoiceViaBitcoinAddress() {
-    return await generateLightningInvoiceViaBitcoinAddress(phrase);
+  async function generateInvoiceViaBitcoinAddress(currentPhhrase) {
+    return await generateLightningInvoiceViaBitcoinAddress(phrase ?? currentPhhrase);
   }
 
-  
+
   async function getEstimateFee({
     fromAddress,
     toAddress,
