@@ -1394,11 +1394,15 @@ export const getCoinsCount = coins => {
 };
 
 export const formatBalance = value => {
-  if (value >= 1000000) {
-    return (value / 1000000).toFixed(2) + 'M';
-  } else if (value >= 1000) {
-    return value.toLocaleString('en-US', {maximumFractionDigits: 2});
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return '0.00';
   }
-  return value.toFixed(2);
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(2) + 'M';
+  } else if (num >= 1000) {
+    return num.toLocaleString('en-US', {maximumFractionDigits: 2});
+  }
+  return num.toFixed(2);
 };
 

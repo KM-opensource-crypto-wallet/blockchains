@@ -159,7 +159,7 @@ export const createWallet = createAsyncThunk(
 
     const newStoreWallet = {
       walletName: walletData.walletName ?? currentWallet.walletName,
-      clientId: walletData.clientId || v4(),
+      clientId: v4(),
     };
     let isFromImportWallet = !!walletData.phrase || !!walletData?.privateKey;
     let isImportWalletWithPrivateKey = !!walletData?.privateKey;
