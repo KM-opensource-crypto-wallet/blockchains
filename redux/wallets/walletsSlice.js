@@ -57,6 +57,7 @@ import {
   createPendingTransactionKey,
   getIndexFromDerivePath,
   getLargestNumber,
+  getWalletTotalBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -275,6 +276,51 @@ export const createWallet = createAsyncThunk(
       address,
       privateKey,
       chain_name,
+    };
+  },
+);
+
+export const createWalletsBatch = createAsyncThunk(
+  'wallets/createWalletsBatch',
+  async (walletsDataArray, thunkAPI) => {
+    if (!Array.isArray(walletsDataArray) || walletsDataArray.length === 0) {
+      return thunkAPI.rejectWithValue('Invalid or empty wallets data array');
+    }
+    const currentState = thunkAPI.getState();
+    const allWalletsName = selectAllWalletName(currentState);
+    const isMaxWalletLimitReached = getIsMaxWalletLimitReached(currentState);
+
+    if (isMaxWalletLimitReached) {
+      const message = 'Max wallet limit reached.';
+      showToast({type: 'errorToast', title: message});
+      return thunkAPI.rejectWithValue(message);
+    }
+
+    const reservedNames = new Set([...allWalletsName]);
+
+    const newWallets = walletsDataArray.map(walletData => {
+      let newWalletName = walletData.walletName;
+
+      if (!newWalletName || reservedNames.has(newWalletName)) {
+        do {
+          newWalletName = `Backup ${newWalletName}`;
+        } while (reservedNames.has(newWalletName));
+      }
+
+      reservedNames.add(newWalletName);
+
+      return {
+        ...walletData,
+        walletName: newWalletName,
+        clientId: walletData.clientId || v4(),
+        updateTimestamp: Date.now(),
+        coinsSortOption: walletData.coinsSortOption || 'default',
+      };
+    });
+
+    return {
+      newWallets,
+      failedWallets: [],
     };
   },
 );
@@ -1855,18 +1901,6 @@ export const walletsSlice = createSlice({
       const currentWalletId = currentWallet?.clientId || currentWallet?.id;
 
       // Helper function to calculate wallet total balance
-      const getWalletTotalBalance = coins => {
-        let total = 0;
-        coins?.forEach(coin => {
-          if (coin?.isInWallet) {
-            const value = isNaN(Number(coin.totalBalanceCourse))
-              ? 0
-              : Number(coin.totalBalanceCourse);
-            total += value;
-          }
-        });
-        return total;
-      };
 
       let sortedWallets;
       switch (sortOption) {
@@ -2142,6 +2176,12 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
+      }
+    });
+    builder.addCase(createWalletsBatch.fulfilled, (state, {payload}) => {
+      const newWallets = payload?.newWallets || [];
+      if (newWallets.length > 0) {
+        state.allWallets = [...state.allWallets, ...newWallets];
       }
     });
     builder.addCase(createWallet.fulfilled, (state, {payload}) => {
