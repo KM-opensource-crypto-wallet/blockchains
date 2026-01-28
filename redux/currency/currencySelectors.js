@@ -11,7 +11,7 @@ export const selectAllActiveCoins = createSelector(
   [selectAllCurrencies],
   currencies =>
     currencies?.filter(
-      item => item?.status && item.type?.toLowerCase() === 'coin',
+      item => item?.status && item?.type?.toLowerCase() === 'coin',
     ) ?? [],
 );
 
@@ -19,7 +19,7 @@ export const selectAllActiveTokens = createSelector(
   [selectAllCurrencies],
   currencies =>
     currencies?.filter(
-      item => item?.status && item.type?.toLowerCase() === 'token',
+      item => item?.status && item?.type?.toLowerCase() === 'token',
     ) ?? [],
 );
 
