@@ -57,6 +57,7 @@ import {
   createPendingTransactionKey,
   getIndexFromDerivePath,
   getLargestNumber,
+  getWalletTotalBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -2020,18 +2021,6 @@ export const walletsSlice = createSlice({
       const currentWalletId = currentWallet?.clientId || currentWallet?.id;
 
       // Helper function to calculate wallet total balance
-      const getWalletTotalBalance = coins => {
-        let total = 0;
-        coins?.forEach(coin => {
-          if (coin?.isInWallet) {
-            const value = isNaN(Number(coin.totalBalanceCourse))
-              ? 0
-              : Number(coin.totalBalanceCourse);
-            total += value;
-          }
-        });
-        return total;
-      };
 
       let sortedWallets;
       switch (sortOption) {

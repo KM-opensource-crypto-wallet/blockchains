@@ -9,6 +9,12 @@ import {
   IS_SANDBOX,
 } from 'dok-wallet-blockchain-networks/config/config';
 import bs58 from 'bs58';
+import {useSelector} from 'react-redux';
+import {
+  getCurrentWalletIndex,
+  selectAllWallets,
+  selectCurrentWallet,
+} from '../redux/wallets/walletsSelector';
 dayjs.extend(duration);
 
 export function getCustomizePublicAddress(str) {
@@ -1353,3 +1359,46 @@ export function extractTxHashFromEVMMissingError(error) {
 
   return null;
 }
+
+export const getWalletTotalBalance = coins => {
+  let total = 0;
+  coins?.forEach(coin => {
+    if (coin?.isInWallet) {
+      const value = isNaN(Number(coin.totalBalanceCourse))
+        ? 0
+        : Number(coin.totalBalanceCourse);
+      total += value;
+    }
+  });
+  return total;
+};
+
+export const getTopTwoCoins = coins => {
+  if (!coins || !Array.isArray(coins)) {
+    return [];
+  }
+  const walletCoins = coins.filter(coin => coin?.isInWallet);
+  const sorted = [...walletCoins].sort((a, b) => {
+    const aValue = isNaN(Number(a.totalCourse)) ? 0 : Number(a.totalCourse);
+    const bValue = isNaN(Number(b.totalCourse)) ? 0 : Number(b.totalCourse);
+    return bValue - aValue;
+  });
+  return sorted.slice(0, 2);
+};
+
+export const getCoinsCount = coins => {
+  if (!coins || !Array.isArray(coins)) {
+    return 0;
+  }
+  return coins.filter(coin => coin?.isInWallet).length;
+};
+
+export const formatBalance = value => {
+  if (value >= 1000000) {
+    return (value / 1000000).toFixed(2) + 'M';
+  } else if (value >= 1000) {
+    return value.toLocaleString('en-US', {maximumFractionDigits: 2});
+  }
+  return value.toFixed(2);
+};
+
