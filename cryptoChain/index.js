@@ -3,6 +3,7 @@ import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMCha
 import {
   isAddressOrPrivateKeyExists,
   validateSupportedChain,
+  isEVMChain,
 } from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {BitcoinChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
@@ -546,6 +547,44 @@ const hashObject = {
   sei: 'hash',
   cardano: '',
   filecoin: '',
+};
+
+export const createWalletForChain = async (phrase, coin, walletData) => {
+  const chainName = isEVMChain(coin.chain_name) ? 'ethereum' : coin.chain_name;
+  const chainNameForNative = validateSupportedChain(chainName);
+
+  if (!chainNameForNative) {
+    return {wallet: null, chain: null};
+  }
+
+  const chain = getChain(chainName);
+  let wallet;
+
+  if (phrase && chainName === 'bitcoin_legacy') {
+    wallet = await BitcoinChain().createBitcoinLegacyWallet({mnemonic: phrase});
+  } else if (phrase && chainName === 'bitcoin_segwit') {
+    wallet = await BitcoinChain().createBitcoinSegwitWallet({mnemonic: phrase});
+  } else if (phrase && chainName === 'stellar') {
+    wallet = StellarChain().createStellarWallet({mnemonic: phrase});
+  } else if (phrase && chainName === 'hedera') {
+    wallet = await HederaChain().getOrCreateHederaWallet({mnemonic: phrase});
+  } else if (phrase) {
+    wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
+  } else if (walletData?.privateKey && !walletData?.address) {
+    wallet = await chain.createWalletByPrivateKey({
+      chain_name: chainName,
+      privateKey: walletData?.privateKey,
+    });
+  } else if (walletData?.privateKey && walletData?.address) {
+    wallet = {
+      privateKey: walletData?.privateKey,
+      address: walletData?.address,
+    };
+  } else {
+    return {wallet: null, chain: null};
+  }
+
+  return {wallet, chain};
 };
 
 export const getHashString = (data, type) => {

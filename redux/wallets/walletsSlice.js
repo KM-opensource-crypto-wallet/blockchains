@@ -697,8 +697,17 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
   'wallets/addOrToggleCoinInWallet',
   async (payload, thunkAPI) => {
     const currentState = thunkAPI.getState();
-    const allCoins = selectCoinsForCurrentWallet(currentState);
-    const currentWallet = selectCurrentWallet(currentState);
+    const targetWalletIndex = payload?.walletIndex;
+    const forceInWallet = payload?.forceInWallet;
+    const currentWallet =
+      targetWalletIndex !== undefined
+        ? currentState.wallets.allWallets[targetWalletIndex]
+        : selectCurrentWallet(currentState);
+    const allCoins =
+      targetWalletIndex !== undefined
+        ? currentWallet?.coins || []
+        : selectCoinsForCurrentWallet(currentState);
+
     if (
       !checkValidChainForWalletImportWithPrivateKey({
         currentWallet,
@@ -708,16 +717,25 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
       console.error('coin chain not match');
       return thunkAPI.rejectWithValue('coin chain not match');
     }
-    let isNew = true;
+
+    const payloadKey = generateUniqueKeyForChain(payload);
+    let existingCoin = null;
+
     for (let i = 0; i < allCoins.length; i++) {
       const item = allCoins[i];
-      if (item?._id === payload?._id) {
-        isNew = false;
+      if (generateUniqueKeyForChain(item) === payloadKey) {
+        existingCoin = item;
         break;
       }
     }
-    if (!isNew) {
-      return {newCoin: null, existingCoinId: payload?._id};
+
+    if (existingCoin) {
+      return {
+        newCoin: null,
+        existingCoinId: existingCoin?._id,
+        walletIndex: targetWalletIndex,
+        forceInWallet,
+      };
     } else {
       let newCoin = await createCoin(
         currentWallet,
@@ -739,7 +757,12 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
           is_imported: currentWallet?.isBackedup,
         });
       }
-      return {newCoin, existingCoinId: null};
+      return {
+        newCoin,
+        existingCoinId: null,
+        walletIndex: targetWalletIndex,
+        forceInWallet,
+      };
     }
   },
 );
@@ -1444,6 +1467,13 @@ export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
+    setWalletChainExistingCoin: (state, action) => {
+      const {walletIndex, chainWallets} = action.payload;
+      const wallet = state.allWallets[walletIndex];
+      if (wallet) {
+        wallet.chain_existing_coin = chainWallets;
+      }
+    },
     setCoinsInCurrentWallet: (state, action) => {
       // get the current wallet
       const allWallets = state.allWallets;
@@ -2128,16 +2158,23 @@ export const walletsSlice = createSlice({
     builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {
       const newCoin = payload.newCoin;
       const existingCoinId = payload.existingCoinId;
+      const forceInWallet = payload.forceInWallet;
+      const targetWalletIndex =
+        payload.walletIndex !== undefined
+          ? payload.walletIndex
+          : state.currentWalletIndex;
       const allWallets = state.allWallets;
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = allWallets[currentWalletIndex] || {};
+      const currentWallet = allWallets[targetWalletIndex] || {};
       const previousCoins = currentWallet.coins;
       if (newCoin) {
         currentWallet.coins = [...previousCoins, newCoin];
       } else if (existingCoinId) {
         currentWallet.coins = previousCoins.map(item => {
           if (item._id === existingCoinId) {
-            return {...item, isInWallet: !item?.isInWallet};
+            return {
+              ...item,
+              isInWallet: forceInWallet ? true : !item?.isInWallet,
+            };
           }
           return item;
         });
@@ -2352,6 +2389,7 @@ export const walletsSlice = createSlice({
 
 export const {
   setCurrentCoin,
+  setWalletChainExistingCoin,
   updateWalletName,
   setCurrentWalletIndex,
   updateUserCoins,
