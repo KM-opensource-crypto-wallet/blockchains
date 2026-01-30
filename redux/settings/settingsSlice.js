@@ -14,6 +14,7 @@ const state = {
   chatsOptions: false,
   searchInHomeScreen: true,
   isWalletReset: false,
+  isCustomDerivedChecked: false,
   walletsSortOption: 'default',
 };
 
@@ -39,6 +40,9 @@ export const settingsSlice = createSlice({
     },
     updateSearchInHomeScreen(state, {payload}) {
       state.searchInHomeScreen = payload;
+    },
+    updateCustomDerivedChecked(state, {payload}) {
+      state.isCustomDerivedChecked = payload;
     },
     updateLockTime(state, {payload}) {
       const number = Number(payload);
@@ -81,4 +85,5 @@ export const {
   updateSearchInHomeScreen,
   setResetWallet,
   setWalletsSortOption,
+  updateCustomDerivedChecked,
 } = settingsSlice.actions;
