@@ -121,6 +121,27 @@ const getUniqueCoins = coins => {
   }
 };
 
+const extractChainExistingCoins = coins => {
+  if (!Array.isArray(coins)) {
+    return null;
+  }
+  const chainWallets = {};
+  coins.forEach(item => {
+    if (item?.chain_name && (item?.address || item?.privateKey)) {
+      if (!chainWallets[item.chain_name]) {
+        chainWallets[item.chain_name] = {
+          address: item?.address,
+          privateKey: item?.privateKey,
+          publicKey: item?.publicKey,
+          extendedPublicKey: item?.extendedPublicKey,
+          extendedPrivateKey: item?.extendedPrivateKey,
+        };
+      }
+    }
+  });
+  return chainWallets;
+};
+
 const refreshCoinData = (dispatch, currentCoin) => {
   if (
     MainNavigation.getCurrentRouteName() === 'TransactionList' ||
@@ -815,97 +836,99 @@ export const sendFunds = createAsyncThunk(
             memo: txData?.memo,
           })
         : txData?.isCreateStaking
-        ? await nativeCoin.createStaking({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            numberOfStakeAccount: txData?.numberOfStakeAccount,
-            stakingBalance: txData?.stakingBalance,
-            resourceType: txData?.resourceType,
-            memo: txData?.memo,
-          })
-        : txData?.isCreateVote
-        ? await nativeCoin.createStakingWithValidator({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            numberOfStakeAccount: txData?.numberOfStakeAccount,
-            stakingBalance: txData?.stakingBalance,
-            resourceType: txData?.resourceType,
-            selectedVotes: txData?.selectedVotes,
-            memo: txData?.memo,
-          })
-        : txData?.isDeactivateStaking
-        ? await nativeCoin.deactivateStaking({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            transactionFee: transferData?.transactionFee,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            resourceType: txData?.resourceType,
-            memo: txData?.memo,
-          })
-        : txData?.isWithdrawStaking
-        ? await nativeCoin.withdrawStaking({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            memo: txData?.memo,
-          })
-        : txData?.isStakingRewards
-        ? await nativeCoin.stakingRewards({
-            from: txData?.from,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            validatorPubKey: txData?.validatorPubKey,
-            stakingAddress: txData?.stakingAddress,
-            memo: txData?.memo,
-          })
-        : txData?.isBatchTransaction
-        ? await nativeCoin.sendBatchTransaction({
-            calls: txData.calls,
-            gasFee: transferData?.gasFee,
-            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-            estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-          })
-        : await nativeCoin.send({
-            to: txData.to,
-            amount: txData.amount,
-            gasFee: transferData?.gasFee,
-            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-            isMax: transferData?.isMax,
-            estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
-            transactionFee: transferData?.transactionFee,
-            phrase: txData?.phrase,
-            memo: txData?.memo,
-            selectedUTXOs: transferData?.selectedUTXOs,
-          });
+          ? await nativeCoin.createStaking({
+              from: txData?.from,
+              amount: txData.amount,
+              gasFee: transferData?.gasFee,
+              estimateGas: transferData?.estimateGas,
+              nonce: txData?.nonce ?? transferData?.nonce,
+              transactionFee: transferData?.transactionFee,
+              phrase: txData?.phrase,
+              validatorPubKey: txData?.validatorPubKey,
+              numberOfStakeAccount: txData?.numberOfStakeAccount,
+              stakingBalance: txData?.stakingBalance,
+              resourceType: txData?.resourceType,
+              memo: txData?.memo,
+            })
+          : txData?.isCreateVote
+            ? await nativeCoin.createStakingWithValidator({
+                from: txData?.from,
+                amount: txData.amount,
+                gasFee: transferData?.gasFee,
+                estimateGas: transferData?.estimateGas,
+                nonce: txData?.nonce ?? transferData?.nonce,
+                transactionFee: transferData?.transactionFee,
+                phrase: txData?.phrase,
+                validatorPubKey: txData?.validatorPubKey,
+                numberOfStakeAccount: txData?.numberOfStakeAccount,
+                stakingBalance: txData?.stakingBalance,
+                resourceType: txData?.resourceType,
+                selectedVotes: txData?.selectedVotes,
+                memo: txData?.memo,
+              })
+            : txData?.isDeactivateStaking
+              ? await nativeCoin.deactivateStaking({
+                  from: txData?.from,
+                  amount: txData.amount,
+                  gasFee: transferData?.gasFee,
+                  estimateGas: transferData?.estimateGas,
+                  transactionFee: transferData?.transactionFee,
+                  nonce: txData?.nonce ?? transferData?.nonce,
+                  phrase: txData?.phrase,
+                  validatorPubKey: txData?.validatorPubKey,
+                  stakingAddress: txData?.stakingAddress,
+                  resourceType: txData?.resourceType,
+                  memo: txData?.memo,
+                })
+              : txData?.isWithdrawStaking
+                ? await nativeCoin.withdrawStaking({
+                    from: txData?.from,
+                    amount: txData.amount,
+                    gasFee: transferData?.gasFee,
+                    estimateGas: transferData?.estimateGas,
+                    transactionFee: transferData?.transactionFee,
+                    phrase: txData?.phrase,
+                    validatorPubKey: txData?.validatorPubKey,
+                    stakingAddress: txData?.stakingAddress,
+                    memo: txData?.memo,
+                  })
+                : txData?.isStakingRewards
+                  ? await nativeCoin.stakingRewards({
+                      from: txData?.from,
+                      amount: txData.amount,
+                      gasFee: transferData?.gasFee,
+                      estimateGas: transferData?.estimateGas,
+                      nonce: txData?.nonce ?? transferData?.nonce,
+                      transactionFee: transferData?.transactionFee,
+                      phrase: txData?.phrase,
+                      validatorPubKey: txData?.validatorPubKey,
+                      stakingAddress: txData?.stakingAddress,
+                      memo: txData?.memo,
+                    })
+                  : txData?.isBatchTransaction
+                    ? await nativeCoin.sendBatchTransaction({
+                        calls: txData.calls,
+                        gasFee: transferData?.gasFee,
+                        maxPriorityFeePerGas:
+                          transferData?.maxPriorityFeePerGas,
+                        estimateGas: transferData?.estimateGas,
+                        nonce: txData?.nonce ?? transferData?.nonce,
+                        transactionFee: transferData?.transactionFee,
+                      })
+                    : await nativeCoin.send({
+                        to: txData.to,
+                        amount: txData.amount,
+                        gasFee: transferData?.gasFee,
+                        maxPriorityFeePerGas:
+                          transferData?.maxPriorityFeePerGas,
+                        isMax: transferData?.isMax,
+                        estimateGas: transferData?.estimateGas,
+                        nonce: txData?.nonce ?? transferData?.nonce,
+                        transactionFee: transferData?.transactionFee,
+                        phrase: txData?.phrase,
+                        memo: txData?.memo,
+                        selectedUTXOs: transferData?.selectedUTXOs,
+                      });
       let confirmTransaction;
 
       if (res) {
@@ -983,12 +1006,12 @@ export const sendFunds = createAsyncThunk(
               txData?.isBatchTransaction
                 ? 'Batch transactions are completed successfully.'
                 : txData?.isCreateStaking
-                ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
-                : txData?.isNFT
-                ? 'You just sent NFT'
-                : txData?.isCreateVote
-                ? 'Your Votes is submitted successfully'
-                : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
+                  ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
+                  : txData?.isNFT
+                    ? 'You just sent NFT'
+                    : txData?.isCreateVote
+                      ? 'Your Votes is submitted successfully'
+                      : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
             }`,
             toastId,
           });
@@ -1255,8 +1278,8 @@ export const fetchNft = createAsyncThunk(
         isSolana && Array.isArray(resp)
           ? resp
           : Array.isArray(resp?.result)
-          ? resp?.result
-          : [];
+            ? resp?.result
+            : [];
       const cursor = resp?.cursor;
       if (previousCursor) {
         data = [...previousNftData, ...data];
@@ -1481,6 +1504,9 @@ export const walletsSlice = createSlice({
       const currentWallet = allWallets[currentWalletIndex] || {};
       if (Array.isArray(action?.payload)) {
         currentWallet.coins = action?.payload;
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          action?.payload,
+        );
       }
     },
     setWalletPosition: (state, {payload}) => {
@@ -2008,6 +2034,9 @@ export const walletsSlice = createSlice({
             privateKey:
               item?.deriveAddresses?.[0]?.privateKey || item?.privateKey,
           }));
+          currentWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallet.coins,
+          );
         }
         newWallet[i] = currentWallet;
       }
@@ -2042,6 +2071,9 @@ export const walletsSlice = createSlice({
           return item;
         }
       });
+      currentWallet.chain_existing_coin = extractChainExistingCoins(
+        currentWallet.coins,
+      );
       currentWallet.isEVMAddressesAdded = false;
     },
     addPendingTransactions: (state, action) => {
@@ -2108,6 +2140,8 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[currentWalletIndex] || {};
         currentWallets.coins = coinData;
+        currentWallets.chain_existing_coin =
+          extractChainExistingCoins(coinData);
       }
     });
     builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {
@@ -2124,6 +2158,9 @@ export const walletsSlice = createSlice({
           const tempWallet = allWallets[i];
           const newCoins = allNewCoins[i];
           tempWallet.coins = [...tempWallet.coins, ...newCoins];
+          tempWallet.chain_existing_coin = extractChainExistingCoins(
+            tempWallet.coins,
+          );
           allWallets[i] = tempWallet;
         }
         state.allWallets = allWallets;
@@ -2150,8 +2187,12 @@ export const walletsSlice = createSlice({
             }
           }
           currentWallets.coins = allCoins;
+          currentWallets.chain_existing_coin =
+            extractChainExistingCoins(allCoins);
         } else {
           currentWallets.coins = allCoins;
+          currentWallets.chain_existing_coin =
+            extractChainExistingCoins(allCoins);
         }
       }
     });
@@ -2178,6 +2219,9 @@ export const walletsSlice = createSlice({
           }
           return item;
         });
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.coins,
+        );
       }
     });
     builder.addCase(addCoinGroup.fulfilled, (state, {payload}) => {
@@ -2206,6 +2250,9 @@ export const walletsSlice = createSlice({
           }),
           ...newCoins,
         ]);
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.coins,
+        );
       }
     });
     builder.addCase(addToken.fulfilled, (state, {payload}) => {
@@ -2213,12 +2260,21 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
+        currentWallets.chain_existing_coin = extractChainExistingCoins(
+          currentWallets.coins,
+        );
       }
     });
     builder.addCase(createWalletsBatch.fulfilled, (state, {payload}) => {
       const newWallets = payload?.newWallets || [];
       if (newWallets.length > 0) {
-        state.allWallets = [...state.allWallets, ...newWallets];
+        state.allWallets = [
+          ...state.allWallets,
+          ...newWallets.map(w => ({
+            ...w,
+            chain_existing_coin: extractChainExistingCoins(w.coins),
+          })),
+        ];
       }
     });
     builder.addCase(createWallet.fulfilled, (state, {payload}) => {
@@ -2238,6 +2294,9 @@ export const walletsSlice = createSlice({
       newStoreWallet.chain_name = chain_name;
       newStoreWallet.isEVMAddressesAdded = false;
       newStoreWallet.coinsSortOption = 'default';
+      newStoreWallet.chain_existing_coin = extractChainExistingCoins(
+        newStoreWallet.coins,
+      );
 
       // coinsAdapter.addMany(newCoinsState, payload.newStoreWallet.coins);
       // Add the new wallet to the wallets state

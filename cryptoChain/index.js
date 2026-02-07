@@ -76,7 +76,18 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
   }
   let wallet;
   const chain = getChain(chainName);
-  if (isAddressOrPrivateKeyExists(coin)) {
+
+  const chain_existing_coin = walletData?.chain_existing_coin?.[chainName];
+
+  if (chain_existing_coin) {
+    wallet = {
+      privateKey: chain_existing_coin.privateKey,
+      address: chain_existing_coin.address,
+      publicKey: chain_existing_coin.publicKey,
+      extendedPublicKey: chain_existing_coin.extendedPublicKey,
+      extendedPrivateKey: chain_existing_coin.extendedPrivateKey,
+    };
+  } else if (isAddressOrPrivateKeyExists(coin)) {
     wallet = {
       privateKey: coin?.privateKey,
       address: coin?.address,
