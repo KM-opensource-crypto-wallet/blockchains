@@ -1,6 +1,6 @@
 import {
   approveClaimDepositRequest,
-  claimOnchainDposit,
+  claimOnchainDeposit,
   generateLightningInvoiceViaBitcoinAddress,
   generateLightningInvoiceViaBolt11,
   generateLightningSparkAddress,
@@ -21,7 +21,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
     return await approveClaimDepositRequest(phrase, txid, vout);
   }
   async function unClaimedOnChainDeposit() {
-    const unClaimedDeposits = await claimOnchainDposit(phrase);
+    const unClaimedDeposits = await claimOnchainDeposit(phrase);
     return unClaimedDeposits;
   }
   async function getBalance() {
