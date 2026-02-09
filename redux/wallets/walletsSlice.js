@@ -80,6 +80,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
+import {BitcoinLightningChain} from '../../cryptoChain/chains/BitcoinLightningChain';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -506,6 +507,26 @@ export const refreshCurrentCoin = createAsyncThunk(
       );
     }
     return {updatedCurrentCoin, updatedNativeCoin};
+  },
+);
+
+export const unClaimedDeposits = createAsyncThunk(
+  'wallets/unClaimedDeposits',
+  async (unClaimedData, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const currentWallet = selectCurrentWallet(currentState);
+    console.log('currentWallet:', currentWallet);
+    const currentWalletIndex = _currentWalletIndexSelector(currentState);
+    const {chain_name, phrase} = unClaimedData;
+    const lightningChain = await BitcoinLightningChain(chain_name, phrase);
+    // await unClaimedOnChainDeposit
+    const listOfUnClaimedDeposits =
+      await lightningChain.unClaimedOnChainDeposit();
+    return {
+      currentWalletIndex,
+      phrase,
+      listOfUnClaimedDeposits,
+    };
   },
 );
 
@@ -2223,6 +2244,12 @@ export const walletsSlice = createSlice({
       } else {
         console.warn('some payload missing addCustomDeriveAddress', payload);
       }
+    });
+    builder.addCase(unClaimedDeposits.fulfilled, (state, {payload}) => {
+      const currentWalletIndex = payload?.currentWalletIndex;
+      const allWallets = state.allWallets;
+      const currentWallets = allWallets[currentWalletIndex] || {};
+      currentWallets.unClaimedLightningBTC = payload.listOfUnClaimedDeposits;
     });
   },
 });

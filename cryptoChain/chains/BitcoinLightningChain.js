@@ -1,27 +1,40 @@
-import { 
-  generateLightningInvoiceViaBitcoinAddress, 
-  generateLightningInvoiceViaBolt11, 
-  generateLightningSparkAddress, 
-  getLightningBalance, 
-  getLightningTransactions, 
-  isLightningAddressValid, 
-  prepareLightning, 
-  sendLightning, 
-  waitForLightningConfirmation 
+import {
+  approveClaimDepositRequest,
+  claimOnchainDposit,
+  generateLightningInvoiceViaBitcoinAddress,
+  generateLightningInvoiceViaBolt11,
+  generateLightningSparkAddress,
+  getLightningBalance,
+  getLightningTransactions,
+  isLightningAddressValid,
+  prepareLightning,
+  refundClaimRequest,
+  sendLightning,
+  waitForLightningConfirmation,
 } from '../../../src/myWallet/wallet.lightning.service';
 
 export const BitcoinLightningChain = (chain, phrase) => {
-
+  async function rejectClaimRequest(txid, vout, destinationAddress) {
+    return await refundClaimRequest(phrase, txid, vout, destinationAddress);
+  }
+  async function approveClaimedBtc(txid, vout) {
+    return await approveClaimDepositRequest(phrase, txid, vout);
+  }
+  async function unClaimedOnChainDeposit() {
+    const unClaimedDeposits = await claimOnchainDposit(phrase);
+    return unClaimedDeposits;
+  }
   async function getBalance() {
-    return await getLightningBalance(phrase)
+    const balance = await getLightningBalance(phrase);
+    return balance;
   }
 
-  async function isValidAddress({ address }) {
-    return await isLightningAddressValid(address, phrase)
+  async function isValidAddress({address}) {
+    return await isLightningAddressValid(address, phrase);
   }
 
   async function generateInvoiceViaBolt11(currentPhrase) {
-    return await generateLightningInvoiceViaBolt11(phrase ?? currentPhrase)
+    return await generateLightningInvoiceViaBolt11(phrase ?? currentPhrase);
   }
 
   async function generateSparkAddress(currentPhrase) {
@@ -29,9 +42,10 @@ export const BitcoinLightningChain = (chain, phrase) => {
   }
 
   async function generateInvoiceViaBitcoinAddress(currentPhrase) {
-    return await generateLightningInvoiceViaBitcoinAddress(phrase ?? currentPhrase);
+    return await generateLightningInvoiceViaBitcoinAddress(
+      phrase ?? currentPhrase,
+    );
   }
-
 
   async function getEstimateFee({
     fromAddress,
@@ -47,7 +61,7 @@ export const BitcoinLightningChain = (chain, phrase) => {
     feesType,
     selectedUTXOs,
   }) {
-    return await prepareLightning(phrase, toAddress, amount)
+    return await prepareLightning(phrase, toAddress, amount);
   }
 
   async function send({
@@ -62,20 +76,23 @@ export const BitcoinLightningChain = (chain, phrase) => {
     extendedPrivateKey,
     selectedUTXOs,
   }) {
-    return await sendLightning(phrase)
+    return await sendLightning(phrase);
   }
 
-  async function waitForConfirmation({ transaction }) {
+  async function waitForConfirmation({transaction}) {
     const transactionID = transaction;
     console.log('transactionID:', transactionID);
 
-    return await waitForLightningConfirmation(phrase)
+    return await waitForLightningConfirmation(phrase);
   }
 
   async function getTransactions() {
     return await getLightningTransactions(phrase);
   }
   return {
+    rejectClaimRequest,
+    approveClaimedBtc,
+    unClaimedOnChainDeposit,
     getBalance,
     isValidAddress,
     generateInvoiceViaBolt11,
