@@ -513,20 +513,23 @@ export const refreshCurrentCoin = createAsyncThunk(
 export const unClaimedDeposits = createAsyncThunk(
   'wallets/unClaimedDeposits',
   async (unClaimedData, thunkAPI) => {
-    const currentState = thunkAPI.getState();
-    const currentWallet = selectCurrentWallet(currentState);
-    console.log('currentWallet:', currentWallet);
-    const currentWalletIndex = _currentWalletIndexSelector(currentState);
-    const {chain_name, phrase} = unClaimedData;
-    const lightningChain = await BitcoinLightningChain(chain_name, phrase);
-    // await unClaimedOnChainDeposit
-    const listOfUnClaimedDeposits =
-      await lightningChain.unClaimedOnChainDeposit();
-    return {
-      currentWalletIndex,
-      phrase,
-      listOfUnClaimedDeposits,
-    };
+    try {
+      const currentState = thunkAPI.getState();
+      const currentWalletIndex = _currentWalletIndexSelector(currentState);
+      const {chain_name, phrase} = unClaimedData;
+      const lightningChain = BitcoinLightningChain(chain_name, phrase);
+      const listOfUnClaimedDeposits =
+        await lightningChain.unClaimedOnChainDeposit();
+      return {
+        currentWalletIndex,
+        listOfUnClaimedDeposits,
+      };
+    } catch (e) {
+      console.error('Error in unClaimedDeposits', e);
+      return thunkAPI.rejectWithValue(
+        'Something went wrong fetching unclaimed deposits',
+      );
+    }
   },
 );
 
