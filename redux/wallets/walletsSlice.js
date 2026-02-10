@@ -2209,6 +2209,9 @@ export const walletsSlice = createSlice({
       const previousCoins = currentWallet.coins;
       if (newCoin) {
         currentWallet.coins = [...previousCoins, newCoin];
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.coins,
+        );
       } else if (existingCoinId) {
         currentWallet.coins = previousCoins.map(item => {
           if (item._id === existingCoinId) {

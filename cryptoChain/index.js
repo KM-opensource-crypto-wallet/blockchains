@@ -561,7 +561,9 @@ const hashObject = {
 };
 
 export const createWalletForChain = async (phrase, coin, walletData) => {
-  const chainName = isEVMChain(coin.chain_name) ? 'ethereum' : coin.chain_name;
+  const chainName = isEVMChain(coin?.chain_name)
+    ? 'ethereum'
+    : coin?.chain_name;
   const chainNameForNative = validateSupportedChain(chainName);
 
   if (!chainNameForNative) {
