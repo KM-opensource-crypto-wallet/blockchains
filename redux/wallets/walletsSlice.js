@@ -1971,6 +1971,23 @@ export const walletsSlice = createSlice({
     setFailedTransaction: (state, action) => {
       state.failedTransaction = action?.payload;
     },
+    removeUnClaimedLightningBTC: (state, action) => {
+      const {txid, vout} = action.payload;
+      const allWallets = state.allWallets;
+      const currentWalletIndex = state.currentWalletIndex;
+      const currentWallet = allWallets[currentWalletIndex] || {};
+      const currentList = currentWallet.unClaimedLightningBTC;
+      console.log('currentList:', currentList);
+      if (Array.isArray(currentList)) {
+        currentWallet.unClaimedLightningBTC = currentList.filter(
+          item => !(item.txid === txid && item.vout === vout),
+        );
+      }
+      console.log(
+        'currentWallet.unClaimedLightningBTC:',
+        currentWallet.unClaimedLightningBTC,
+      );
+    },
   },
   extraReducers: builder => {
     builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
@@ -2297,6 +2314,7 @@ export const {
   createClientIdIfNotExist,
   deleteCoin,
   setFailedTransaction,
+  removeUnClaimedLightningBTC,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators
