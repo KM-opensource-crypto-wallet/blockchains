@@ -406,7 +406,7 @@ export const config = {
     ? 'https://mempool.space/testnet'
     : 'https://mempool.space',
   BITCOIN_LIGHTNING_URL: IS_SANDBOX
-    ? 'https://blockstream.info/liquid'
+    ? 'https://mempool.space/testnet/lightning'
     : 'https://blockstream.info/liquid',
   BITCOIN_BASE_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet/api'

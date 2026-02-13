@@ -94,7 +94,7 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
       mnemonic: phrase,
     });
   } else if (phrase && chainName === 'bitcoin_lightning') {
-    const lightningChain = await BitcoinLightningChain(chainName, phrase);
+    const lightningChain = BitcoinLightningChain(chainName, phrase);
 
     wallet = await lightningChain.generateSparkAddress();
   }
