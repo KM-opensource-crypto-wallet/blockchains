@@ -69,6 +69,9 @@ export const settingsSlice = createSlice({
     setResetWallet(state, {payload}) {
       state.isWalletReset = payload;
     },
+    setWalletsSortOption(state, {payload}) {
+      state.walletsSortOption = payload;
+    },
   },
 });
 

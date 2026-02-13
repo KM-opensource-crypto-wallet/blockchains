@@ -80,7 +80,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
-import {BitcoinLightningChain} from '../../cryptoChain/chains/BitcoinLightningChain';
+import {BitcoinLightningChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinLightningChain';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {

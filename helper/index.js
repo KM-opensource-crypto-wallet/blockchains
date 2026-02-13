@@ -1408,4 +1408,3 @@ export const formatBalance = value => {
   }
   return num.toFixed(2);
 };
-
