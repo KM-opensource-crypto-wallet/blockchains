@@ -405,9 +405,6 @@ export const config = {
   BITCOIN_SCAN_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet'
     : 'https://mempool.space',
-  BITCOIN_LIGHTNING_URL: IS_SANDBOX
-    ? 'https://mempool.space/testnet/lightning'
-    : 'https://blockstream.info/liquid',
   BITCOIN_BASE_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet/api'
     : 'https://mempool.space/api',

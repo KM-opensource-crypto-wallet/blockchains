@@ -197,7 +197,22 @@ export const createWallet = createAsyncThunk(
           return thunkAPI.rejectWithValue('coin not created');
         }
       } else {
-        coins = await createCoins(walletData, currentState, true);
+        // Check if selectedCoins is provided (from SelectCoins screen)
+
+        if (
+          walletData?.selectedCoins &&
+          Array.isArray(walletData.selectedCoins) &&
+          walletData.selectedCoins.length > 0
+        ) {
+          coins = await createCoins(
+            walletData,
+            currentState,
+            true,
+            walletData.selectedCoins,
+          );
+        } else {
+          coins = await createCoins(walletData, currentState, true);
+        }
       }
     } catch (error) {
       console.error('error in createCoins', error);
@@ -205,9 +220,19 @@ export const createWallet = createAsyncThunk(
       // throw error;
     }
     newStoreWallet.coins = coins;
-    coins
-      .filter(item => item?.status)
-      .forEach(item => (item.isInWallet = true));
+    // If selectedCoins were provided, mark all of them as isInWallet
+    // Otherwise, only mark coins with status: true
+    if (
+      walletData?.selectedCoins &&
+      Array.isArray(walletData.selectedCoins) &&
+      walletData.selectedCoins.length > 0
+    ) {
+      coins.forEach(item => (item.isInWallet = true));
+    } else {
+      coins
+        .filter(item => item?.status)
+        .forEach(item => (item.isInWallet = true));
+    }
     if (walletData?.phrase) {
       newStoreWallet.phrase = walletData.phrase;
     }
@@ -239,6 +264,11 @@ export const createWallet = createAsyncThunk(
       is_create_wallet: true,
       is_imported: isFromImportWallet,
     });
+    if (isFromImportWallet) {
+      setTimeout(() => {
+        thunkAPI.dispatch(refreshCoins());
+      }, 1000);
+    }
     return {
       newStoreWallet: newStoreWallet,
       replace: walletData.replace,
@@ -775,7 +805,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             transactionFee: transferData?.transactionFee,
             contract_type: txData?.contract_type,
@@ -791,7 +821,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -806,7 +836,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -823,7 +853,7 @@ export const sendFunds = createAsyncThunk(
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
             transactionFee: transferData?.transactionFee,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
             stakingAddress: txData?.stakingAddress,
@@ -848,7 +878,7 @@ export const sendFunds = createAsyncThunk(
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             validatorPubKey: txData?.validatorPubKey,
@@ -861,7 +891,7 @@ export const sendFunds = createAsyncThunk(
             gasFee: transferData?.gasFee,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
           })
         : await nativeCoin.send({
@@ -871,7 +901,7 @@ export const sendFunds = createAsyncThunk(
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             isMax: transferData?.isMax,
             estimateGas: transferData?.estimateGas,
-            nonce: transferData?.nonce,
+            nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             memo: txData?.memo,
@@ -1832,12 +1862,24 @@ export const walletsSlice = createSlice({
           break;
         case 'name_asc':
           sortedWallets = wallets.sort((a, b) =>
-            (a?.walletName || '').localeCompare(b?.walletName || ''),
+            (a?.walletName || '').localeCompare(
+              b?.walletName || '',
+              undefined,
+              {
+                numeric: true,
+              },
+            ),
           );
           break;
         case 'name_desc':
           sortedWallets = wallets.sort((a, b) =>
-            (b?.walletName || '').localeCompare(a?.walletName || ''),
+            (b?.walletName || '').localeCompare(
+              a?.walletName || '',
+              undefined,
+              {
+                numeric: true,
+              },
+            ),
           );
           break;
         default:
@@ -2119,6 +2161,7 @@ export const walletsSlice = createSlice({
       newStoreWallet.address = address;
       newStoreWallet.chain_name = chain_name;
       newStoreWallet.isEVMAddressesAdded = false;
+      newStoreWallet.coinsSortOption = 'default';
 
       // coinsAdapter.addMany(newCoinsState, payload.newStoreWallet.coins);
       // Add the new wallet to the wallets state
@@ -2306,7 +2349,9 @@ export const {
   removePendingTransactions,
   setIsAdding50MoreAddresses,
   rearrangeCurrentWalletCoins,
+  sortCurrentWalletCoins,
   setCurrentWalletCoinsPosition,
+  sortWallets,
   togglePrivacyMode,
   resetCoinsToDefaultAddressForPrivacyMode,
   setMasterClientId,

@@ -5,8 +5,8 @@ import {toXOnly} from 'bitcoinjs-lib/src/psbt/bip371';
 import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
-import {ethers} from 'ethers';
 import {
+  convertToSmallAmount,
   getLastIndexOfDerivations,
   parseBalance,
   validateNumber,
@@ -446,7 +446,7 @@ const buildUTXO = async ({
 
   if (!vSize) {
     if (fee) {
-      const feeBn = ethers.parseUnits(fee, 8);
+      const feeBn = convertToSmallAmount(fee, 8);
       fees = new BigNumber(feeBn ? feeBn?.toString() : 10000);
       amountWithFees = amountWithFees.plus(fees);
     }

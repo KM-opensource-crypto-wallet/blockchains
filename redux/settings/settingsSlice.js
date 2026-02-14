@@ -11,7 +11,6 @@ const state = {
   paymentUrlCoin: {},
   paymentUrlAmount: '',
   paymentUrlCurrencyAmount: '',
-  feesOptions: false,
   chatsOptions: false,
   searchInHomeScreen: true,
   isWalletReset: false,
@@ -35,9 +34,6 @@ export const settingsSlice = createSlice({
     },
     updateFingerprint(state, {payload}) {
       state.fingerprint = payload;
-    },
-    updateFeesOptions(state, {payload}) {
-      state.feesOptions = payload;
     },
     updateChatOptions(state, {payload}) {
       state.chatsOptions = payload;
@@ -84,7 +80,6 @@ export const {
   resetPaymentUrl,
   setPaymentUrlAmount,
   setPaymentUrlCoin,
-  updateFeesOptions,
   updateChatOptions,
   setPaymentUrlCurrencyAmount,
   updateSearchInHomeScreen,

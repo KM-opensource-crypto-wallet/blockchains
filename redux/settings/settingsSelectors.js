@@ -10,7 +10,6 @@ export const isNotificationsReceived = state =>
   state.settings.notifications.received;
 export const isNotificationsSent = state => state.settings.notifications.sent;
 export const isFingerprint = state => state.settings.fingerprint;
-export const isFeesOptions = state => state.settings.feesOptions;
 export const isChatOptions = state => state.settings.chatsOptions;
 export const isSearchInHomeScreen = state => state.settings.searchInHomeScreen;
 export const isWalletReset = state => state.settings.isWalletReset;
