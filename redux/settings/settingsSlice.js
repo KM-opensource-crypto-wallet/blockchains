@@ -15,7 +15,6 @@ const state = {
   searchInHomeScreen: true,
   isWalletReset: false,
   isCustomDerivedChecked: false,
-  coinsSortOption: 'value_desc',
   walletsSortOption: 'default',
 };
 
@@ -84,7 +83,6 @@ export const {
   setPaymentUrlCurrencyAmount,
   updateSearchInHomeScreen,
   setResetWallet,
-  setCoinsSortOption,
   setWalletsSortOption,
   updateCustomDerivedChecked,
 } = settingsSlice.actions;
