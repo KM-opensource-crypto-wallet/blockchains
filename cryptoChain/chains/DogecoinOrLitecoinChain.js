@@ -224,7 +224,8 @@ const buildUTXO = async ({
     const tx = new bitcoin.Psbt({network: network});
     if (fee) {
       const feeBn = ethers.parseUnits(fee, 8);
-      fees = new BigNumber(feeBn ? feeBn?.toString() : 10000);
+      const feeBnNumber = new BigNumber(feeBn || 0);
+      fees = feeBnNumber.isZero() ? new BigNumber(10000) : feeBnNumber;
       amountWithFees = amountWithFees.plus(fees);
     }
     // Only use the required utxos
