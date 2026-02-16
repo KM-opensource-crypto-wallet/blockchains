@@ -455,7 +455,11 @@ export const isCustomAddressNotSupportedChain = chain_name =>
 export const isPendingTransactionSupportedChain = chain_name =>
   EVM_CHAINS.includes(chain_name);
 
-const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = ['ripple', 'cardano'];
+const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = [
+  'ripple',
+  'cardano',
+  'bitcoin_lightning',
+];
 
 export const isPrivateKeyNotSupportedChain = chain_name => {
   return PRIVATE_KEY_NOT_SUPPORTED_CHAINS.includes(chain_name);
