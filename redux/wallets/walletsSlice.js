@@ -795,7 +795,7 @@ export const handleUnclaimedData = createAsyncThunk(
         title: 'Something went wrong',
         message: e?.message || e,
       });
-      throw e;
+      return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
     }
   },
 );
@@ -2132,7 +2132,7 @@ export const walletsSlice = createSlice({
       const existingCurrentWalletIndex = payload?.existingCurrentWalletIndex;
       const allWallets = state.allWallets;
       const currentWalletIndex =
-        existingCurrentWalletIndex || state.currentWalletIndex;
+        existingCurrentWalletIndex ?? state.currentWalletIndex;
       const currentWallet = allWallets[currentWalletIndex] || {};
       const previousCoins = currentWallet.coins;
       currentWallet.coins = previousCoins.map(item => {
