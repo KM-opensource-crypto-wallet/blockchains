@@ -316,8 +316,10 @@ const getBaseCoin = async (chain, wallet, coin) => {
         from: wallet.address,
       }),
     unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
-    approveClaimDeposit: async () => await chain.approveClaimDeposit(),
-    rejectClaimDeposit: async () => await chain.rejectClaimDeposit(),
+    approveClaimDeposit: async payload =>
+      await chain.approveClaimDeposit(payload),
+    rejectClaimDeposit: async payload =>
+      await chain.rejectClaimDeposit(payload),
   };
 
   return coinWrapper;
@@ -513,8 +515,10 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         from: wallet.address,
       }),
     unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
-    approveClaimDeposit: async () => await chain.approveClaimDeposit(),
-    rejectClaimDeposit: async () => await chain.rejectClaimDeposit(),
+    approveClaimDeposit: async payload =>
+      await chain.approveClaimDeposit(payload),
+    rejectClaimDeposit: async payload =>
+      await chain.rejectClaimDeposit(payload),
   };
 
   return coinWrapper;
