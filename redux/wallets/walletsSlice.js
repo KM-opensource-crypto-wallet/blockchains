@@ -772,13 +772,13 @@ export const handleUnclaimedData = createAsyncThunk(
           ? await chain.approveClaimDeposit(txData)
           : await chain.rejectClaimDeposit(txData);
       if (response) {
+        await delay(2000);
         const removeData = {
           txData,
           existingCurrentWalletIndex,
           existingCoinId,
         };
         thunkAPI.dispatch(removeUnClaimedLightningBTC(removeData));
-        await delay(2000);
         thunkAPI.dispatch(
           refreshCurrentCoin({
             currentCoin,
