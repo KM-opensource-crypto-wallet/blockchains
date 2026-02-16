@@ -13,7 +13,8 @@ export const isFingerprint = state => state.settings.fingerprint;
 export const isChatOptions = state => state.settings.chatsOptions;
 export const isSearchInHomeScreen = state => state.settings.searchInHomeScreen;
 export const isWalletReset = state => state.settings.isWalletReset;
-export const isCustomDerivedChecked = state =>  state.settings.isCustomDerivedChecked;
+export const isCustomDerivedChecked = state =>
+  state.settings.isCustomDerivedChecked;
 
 export const getPaymentUrlAmount = state => state.settings.paymentUrlAmount;
 export const getPaymentUrlCurrencyAmount = state =>

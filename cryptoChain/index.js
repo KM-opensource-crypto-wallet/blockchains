@@ -20,6 +20,7 @@ import {AptosChain} from './chains/AptosChain';
 import {HederaChain} from './chains/HederaChain';
 import {CardanoChain} from './chains/CardanoChain';
 import {FilecoinChain} from './chains/FilecoinChain';
+import {BitcoinLightningChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinLightningChain';
 
 const chains = {
   tron: TronChain,
@@ -28,6 +29,7 @@ const chains = {
   bitcoin: BitcoinChain, // this is native segwit
   bitcoin_legacy: BitcoinChain,
   bitcoin_segwit: BitcoinChain,
+  bitcoin_lightning: BitcoinLightningChain,
   // bitcoin_taproot: BitcoinChain,
   solana: SolanaChain,
   polygon: EVMChain,
@@ -62,8 +64,8 @@ const chains = {
   filecoin: FilecoinChain,
 };
 
-export const getChain = chain => {
-  return chains[chain]?.(chain);
+export const getChain = (chain, phrase) => {
+  return chains[chain]?.(chain, phrase);
 };
 
 export const getCoin = async (phrase, coin, transactionFee, walletData) => {
@@ -74,7 +76,7 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
     return null;
   }
   let wallet;
-  const chain = getChain(chainName);
+  const chain = getChain(chainName, phrase);
   if (isAddressOrPrivateKeyExists(coin)) {
     wallet = {
       privateKey: coin?.privateKey,
@@ -91,6 +93,10 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
     wallet = await BitcoinChain().createBitcoinSegwitWallet({
       mnemonic: phrase,
     });
+  } else if (phrase && chainName === 'bitcoin_lightning') {
+    const lightningChain = BitcoinLightningChain(chainName, phrase);
+
+    wallet = await lightningChain.generateSparkAddress();
   }
   // else if (phrase && chainName === 'bitcoin_taproot') {
   //   wallet = await BitcoinChain().createBitcoinTaprootWallet({
@@ -309,6 +315,11 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         from: wallet.address,
       }),
+    unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
+    approveClaimDeposit: async payload =>
+      await chain.approveClaimDeposit(payload),
+    rejectClaimDeposit: async payload =>
+      await chain.rejectClaimDeposit(payload),
   };
 
   return coinWrapper;
@@ -503,6 +514,11 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         privateKey: wallet.privateKey,
         from: wallet.address,
       }),
+    unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
+    approveClaimDeposit: async payload =>
+      await chain.approveClaimDeposit(payload),
+    rejectClaimDeposit: async payload =>
+      await chain.rejectClaimDeposit(payload),
   };
 
   return coinWrapper;

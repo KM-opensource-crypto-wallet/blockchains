@@ -34,7 +34,6 @@ export const settingsSlice = createSlice({
     updateFingerprint(state, {payload}) {
       state.fingerprint = payload;
     },
-
     updateChatOptions(state, {payload}) {
       state.chatsOptions = payload;
     },
