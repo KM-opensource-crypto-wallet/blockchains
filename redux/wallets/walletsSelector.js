@@ -265,10 +265,6 @@ export const getUserCoinsOptions = createSelector(
   },
 );
 
-export const selectBtcLightningUnClaimed = state => {
-  const currentWallet = selectCurrentWallet(state);
-  return currentWallet?.unClaimedLightningBTC;
-};
 export const selectCurrentCoin = state => {
   const currentWallet = selectCurrentWallet(state);
   const selectedCoinId = currentWallet?.selectedCoin;

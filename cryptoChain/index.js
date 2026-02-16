@@ -20,7 +20,7 @@ import {AptosChain} from './chains/AptosChain';
 import {HederaChain} from './chains/HederaChain';
 import {CardanoChain} from './chains/CardanoChain';
 import {FilecoinChain} from './chains/FilecoinChain';
-import {BitcoinLightningChain} from './chains/BitcoinLightningChain';
+import {BitcoinLightningChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinLightningChain';
 
 const chains = {
   tron: TronChain,
@@ -315,6 +315,9 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         from: wallet.address,
       }),
+    unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
+    approveClaimDeposit: async () => await chain.approveClaimDeposit(),
+    rejectClaimDeposit: async () => await chain.rejectClaimDeposit(),
   };
 
   return coinWrapper;
@@ -509,6 +512,9 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         privateKey: wallet.privateKey,
         from: wallet.address,
       }),
+    unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
+    approveClaimDeposit: async () => await chain.approveClaimDeposit(),
+    rejectClaimDeposit: async () => await chain.rejectClaimDeposit(),
   };
 
   return coinWrapper;

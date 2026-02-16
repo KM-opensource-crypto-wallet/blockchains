@@ -16,6 +16,7 @@ import {
   isEVMChain,
   isPendingTransactionSupportedChain,
   isStakingChain,
+  isUnclaimDepositSupportedChain,
   parseBalance,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -31,6 +32,7 @@ export const getCoinSnapshot = async (
   fetchTransactions,
   isFetchStaking,
   fetchUTXOs,
+  isFetchUnclaimDeposit,
 ) => {
   try {
     const coinDef = _coinDef ?? selectCurrentCoin(state);
@@ -108,6 +110,14 @@ export const getCoinSnapshot = async (
         balance = (await nativeCoin.getBalance?.()) || 0;
       }
     }
+    let listOfUnClaimedDeposits;
+    if (
+      isFetchUnclaimDeposit &&
+      isUnclaimDepositSupportedChain(coinDef?.chain_name)
+    ) {
+      listOfUnClaimedDeposits =
+        (await nativeCoin.unClaimedOnChainDeposit?.()) || [];
+    }
     const finalUTXOs = Array.isArray(utxos) ? utxos : [];
     const allTransactions = Array.isArray(trxs) ? trxs : [];
     const finalTransactions = allTransactions.map(item => {
@@ -155,6 +165,9 @@ export const getCoinSnapshot = async (
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;
       newCoin.UTXOs = finalUTXOs;
+    }
+    if (listOfUnClaimedDeposits !== undefined) {
+      newCoin.listOfUnClaimedDeposits = listOfUnClaimedDeposits;
     }
     return newCoin;
   } catch (err) {
