@@ -2133,21 +2133,19 @@ export const walletsSlice = createSlice({
       const allWallets = state.allWallets;
       const currentWalletIndex =
         existingCurrentWalletIndex ?? state.currentWalletIndex;
-      const currentWallet = allWallets[currentWalletIndex] || {};
-      const previousCoins = currentWallet.coins;
-      currentWallet.coins = previousCoins.map(item => {
-        const tempItem = structuredClone(item);
-        if (tempItem?._id === existingCoinId) {
-          const currentList = tempItem.listOfUnClaimedDeposits;
-          if (Array.isArray(currentList)) {
-            tempItem.listOfUnClaimedDeposits = currentList.filter(
-              item2 => !(item2.txid === txid && item2.vout === vout),
-            );
-          }
-          return tempItem;
-        }
-        return tempItem;
-      });
+      const currentWallet = allWallets[currentWalletIndex];
+      if (!currentWallet) {
+        console.warn('removeUnClaimedLightningBTC: wallet not found');
+        return;
+      }
+      const coin = currentWallet.coins?.find(
+        item => item?._id === existingCoinId,
+      );
+      if (coin && Array.isArray(coin.listOfUnClaimedDeposits)) {
+        coin.listOfUnClaimedDeposits = coin.listOfUnClaimedDeposits.filter(
+          item2 => !(item2.txid === txid && item2.vout === vout),
+        );
+      }
     },
   },
   extraReducers: builder => {
