@@ -1496,7 +1496,7 @@ export const searchCoinFromCurrency = createAsyncThunk(
   },
 );
 
-const walletsSlice = createSlice({
+export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
@@ -2429,7 +2429,6 @@ const walletsSlice = createSlice({
     });
   },
 });
-export default walletsSlice;
 
 export const {
   setCurrentCoin,
