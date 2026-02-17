@@ -364,7 +364,7 @@ export const BitcoinChain = () => {
     waitForConfirmation: async ({transaction}) => {
       const transactionID = transaction;
       if (!transactionID) {
-        console.error('No transaction id found for tron');
+        console.error('No transaction id found for bitcoin');
         return null;
       }
       return new Promise((resolve, reject) => {

@@ -380,7 +380,7 @@ export const TonChain = () => {
     },
     waitForConfirmation: async ({transaction}) => {
       if (!transaction?.seqno || !transaction?.walletContract) {
-        console.error('No transaction id found for tron');
+        console.error('No transaction id found for ton');
         return null;
       }
       return new Promise((resolve, reject) => {
