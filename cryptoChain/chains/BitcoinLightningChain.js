@@ -41,8 +41,8 @@ export const BitcoinLightningChain = (_, phrase) => {
     send: async ({}) => {
       return await sendLightning(phrase);
     },
-    waitForConfirmation: async () => {
-      return await waitForLightningConfirmation(phrase);
+    waitForConfirmation: async txData => {
+      return await waitForLightningConfirmation(phrase, txData);
     },
 
     rejectClaimDeposit: async txData => {
