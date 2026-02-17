@@ -125,6 +125,7 @@ const supportedChain = [
   'cardano',
   'filecoin',
   // 'bitcoin_taproot'
+  'bitcoin_lightning',
 ];
 
 export function validateSupportedChain(chain_name) {
@@ -329,6 +330,11 @@ const EIP_1559_NOT_SUPPORTED = ['binance_smart_chain', 'kava'];
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
+const UNCLAIM_DEPOSIT_SUPPORTED_CHAINS = ['bitcoin_lightning'];
+
+export const isUnclaimDepositSupportedChain = chain_name =>
+  UNCLAIM_DEPOSIT_SUPPORTED_CHAINS.includes(chain_name);
+
 const EIP_7702_SUPPORTED_CHAIN = [
   'ethereum',
   // 'binance_smart_chain',
@@ -449,7 +455,11 @@ export const isCustomAddressNotSupportedChain = chain_name =>
 export const isPendingTransactionSupportedChain = chain_name =>
   EVM_CHAINS.includes(chain_name);
 
-const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = ['ripple', 'cardano'];
+const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = [
+  'ripple',
+  'cardano',
+  'bitcoin_lightning',
+];
 
 export const isPrivateKeyNotSupportedChain = chain_name => {
   return PRIVATE_KEY_NOT_SUPPORTED_CHAINS.includes(chain_name);
@@ -483,6 +493,8 @@ export const isAddressOrPrivateKeyExists = coin => {
       const prefix = IS_SANDBOX ? 'tltc' : 'ltc';
       return coin?.address?.startsWith(prefix);
     }
+    return false;
+  } else if (coin?.address && chain_name === 'bitcoin_lightning') {
     return false;
   }
   return false;
@@ -1410,4 +1422,3 @@ export const formatBalance = value => {
   }
   return num.toFixed(2);
 };
-

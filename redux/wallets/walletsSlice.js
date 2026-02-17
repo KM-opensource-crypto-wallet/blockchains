@@ -1,4 +1,5 @@
 import {
+  getChain,
   getCoin,
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
@@ -58,6 +59,7 @@ import {
   getIndexFromDerivePath,
   getLargestNumber,
   getWalletTotalBalance,
+  delay,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -522,6 +524,7 @@ export const refreshCurrentCoin = createAsyncThunk(
     const isFetchTransactions = refreshData?.fetchTransaction || false;
     const isFetchUTXOs = refreshData?.fetchUTXOs || false;
     const isFetchStaking = refreshData?.isFetchStaking || false;
+    const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
     const allCoins = selectUserCoins(currentState);
     const parentCoin = getNativeCoinByTokenCoin(allCoins, currentCoin);
     const validatedChainName = validateSupportedChain(currentCoin?.chain_name);
@@ -541,6 +544,7 @@ export const refreshCurrentCoin = createAsyncThunk(
       isFetchTransactions,
       isFetchStaking,
       isFetchUTXOs,
+      isFetchUnclaimDeposit,
     );
     let updatedNativeCoin;
     if (parentCoin) {
@@ -784,6 +788,57 @@ export const addOrToggleCoinInWallet = createAsyncThunk(
         walletIndex: targetWalletIndex,
         forceInWallet,
       };
+    }
+  },
+);
+
+export const handleUnclaimedData = createAsyncThunk(
+  'wallets/handleUnclaimedData',
+  async (payload, thunkAPI) => {
+    const action = payload?.action;
+    try {
+      const currentState = thunkAPI.getState();
+      const currentWallet = selectCurrentWallet(currentState);
+      const currentCoin =
+        payload?.currentCoin || selectCurrentCoin(currentState);
+      const existingCurrentWalletIndex = getCurrentWalletIndex(currentState);
+      const existingCoinId = currentCoin?._id;
+      const walletPhrase = currentWallet?.phrase;
+      if (!walletPhrase) {
+        throw new Error('no walletPhrase found');
+      }
+      const chain = getChain(currentCoin?.chain_name, walletPhrase);
+      const txData = payload?.txData;
+
+      const response =
+        action === 'approve'
+          ? await chain.approveClaimDeposit(txData)
+          : await chain.rejectClaimDeposit(txData);
+      if (response) {
+        await delay(2000);
+        const removeData = {
+          txData,
+          existingCurrentWalletIndex,
+          existingCoinId,
+        };
+        thunkAPI.dispatch(removeUnClaimedLightningBTC(removeData));
+        thunkAPI.dispatch(
+          refreshCurrentCoin({
+            currentCoin,
+            isFetchUnclaimDeposit: true,
+          }),
+        );
+      } else {
+        throw new Error(`Something went wrong in ${action} unclaim`);
+      }
+    } catch (e) {
+      console.error(`Error in handleUnclaimedData (${action})`, e);
+      showToast({
+        type: 'errorToast',
+        title: 'Something went wrong',
+        message: e?.message || e,
+      });
+      return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
     }
   },
 );
@@ -2131,6 +2186,28 @@ export const walletsSlice = createSlice({
     setFailedTransaction: (state, action) => {
       state.failedTransaction = action?.payload;
     },
+    removeUnClaimedLightningBTC: (state, action) => {
+      const payload = action?.payload;
+      const {txid, vout} = payload?.txData || {};
+      const existingCoinId = payload?.existingCoinId;
+      const existingCurrentWalletIndex = payload?.existingCurrentWalletIndex;
+      const allWallets = state.allWallets;
+      const currentWalletIndex =
+        existingCurrentWalletIndex ?? state.currentWalletIndex;
+      const currentWallet = allWallets[currentWalletIndex];
+      if (!currentWallet) {
+        console.warn('removeUnClaimedLightningBTC: wallet not found');
+        return;
+      }
+      const coin = currentWallet.coins?.find(
+        item => item?._id === existingCoinId,
+      );
+      if (coin && Array.isArray(coin.listOfUnClaimedDeposits)) {
+        coin.listOfUnClaimedDeposits = coin.listOfUnClaimedDeposits.filter(
+          item2 => !(item2.txid === txid && item2.vout === vout),
+        );
+      }
+    },
   },
   extraReducers: builder => {
     builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
@@ -2492,6 +2569,7 @@ export const {
   createClientIdIfNotExist,
   deleteCoin,
   setFailedTransaction,
+  removeUnClaimedLightningBTC,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators
