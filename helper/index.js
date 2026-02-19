@@ -217,6 +217,9 @@ export function validateBigNumberStr(number) {
   }
 }
 export function validateNumberInInput(text, decimals = 18) {
+  // Normalize locale-specific decimal separator (comma → dot)
+  text = text.replace(',', '.');
+
   // Remove leading zeros unless it's something like "0." or just "0"
   while (text.charAt(0) === '0' && text.charAt(1) !== '.' && text.length > 1) {
     text = text.substring(1);
