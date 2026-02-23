@@ -120,20 +120,21 @@ export const updateConsentState = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsUpdatingConsentState(true));
-      const {topic, address, consentState, peerAddress} = payload;
+      const {topic, address, consentState, peerInboxId} = payload;
       if (consentState !== 'denied' && consentState !== 'allowed') {
         return console.error(
           'consentState must be one of this allowed or denied  ',
         );
       }
-      let results;
       if (consentState === 'denied') {
-        results = await XMTP.blockConversation({
-          peerAddress,
+        await XMTP.blockConversation({
+          peerInboxId,
+          topic,
         });
       } else {
-        results = await XMTP.unBlockConversation({
-          peerAddress,
+        await XMTP.unBlockConversation({
+          peerInboxId,
+          topic,
         });
       }
 
@@ -214,7 +215,7 @@ export const messageSlice = createSlice({
     },
     setSelectedConversation(state, {payload}) {
       state.selectedConversation = {
-        address: payload?.address,
+        address: payload?.address?.toLowerCase(),
         topic: payload?.topic,
       };
     },
@@ -322,21 +323,22 @@ export const messageSlice = createSlice({
         if (!tempConversation) {
           continue;
         }
-        const {peerAddress, topic} = tempConversation;
+        const {peerInboxId, topic} = tempConversation;
         const tempMessage = lastMessages[i];
         finalConversations[topic] = {
           ...tempConversation,
           lastMessage: tempMessage?.[0],
-          name: conversationName[peerAddress] || '',
+          name: conversationName[peerInboxId] || '',
         };
       }
+      const lowerAddress = address?.toLowerCase();
       const tempMessageData = {...state.conversationData};
-      const finalConvData = tempMessageData.conversations
-        ? {...tempMessageData.conversations, finalConversations}
+      const finalConvData = tempMessageData[lowerAddress]
+        ? {...tempMessageData[lowerAddress], ...finalConversations}
         : finalConversations;
       state.conversationData = {
         ...tempMessageData,
-        [address]: finalConvData,
+        [lowerAddress]: finalConvData,
       };
       state.isFetchingConversations = false;
     });

@@ -11,7 +11,7 @@ export const isFetchingMoreMessages = state =>
 export const isAllMessageLoaded = state => state.message.isAllMessageLoaded;
 export const getConversations = state => {
   const ethereumCoin = getEthereumCoin(state);
-  const address = ethereumCoin?.address;
+  const address = ethereumCoin?.address?.toLowerCase();
   if (!address) {
     return [];
   }
