@@ -291,6 +291,15 @@ export const messageSlice = createSlice({
         console.warn('some payload is missing addConversations', payload);
       }
     },
+    addSentMessage(state, {payload}) {
+      const {topic, message} = payload;
+      if (topic && message) {
+        const previousMessages = state.messageData[topic]
+          ? [...state.messageData[topic]]
+          : [];
+        state.messageData[topic] = [message, ...previousMessages];
+      }
+    },
     addConversationsName(state, {payload}) {
       const {name} = payload;
       const conversationData = state?.conversationData;
@@ -360,4 +369,5 @@ export const {
   setSelectedConversation,
   addConversationsName,
   setIsForwardingMessage,
+  addSentMessage,
 } = messageSlice.actions;
