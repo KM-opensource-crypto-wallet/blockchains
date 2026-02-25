@@ -215,7 +215,7 @@ export const messageSlice = createSlice({
     },
     setSelectedConversation(state, {payload}) {
       state.selectedConversation = {
-        address: payload?.address?.toLowerCase(),
+        address: payload?.address,
         topic: payload?.topic,
       };
     },
