@@ -175,9 +175,9 @@ export const forwardMessages = createAsyncThunk(
           createdAt: conversation?.createdAt,
           version: conversation?.version,
         });
-        messages.forEach(async message => {
+        for (const message of messages) {
           await convObj.send(message);
-        });
+        }
       }
       thunkAPI.dispatch(getConversation());
     } catch (e) {
