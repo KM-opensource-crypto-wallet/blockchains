@@ -292,12 +292,26 @@ export const messageSlice = createSlice({
       }
     },
     addSentMessage(state, {payload}) {
-      const {topic, message} = payload;
+      const {topic, message, address} = payload;
       if (topic && message) {
         const previousMessages = state.messageData[topic]
           ? [...state.messageData[topic]]
           : [];
         state.messageData[topic] = [message, ...previousMessages];
+        if (address) {
+          const lowerAddress = address.toLowerCase();
+          const tempConversationData = state.conversationData[lowerAddress]
+            ? {...state.conversationData[lowerAddress]}
+            : {};
+          const finalConvData = tempConversationData[topic]
+            ? {...tempConversationData[topic]}
+            : {};
+          finalConvData.lastMessage = message;
+          tempConversationData[topic] = finalConvData;
+          state.conversationData[lowerAddress] = tempConversationData;
+        }
+      } else {
+        console.warn('some payload is missing addSentMessage', payload);
       }
     },
     addConversationsName(state, {payload}) {
