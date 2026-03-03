@@ -394,14 +394,10 @@ export const BitcoinChain = () => {
         }, 5000);
       });
     },
-    createCustomDerivedAddress: async ({
-      chain_name,
-      mnenomincs,
-      derivePath,
-    }) => {
+    createCustomDerivedAddress: async ({chain_name, mnemonic, derivePath}) => {
       try {
         const customNetwork = getNetworkByChainName(chain_name);
-        const seed = bip39.mnemonicToSeedSync(mnenomincs);
+        const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
         const root = bip32.fromSeed(seed, customNetwork);
         const child1 = root.derivePath(derivePath);
@@ -434,7 +430,8 @@ export const BitcoinChain = () => {
           },
         };
       } catch (error) {
-        console.log(error);
+        console.error(error);
+        throw error;
       }
     },
   };
