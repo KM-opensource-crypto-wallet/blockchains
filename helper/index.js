@@ -1090,22 +1090,22 @@ const solanaMDerivationPath = [
 
 const bitcoinNativeSegwitDerivationPath = [
   {
-    label: "Ledger (m/84'/0'/0'/0/0)",
-    value: "m/84'/0'/0'/0/0",
+    label: "Ledger (m/84'/0'/1'/0/0)",
+    value: "m/84'/0'/1'/0/0",
   },
 ];
 
 const bitcoinSegwitDerivationPath = [
   {
-    label: "Ledger (m/49'/0'/0'/0/0)",
-    value: "m/49'/0'/0'/0/0",
+    label: "Ledger (m/49'/0'/1'/0/0)",
+    value: "m/49'/0'/1'/0/0",
   },
 ];
 
 const bitcoinLegacyDerivationPath = [
   {
-    label: "Ledger (m/44'/0'/0'/0/0)",
-    value: "m/44'/0'/0'/0/0",
+    label: "Ledger (m/44'/0'/1'/0/0)",
+    value: "m/44'/0'/1'/0/0",
   },
 ];
 

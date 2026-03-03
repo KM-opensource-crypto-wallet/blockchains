@@ -1435,6 +1435,7 @@ export const addCustomDeriveAddress = createAsyncThunk(
       const currentDeriveAddresses =
         selectCurrentCoin(currentState)?.deriveAddresses;
       if (
+        isBitcoinChain(chain_name) &&
         Array.isArray(currentDeriveAddresses) &&
         currentDeriveAddresses.length >= 100
       ) {

@@ -402,12 +402,6 @@ export const BitcoinChain = () => {
         const root = bip32.fromSeed(seed, customNetwork);
         const child1 = root.derivePath(derivePath);
         let data = {};
-        if (chain_name === 'bitcoin') {
-          data = bitcoin.payments.p2wpkh({
-            pubkey: child1.publicKey,
-            network: customNetwork,
-          });
-        }
         if (chain_name === 'bitcoin_legacy') {
           data = bitcoin.payments.p2pkh({
             pubkey: child1.publicKey,
