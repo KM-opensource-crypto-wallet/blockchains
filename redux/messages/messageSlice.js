@@ -277,16 +277,17 @@ export const messageSlice = createSlice({
     },
     updateConversation(state, {payload}) {
       const {topic, conversationData, address} = payload;
-      if (topic && conversationData && address) {
-        const tempConversationData = state.conversationData[address]
-          ? {...state.conversationData[address]}
+      const lowerAddress = address?.toLowerCase();
+      if (topic && conversationData && lowerAddress) {
+        const tempConversationData = state.conversationData[lowerAddress]
+          ? {...state.conversationData[lowerAddress]}
           : {};
         const previousConversationData = tempConversationData[topic];
         tempConversationData[topic] = {
           ...previousConversationData,
           ...conversationData,
         };
-        state.conversationData[address] = tempConversationData;
+        state.conversationData[lowerAddress] = tempConversationData;
       } else {
         console.warn('some payload is missing addConversations', payload);
       }

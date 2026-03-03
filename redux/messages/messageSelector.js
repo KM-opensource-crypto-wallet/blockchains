@@ -34,7 +34,7 @@ export const getSelectedConversations = state => {
   const conversationData = state?.message?.conversationData;
   const selectedConversation = state?.message?.selectedConversation;
   return (
-    conversationData?.[selectedConversation?.address]?.[
+    conversationData?.[selectedConversation?.address?.toLowerCase()]?.[
       selectedConversation.topic
     ] || {}
   );
