@@ -1432,6 +1432,20 @@ export const addCustomDeriveAddress = createAsyncThunk(
       const derivePath = payload?.derivePath;
       const chain_name =
         payload?.chain_name || selectCurrentCoin(currentState)?.chain_name;
+      const currentDeriveAddresses =
+        selectCurrentCoin(currentState)?.deriveAddresses;
+      if (
+        Array.isArray(currentDeriveAddresses) &&
+        currentDeriveAddresses.length >= 100
+      ) {
+        showToast({
+          type: 'errorToast',
+          title: 'Limit reached',
+          message: 'You can only create up to 100 accounts',
+          autoHide: true,
+        });
+        return thunkAPI.rejectWithValue('Address limit reached');
+      }
       toastId = showToast({
         type: 'progressToast',
         title: `Adding to the ${wallet.walletName}`,

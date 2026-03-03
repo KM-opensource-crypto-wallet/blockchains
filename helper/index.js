@@ -354,7 +354,14 @@ export const isEip7702SupportedChain = chain_name =>
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
 
-const DERIVE_ADDRESS_SUPPORT_CHAIN = [...EVM_CHAINS, 'tron', 'solana'];
+const DERIVE_ADDRESS_SUPPORT_CHAIN = [
+  ...EVM_CHAINS,
+  'tron',
+  'solana',
+  'bitcoin',
+  'bitcoin_segwit',
+  'bitcoin_legacy',
+];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
 
@@ -1081,10 +1088,34 @@ const solanaMDerivationPath = [
   },
 ];
 
+const bitcoinNativeSegwitDerivationPath = [
+  {
+    label: "Ledger (m/84'/0'/0'/0/0)",
+    value: "m/84'/0'/0'/0/0",
+  },
+];
+
+const bitcoinSegwitDerivationPath = [
+  {
+    label: "Ledger (m/49'/0'/0'/0/0)",
+    value: "m/49'/0'/0'/0/0",
+  },
+];
+
+const bitcoinLegacyDerivationPath = [
+  {
+    label: "Ledger (m/44'/0'/0'/0/0)",
+    value: "m/44'/0'/0'/0/0",
+  },
+];
+
 export const allDerivePath = {
   ethereum: EVMDerivationPath,
   solana: solanaMDerivationPath,
   tron: tronDerivationPath,
+  bitcoin: bitcoinNativeSegwitDerivationPath,
+  bitcoin_segwit: bitcoinSegwitDerivationPath,
+  bitcoin_legacy: bitcoinLegacyDerivationPath,
 };
 
 export const customObj = {
