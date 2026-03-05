@@ -1008,6 +1008,15 @@ export const sendFunds = createAsyncThunk(
           );
         }
 
+        const tx_hash = getHashString(res, currentCoin?.chain_name);
+        const pendingTransaction = {
+          amount: txData?.amount,
+          to: txData?.to,
+          from: txData?.from || currentCoin?.address,
+          status: 'PENDING',
+          date: new Date().toISOString(),
+          link: tx_hash,
+        };
         toastId = showToast({
           type: 'progressToast',
           title: `${
@@ -1017,6 +1026,14 @@ export const sendFunds = createAsyncThunk(
             txData?.isExchange ? 'exchange' : ''
           } transaction submitted successfully. Once the transaction completed you will be notified.`,
           autoHide: false,
+          props: {
+            onViewTransaction: () => {
+              MainNavigation.navigate({
+                name: 'TransactionDetails',
+                params: {transaction: pendingTransaction},
+              });
+            },
+          },
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
           const key = createPendingTransactionKey({
@@ -1031,7 +1048,6 @@ export const sendFunds = createAsyncThunk(
             }),
           );
         }
-        const tx_hash = getHashString(res, currentCoin?.chain_name);
         confirmTransaction = await nativeCoin.waitForConfirmation({
           transaction: res,
           interval: 5000,
