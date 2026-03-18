@@ -1,4 +1,5 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
+import Toast from 'react-native-toast-message';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
   CHAIN_ID,
@@ -17,6 +18,7 @@ import {
   getFreeRPCUrl,
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {getEthBlockByRPCUrls} from 'dok-wallet-blockchain-networks/service/rpcService';
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
@@ -52,8 +54,9 @@ const ADDITIONAL_ESTIMATE_GAS = {
   arbitrum: 100000n,
 };
 
-export const EVMChain = chain_name => {
-  const allRpcUrls = getFreeRPCUrl(chain_name);
+export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
+  let allRpcUrls = customRpcUrl ? [customRpcUrl] : getFreeRPCUrl(chain_name);
+
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
@@ -326,6 +329,18 @@ export const EVMChain = chain_name => {
       } catch (e) {
         console.error('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
+          if (customRpcUrl) {
+            onRpcError?.();
+          }
+          Toast.show({
+            type: 'rpcError',
+            props: {
+              chain_name,
+              hasCustomRpc: !!customRpcUrl,
+            },
+            visibilityTime: 8000,
+            autoHide: true,
+          });
           if (defaultResponse) {
             return defaultResponse;
           } else {
@@ -544,7 +559,11 @@ export const EVMChain = chain_name => {
     }
     let currentNonce;
     if (!ignoreFetchingNonce && (isFetchNonce || existingNonce == null)) {
-      currentNonce = await EVMChain(chain_name).getNonce({
+      currentNonce = await EVMChain(
+        chain_name,
+        undefined,
+        customRpcUrl,
+      ).getNonce({
         address: fromAddress,
       });
     } else if (existingNonce) {
@@ -659,7 +678,11 @@ export const EVMChain = chain_name => {
           );
           let currentNonce;
           if (isFetchNonce || existingNonce == null) {
-            currentNonce = await EVMChain(chain_name).getNonce({
+            currentNonce = await EVMChain(
+              chain_name,
+              undefined,
+              customRpcUrl,
+            ).getNonce({
               address: wallet.address,
             });
           } else if (existingNonce) {
@@ -1018,7 +1041,11 @@ export const EVMChain = chain_name => {
         throw new Error('Transaction not found');
       }
 
-      const pendingNonce = await EVMChain(chain_name).getSafelyLatestNonce({
+      const pendingNonce = await EVMChain(
+        chain_name,
+        undefined,
+        customRpcUrl,
+      ).getSafelyLatestNonce({
         address: from,
       });
       if (pendingNonce !== tr?.nonce) {
@@ -1030,7 +1057,11 @@ export const EVMChain = chain_name => {
       const decodeTx = parseTransaction(tr.data);
       let contractDetails = null;
       if (decodeTx?.toAddress) {
-        contractDetails = await EVMChain(chain_name).getContract({
+        contractDetails = await EVMChain(
+          chain_name,
+          undefined,
+          customRpcUrl,
+        ).getContract({
           contractAddress: tr?.to,
         });
         if (contractDetails?.decimals) {
@@ -1550,11 +1581,19 @@ export const EVMChain = chain_name => {
       }
     },
     getNonce: async ({address}) => {
-      let nonce = await EVMChain(chain_name).getSafelyPendingNonce({
+      let nonce = await EVMChain(
+        chain_name,
+        undefined,
+        customRpcUrl,
+      ).getSafelyPendingNonce({
         address,
       });
       if (nonce === 'not_found_pending_nonce') {
-        nonce = await EVMChain(chain_name).getSafelyLatestNonce({
+        nonce = await EVMChain(
+          chain_name,
+          undefined,
+          customRpcUrl,
+        ).getSafelyLatestNonce({
           address,
         });
         if (nonce === 'not_found_latest_nonce') {
