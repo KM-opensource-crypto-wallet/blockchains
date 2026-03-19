@@ -28,7 +28,7 @@ export async function compareAndSortRpcUrls(freeRpcUrls) {
   return finalObj;
 }
 
-export async function validateRpcUrl(url) {
+export async function validateRpcUrl(url, expectedChainName) {
   try {
     const resp = await API_REQUEST.post(url, {
       jsonrpc: '2.0',
@@ -39,8 +39,18 @@ export async function validateRpcUrl(url) {
     const chainIdHex = resp?.data?.result;
     if (chainIdHex) {
       const chainId = new BigNumber(chainIdHex).toNumber();
+      const expectedChainId = CHAIN_ID?.[expectedChainName];
+      if (!expectedChainId) {
+        return {isValid: false, error: 'Unsupported chain'};
+      }
       if (!SUPPORTED_EVM_CHAIN_IDS.has(chainId)) {
         return {isValid: false, error: 'Chain ID is not supported'};
+      }
+      if (chainId !== expectedChainId) {
+        return {
+          isValid: false,
+          error: `RPC URL chain mismatch. Expected ${expectedChainId}, got ${chainId}`,
+        };
       }
       return {isValid: true, chainId};
     }

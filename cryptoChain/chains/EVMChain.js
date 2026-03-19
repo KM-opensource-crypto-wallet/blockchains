@@ -56,6 +56,8 @@ const ADDITIONAL_ESTIMATE_GAS = {
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
   let allRpcUrls = customRpcUrl ? [customRpcUrl] : getFreeRPCUrl(chain_name);
+  let lastRpcErrorToastAt = 0;
+  const RPC_TOAST_COOLDOWN_MS = 15000;
 
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
@@ -332,15 +334,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
           if (customRpcUrl) {
             onRpcError?.();
           }
-          Toast.show({
-            type: 'rpcError',
-            props: {
-              chain_name,
-              hasCustomRpc: !!customRpcUrl,
-            },
-            visibilityTime: 8000,
-            autoHide: true,
-          });
+          const now = Date.now();
+          if (now - lastRpcErrorToastAt > RPC_TOAST_COOLDOWN_MS) {
+            lastRpcErrorToastAt = now;
+            Toast.show({
+              type: 'rpcError',
+              props: {
+                chain_name,
+                hasCustomRpc: !!customRpcUrl,
+              },
+              visibilityTime: 8000,
+              autoHide: true,
+            });
+          }
           if (defaultResponse) {
             return defaultResponse;
           } else {
