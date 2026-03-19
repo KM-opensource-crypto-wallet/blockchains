@@ -569,6 +569,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
+        onRpcError,
       ).getNonce({
         address: fromAddress,
       });
@@ -688,6 +689,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
               chain_name,
               undefined,
               customRpcUrl,
+              onRpcError,
             ).getNonce({
               address: wallet.address,
             });
@@ -1051,6 +1053,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
+        onRpcError,
       ).getSafelyLatestNonce({
         address: from,
       });
@@ -1067,6 +1070,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
           chain_name,
           undefined,
           customRpcUrl,
+          onRpcError,
         ).getContract({
           contractAddress: tr?.to,
         });
@@ -1591,6 +1595,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
+        onRpcError,
       ).getSafelyPendingNonce({
         address,
       });
@@ -1599,6 +1604,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
           chain_name,
           undefined,
           customRpcUrl,
+          onRpcError,
         ).getSafelyLatestNonce({
           address,
         });
