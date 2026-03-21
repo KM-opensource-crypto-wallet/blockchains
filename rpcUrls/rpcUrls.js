@@ -1,7 +1,6 @@
 import {fetchRpcUrls} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-import {compareAndSortRpcUrls} from 'dok-wallet-blockchain-networks/service/rpcService';
 import dayjs from 'dayjs';
 
 const allRPCUrl = {
