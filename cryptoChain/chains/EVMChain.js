@@ -18,7 +18,6 @@ import {
   getFreeRPCUrl,
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {getEthBlockByRPCUrls} from 'dok-wallet-blockchain-networks/service/rpcService';
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
@@ -54,7 +53,7 @@ const ADDITIONAL_ESTIMATE_GAS = {
   arbitrum: 100000n,
 };
 
-export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
+export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   let allRpcUrls = customRpcUrl ? [customRpcUrl] : getFreeRPCUrl(chain_name);
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
@@ -331,11 +330,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
       } catch (e) {
         console.error('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
-          if (customRpcUrl) {
-            onRpcError?.();
-          }
           const now = Date.now();
-          if (now - lastRpcErrorToastAt > RPC_TOAST_COOLDOWN_MS) {
+          if (
+            customRpcUrl &&
+            now - lastRpcErrorToastAt > RPC_TOAST_COOLDOWN_MS
+          ) {
             lastRpcErrorToastAt = now;
             Toast.show({
               type: 'rpcError',
@@ -569,7 +568,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
-        onRpcError,
       ).getNonce({
         address: fromAddress,
       });
@@ -689,7 +687,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
               chain_name,
               undefined,
               customRpcUrl,
-              onRpcError,
             ).getNonce({
               address: wallet.address,
             });
@@ -1053,7 +1050,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
-        onRpcError,
       ).getSafelyLatestNonce({
         address: from,
       });
@@ -1070,7 +1066,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
           chain_name,
           undefined,
           customRpcUrl,
-          onRpcError,
         ).getContract({
           contractAddress: tr?.to,
         });
@@ -1595,7 +1590,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
         chain_name,
         undefined,
         customRpcUrl,
-        onRpcError,
       ).getSafelyPendingNonce({
         address,
       });
@@ -1604,7 +1598,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl, onRpcError) => {
           chain_name,
           undefined,
           customRpcUrl,
-          onRpcError,
         ).getSafelyLatestNonce({
           address,
         });

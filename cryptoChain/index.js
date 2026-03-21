@@ -64,8 +64,8 @@ const chains = {
   filecoin: FilecoinChain,
 };
 
-export const getChain = (chain, phrase, customRpcUrl, onRpcError) => {
-  return chains[chain]?.(chain, phrase, customRpcUrl, onRpcError);
+export const getChain = (chain, phrase, customRpcUrl) => {
+  return chains[chain]?.(chain, phrase, customRpcUrl);
 };
 
 export const getCoin = async (

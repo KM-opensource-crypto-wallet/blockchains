@@ -2,7 +2,11 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {countSelectedVotes, getSelectedVotes} from './stakingSelectors';
 import {validateNumber} from 'dok-wallet-blockchain-networks/helper';
-import {selectCurrentCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+import {
+  selectCurrentCoin,
+  selectCurrentWallet,
+} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
 const initialState = {
   loading: true,
@@ -18,9 +22,14 @@ export const fetchValidatorByChain = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     const currentState = thunkAPI.getState();
     const currentCoin = selectCurrentCoin(currentState);
+    const currentWallet = selectCurrentWallet(currentState);
     dispatch(setStakingLoading(true));
     const chain_name = payload?.chain_name;
-    const chain = getChain(chain_name);
+    const customRPC = selectCustomRpcUrlByChainAndWallet(
+      chain_name,
+      currentWallet?.clientId,
+    )(currentState);
+    const chain = getChain(chain_name, currentWallet?.phrase, customRPC);
     const finalPayload = {chain_name, address: currentCoin?.address};
     const {selectedVotes, validators} = await chain.getStakingValidators(
       finalPayload,
