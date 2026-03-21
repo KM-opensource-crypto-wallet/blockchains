@@ -57,7 +57,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   let allRpcUrls = customRpcUrl ? [customRpcUrl] : getFreeRPCUrl(chain_name);
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
-
+  console.log('All rpcs', allRpcUrls);
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
