@@ -82,6 +82,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/currency/currencySlice';
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -350,11 +351,17 @@ export const addToken = createAsyncThunk(
     }
 
     const currentWallet = selectCurrentWallet(currentState);
+    const wallet = selectCurrentWallet(currentState);
+    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+      tokenData?.chain_name,
+      wallet?.clientId,
+    )(currentState);
     const nativeCoin = await getCoin(
       currentWallet.phrase,
       tokenData,
       null,
       currentWallet,
+      customRpcUrl,
     );
     const isBitcoin = isBitcoinChain(tokenData?.chain_name);
     const isStaking = isStakingChain(tokenData?.chain_name);
@@ -763,7 +770,15 @@ export const handleUnclaimedData = createAsyncThunk(
       if (!walletPhrase) {
         throw new Error('no walletPhrase found');
       }
-      const chain = getChain(currentCoin?.chain_name, walletPhrase);
+      const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+        currentCoin?.chain_name,
+        currentWallet?.clientId,
+      )(currentState);
+      const chain = getChain(
+        currentCoin?.chain_name,
+        walletPhrase,
+        customRpcUrl,
+      );
       const txData = payload?.txData;
 
       const response =
