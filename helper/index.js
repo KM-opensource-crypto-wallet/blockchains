@@ -873,8 +873,8 @@ export const CustomRPCList = [
   {label: 'Arbitrum', value: 'arbitrum'},
   {label: 'Optimism', value: 'optimism'},
   {
-    label: 'Optimism Binance Smart Chain',
-    value: 'optimism_binance_smart_chain',
+    label: 'Binance Smart Chain',
+    value: 'binance_smart_chain',
   },
   {label: 'Avalanche', value: 'avalanche'},
   {label: 'Fantom', value: 'fantom'},
