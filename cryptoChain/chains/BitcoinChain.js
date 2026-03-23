@@ -322,6 +322,34 @@ export const BitcoinChain = () => {
         return [];
       }
     },
+    getTransaction: async ({txHash, address, deriveAddresses}) => {
+      try {
+        const allAddresses = deriveAddresses?.map?.(item => item?.address);
+        const response = await BitcoinFork.getTransaction({
+          transactionId: txHash,
+          chain: 'btc',
+          address,
+          derive_addresses: allAddresses,
+        });
+        if (!response) return null;
+        return {
+          data: {
+            amount: response?.amount.toString(),
+            hash: txHash,
+            url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
+            status: response?.status ? 'SUCCESS' : 'Pending',
+            date: response?.timestamp,
+            from: response?.from,
+            to: response?.to,
+            fee: response?.fee,
+            totalCourse: '0',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for bitcoin ${e}`);
+        return null;
+      }
+    },
     send: async ({
       to,
       from,
@@ -379,7 +407,7 @@ export const BitcoinChain = () => {
               transactionId: transaction,
               chain: 'btc',
             });
-            if (response?.data?.status?.confirmed) {
+            if (response?.status) {
               clearInterval(timer);
               resolve(response);
             } else if (numberOfRetries === 15) {

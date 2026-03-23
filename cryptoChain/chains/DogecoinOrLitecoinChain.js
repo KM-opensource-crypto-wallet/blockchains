@@ -136,6 +136,31 @@ export const DogecoinOrLitecoinChain = chain_name => {
         return [];
       }
     },
+    getTransaction: async ({txHash, address, deriveAddresses}) => {
+      try {
+        const allAddresses = deriveAddresses?.map?.(item => item?.address);
+        const response = await BitcoinFork.getTransaction({
+          transactionId: txHash,
+          chain: chainDetails[chain_name],
+          address,
+          derive_addresses: allAddresses,
+        });
+        if (!response) return null;
+        return {
+          amount: response?.amount?.toString(),
+          link: txHash,
+          url: `${scanUrl}/transaction/${txHash}`,
+          status: response?.status ? 'SUCCESS' : 'Pending',
+          date: response?.timestamp,
+          from: response?.from,
+          to: response?.to,
+          totalCourse: '0$',
+        };
+      } catch (e) {
+        console.error(`error getting transaction for ${chain_name} ${e}`);
+        return null;
+      }
+    },
     send: async ({to, from, amount, privateKey, transactionFee}) => {
       try {
         const amountToSend = new BigNumber(amount);
@@ -179,7 +204,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
               chain: chainDetails[chain_name],
               transactionId: transactionID,
             });
-            if (isConfirmed) {
+            if (isConfirmed?.status) {
               clearInterval(timer);
               resolve(isConfirmed);
             } else if (numberOfRetries === 15) {

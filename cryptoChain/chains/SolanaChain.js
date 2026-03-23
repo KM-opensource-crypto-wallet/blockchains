@@ -600,6 +600,37 @@ export const SolanaChain = () => {
           throw e;
         }
       }, []),
+    getTransaction: async ({txHash}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          if (!txHash) return;
+          const item = await solanaProvider.getParsedTransaction(txHash, {
+            maxSupportedTransactionVersion: 0,
+          });
+          if (!item) return null;
+          const transactionDetails =
+            item?.transaction?.message?.instructions[0]?.parsed?.info;
+          if (!transactionDetails?.lamports?.toString()) return null;
+          const bnValue = transactionDetails?.lamports?.toString() || 0;
+          return {
+            data: {
+              amount: bnValue?.toString(),
+              hash: txHash,
+              url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
+                IS_SANDBOX ? '?cluster=devnet' : ''
+              }`,
+              status: 'SUCCESS',
+              date: item?.blockTime * 1000,
+              from: transactionDetails?.source,
+              to: transactionDetails?.destination,
+              totalCourse: '0',
+            },
+          };
+        } catch (e) {
+          console.error(`error getting transaction for solana ${e}`);
+          throw e;
+        }
+      }, null),
 
     getTokenTransactions: ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {

@@ -739,6 +739,41 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
+    getTransaction: async ({txHash}) =>
+      retryFunc(async tronWeb => {
+        try {
+          if (!txHash) return;
+          const resp = await tronWeb.fullNode.request(
+            `wallet/gettransactionbyid`,
+            {
+              value: txHash,
+            },
+            'post',
+          );
+          const transaction = resp;
+          if (!transaction) return null;
+          const raw = transaction.raw_data.contract[0].parameter.value;
+          const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+          return {
+            data: {
+              amount: raw?.amount?.toString(),
+              link: txHash,
+              url: `${config.TRON_SCAN_URL}/transaction/${txHash}`,
+              date: transaction.raw_data.timestamp,
+              status: transaction.ret?.[0]?.contractRet,
+              fee: transaction.ret?.[0]?.fee,
+              net_fee: transaction.net_fee,
+              from: fromAddress,
+              to: tronWeb.address.fromHex(raw.to_address),
+              blockNumber: transaction.blockNumber,
+              totalCourse: '0',
+            },
+          };
+        } catch (e) {
+          console.error(`error getting transaction ${e}`);
+          throw e;
+        }
+      }, null),
     getStakingInfo: async ({staking, stakingBalance, address}) =>
       retryFunc(async tronWeb => {
         try {

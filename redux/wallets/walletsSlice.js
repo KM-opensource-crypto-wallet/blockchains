@@ -66,7 +66,7 @@ import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {config, SCAN_URL} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -84,6 +84,7 @@ import {
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -530,6 +531,7 @@ export const refreshCurrentCoin = createAsyncThunk(
     const currentCoin =
       refreshData?.currentCoin || selectCurrentCoin(currentState);
     const isFetchTransactions = refreshData?.fetchTransaction || false;
+    const txHash = refreshData?.txHash || '';
     const isFetchUTXOs = refreshData?.fetchUTXOs || false;
     const isFetchStaking = refreshData?.isFetchStaking || false;
     const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
@@ -550,6 +552,7 @@ export const refreshCurrentCoin = createAsyncThunk(
       priceObj,
       false,
       isFetchTransactions,
+      txHash,
       isFetchStaking,
       isFetchUTXOs,
       isFetchUnclaimDeposit,
@@ -836,6 +839,15 @@ export const handleUnclaimedData = createAsyncThunk(
   },
 );
 
+const getScanUrlName = chain_name => {
+  if (chain_name === 'polygon') {
+    return getRPCUrl('polygon_blockscout')
+      ? 'polygon_blockscout'
+      : 'polygon_scan';
+  }
+  return chain_name;
+};
+
 export const sendFunds = createAsyncThunk(
   'wallets/sendFunds',
   async (txData, thunkAPI) => {
@@ -1016,6 +1028,10 @@ export const sendFunds = createAsyncThunk(
           status: 'PENDING',
           date: new Date().toISOString(),
           link: tx_hash,
+          totalCourse: txData.totalCourse,
+          url: `${
+            SCAN_URL[getScanUrlName(currentCoin?.chain_name)]
+          }/tx/${tx_hash}`,
         };
         toastId = showToast({
           type: 'progressToast',

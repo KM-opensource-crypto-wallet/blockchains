@@ -244,16 +244,23 @@ export const BlockChair = {
       throw e;
     }
   },
-  getTransaction: async ({chain, transactionId}) => {
+  getTransaction: async ({chain, transactionId, address, derive_addresses}) => {
     try {
       const resp = await BlockChairAPI.get(
         `${chainName[chain]}/dashboards/transaction/${transactionId}`,
       );
-      const blockId = resp?.data?.data?.[transactionId]?.transaction?.block_id;
-      return blockId && blockId !== -1;
+      const txData = resp?.data?.data?.[transactionId];
+      if (!txData) return null;
+      const finalAddresses = address
+        ? Array.isArray(derive_addresses)
+          ? derive_addresses
+          : [address]
+        : [];
+      const [parsed] = parseBlockchainTransactions([txData], finalAddresses);
+      return parsed;
     } catch (e) {
       console.error(
-        `Error in BlockChair for get transactions in ${chain} `,
+        `Error in BlockChair for get transaction in ${chain}`,
         e?.response?.data,
       );
       throw e;

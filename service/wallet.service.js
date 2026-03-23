@@ -31,6 +31,7 @@ export const getCoinSnapshot = async (
   priceObj,
   skipData,
   fetchTransactions,
+  txHash,
   isFetchStaking,
   fetchUTXOs,
   isFetchUnclaimDeposit,
@@ -50,6 +51,7 @@ export const getCoinSnapshot = async (
       customRpcUrl,
     );
     let trxs = [];
+    let trx = [];
     let utxos = [];
     let balance = 0;
     let deriveAddresses = Array.isArray(nativeCoin?.deriveAddresses)
@@ -109,6 +111,22 @@ export const getCoinSnapshot = async (
           key,
           deriveAddresses: coinDef?.deriveAddresses,
         });
+        trx = await nativeCoin.getTransaction?.({txHash});
+        if (trx) {
+          const amount = trx?.data?.amount;
+          trx = {
+            ...trx,
+            data: {
+              ...trx.data,
+              totalCourse: calculatePrice(
+                amount,
+                coinDef?.decimal,
+                currentPrice,
+              ),
+              amount: parseBalance(amount, coinDef?.decimal),
+            },
+          };
+        }
       }
       if (fetchUTXOs) {
         utxos = await nativeCoin.getUTXOs?.();
@@ -171,6 +189,9 @@ export const getCoinSnapshot = async (
       transactions: finalTransactions,
       staking: finalStaking,
       stakingInfo,
+      energyBalance: parseBalance(energyBalance, coinDef?.decimal),
+      bandwidthBalance: parseBalance(bandwidthBalance, coinDef?.decimal),
+      recentTransaction: trx,
     };
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;
