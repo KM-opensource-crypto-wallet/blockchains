@@ -1,5 +1,5 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
-import {showToast} from '../../helper/toast';
+import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
   CHAIN_ID,
