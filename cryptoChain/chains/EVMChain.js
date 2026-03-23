@@ -1112,6 +1112,59 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return [];
       }
     },
+    getTransaction: async ({txHash}) => {
+      try {
+        const [tx, receipt] = await Promise.all([
+          safeGetTransactionData(txHash),
+          safeGetTransactionStatus(txHash),
+        ]);
+        if (!tx) {
+          return null;
+        }
+        let blockTimestamp = null;
+        if (receipt?.blockNumber) {
+          try {
+            const fetchRequest = new FetchRequest(allRpcUrls[0]);
+            fetchRequest.timeout = TIMEOUT;
+            const provider = new JsonRpcProvider(fetchRequest, chainId, {
+              staticNetwork: true,
+            });
+            const block = await provider.getBlock(receipt.blockNumber);
+            blockTimestamp = block?.timestamp
+              ? `0x${block.timestamp.toString(16)}`
+              : null;
+          } catch (e) {
+            console.warn('Could not fetch block timestamp', e);
+          }
+        }
+
+        return {
+          data: {
+            hash: tx.hash,
+            from: tx.from,
+            to: tx.to,
+            amount: tx.value.toString(),
+            blockNumber: tx.blockNumber
+              ? `0x${tx.blockNumber.toString(16)}`
+              : null,
+            blockTimestamp,
+            gasPrice: tx.gasPrice ? `0x${tx.gasPrice.toString(16)}` : null,
+            gasUsed: receipt?.gasUsed
+              ? `0x${receipt.gasUsed.toString(16)}`
+              : null,
+            status:
+              receipt === null
+                ? null
+                : receipt.status === 1
+                ? 'SUCCESS'
+                : 'PENDING',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for ether ${e}`);
+        return null;
+      }
+    },
     getTransactionForUpdate: async ({from, txHash, decimals}) => {
       const foundTransactions = await safeGetTransactionStatus(txHash);
       if (foundTransactions) {

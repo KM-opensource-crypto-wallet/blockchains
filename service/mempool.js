@@ -196,15 +196,20 @@ export const Mempool = {
       throw e;
     }
   },
-  getTransaction: async ({transactionId, chain}) => {
+  getTransaction: async ({transactionId, chain, address, derive_addresses}) => {
     try {
       const resp = await APIProvider[chain].get(`/tx/${transactionId}`);
-      return !!resp?.data?.status?.confirmed;
+      const tx = resp?.data;
+      if (!tx) return null;
+      const finalAddresses = address
+        ? Array.isArray(derive_addresses)
+          ? derive_addresses
+          : [address]
+        : [];
+      const [parsed] = parseReadableTransactions([tx], finalAddresses);
+      return parsed;
     } catch (e) {
-      console.error(
-        `Error in ${chain} for get transactions`,
-        e?.response?.data,
-      );
+      console.error(`Error in ${chain} for get transaction`, e?.response?.data);
       throw e;
     }
   },

@@ -174,6 +174,9 @@ export const AptosChain = () => {
     getTransactions: async () => {
       return [];
     },
+    getTransaction: async () => {
+      return [];
+    },
     getTokenTransactions: async () => {
       return [];
     },
