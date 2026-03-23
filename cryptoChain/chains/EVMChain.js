@@ -1,5 +1,5 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
-import Toast from 'react-native-toast-message';
+import {showToast} from '../../helper/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
   CHAIN_ID,
@@ -336,7 +336,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             now - lastRpcErrorToastAt > RPC_TOAST_COOLDOWN_MS
           ) {
             lastRpcErrorToastAt = now;
-            Toast.show({
+            showToast({
               type: 'rpcError',
               props: {
                 chain_name,
