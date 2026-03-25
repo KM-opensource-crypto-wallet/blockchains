@@ -357,12 +357,12 @@ export const messageSlice = createSlice({
         if (!tempConversation) {
           continue;
         }
-        const {peerInboxId, topic} = tempConversation;
+        const {topic, peerAddress} = tempConversation;
         const tempMessage = lastMessages[i];
         finalConversations[topic] = {
           ...tempConversation,
           lastMessage: tempMessage?.[0],
-          name: conversationName[peerInboxId] || '',
+          name: conversationName[peerAddress] || '',
         };
       }
       const lowerAddress = address?.toLowerCase();
