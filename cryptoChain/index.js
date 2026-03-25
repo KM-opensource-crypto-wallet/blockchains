@@ -2,6 +2,7 @@ import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronC
 import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
 import {
   isAddressOrPrivateKeyExists,
+  mergeUniqueAccounts,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
@@ -91,14 +92,6 @@ export const getCoin = async (
       extendedPublicKey: coin?.extendedPublicKey,
       extendedPrivateKey: coin?.extendedPrivateKey,
     };
-  } else if (phrase && chainName === 'bitcoin_legacy') {
-    wallet = await BitcoinChain().createBitcoinLegacyWallet({
-      mnemonic: phrase,
-    });
-  } else if (phrase && chainName === 'bitcoin_segwit') {
-    wallet = await BitcoinChain().createBitcoinSegwitWallet({
-      mnemonic: phrase,
-    });
   } else if (phrase && chainName === 'bitcoin_lightning') {
     const lightningChain = BitcoinLightningChain(chainName, phrase);
 
@@ -119,6 +112,7 @@ export const getCoin = async (
     });
   } else if (phrase) {
     wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
+    wallet.isNew = true;
   } else if (walletData?.privateKey && !walletData?.address) {
     wallet = await chain.createWalletByPrivateKey({
       chain_name: chainName,
@@ -140,6 +134,11 @@ export const getCoin = async (
 };
 
 const getBaseCoin = async (chain, wallet, coin) => {
+  // Prefer coin's stored deriveAddresses (from Redux); fall back to native wallet result
+  const effectiveDeriveAddresses = wallet?.isNew
+    ? mergeUniqueAccounts(coin?.deriveAddresses, wallet?.deriveAddresses)
+    : coin?.deriveAddresses;
+
   const coinWrapper = {
     type: 'coin',
     wallet,
@@ -148,12 +147,13 @@ const getBaseCoin = async (chain, wallet, coin) => {
     publicKey: wallet.publicKey,
     extendedPublicKey: wallet.extendedPublicKey,
     extendedPrivateKey: wallet.extendedPrivateKey,
+    deriveAddresses: effectiveDeriveAddresses,
     chain,
     getBalance: async () =>
       chain?.getBalance({
         address: wallet.address,
         extendedPublicKey: wallet.extendedPublicKey,
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
         chain_name: coin?.chain_name,
       }),
     getStakingBalance: async () =>
@@ -209,7 +209,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
       }),
     getUTXOs: async () =>
       await chain.getUTXOs({
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
       }),
     send: async payload =>
       await chain.send({
@@ -217,7 +217,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         chain_name: coin?.chain_name,
         publicKey: coin?.publicKey,
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
         extendedPrivateKey:
           wallet.extendedPrivateKey || coin?.extendedPrivateKey,
         ...payload,
@@ -228,7 +228,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         chain_name: coin?.chain_name,
         publicKey: coin?.publicKey,
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
         extendedPrivateKey:
           wallet.extendedPrivateKey || coin?.extendedPrivateKey,
         ...payload,
@@ -239,7 +239,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         chain_name: coin?.chain_name,
         publicKey: coin?.publicKey,
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
         extendedPrivateKey:
           wallet.extendedPrivateKey || coin?.extendedPrivateKey,
         ...payload,
@@ -251,7 +251,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         minimumBalance: coin?.minimumBalance,
         privateKey: wallet.privateKey,
         chain_name: coin?.chain_name,
-        deriveAddresses: coin?.deriveAddresses,
+        deriveAddresses: effectiveDeriveAddresses,
         extendedPrivateKey:
           wallet.extendedPrivateKey || coin?.extendedPrivateKey,
       }),

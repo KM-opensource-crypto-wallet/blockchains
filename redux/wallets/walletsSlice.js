@@ -46,6 +46,7 @@ import {
   generateUniqueKeyForChain,
   getNativeCoinByTokenCoin,
   isBitcoinChain,
+  mergeUniqueAccounts,
   parseBalance,
   validateSupportedChain,
   isDeriveAddressSupportChain,
@@ -1447,6 +1448,21 @@ export const addCustomDeriveAddress = createAsyncThunk(
       const derivePath = payload?.derivePath;
       const chain_name =
         payload?.chain_name || selectCurrentCoin(currentState)?.chain_name;
+      const currentDeriveAddresses =
+        selectCurrentCoin(currentState)?.deriveAddresses;
+      if (
+        isBitcoinChain(chain_name) &&
+        Array.isArray(currentDeriveAddresses) &&
+        currentDeriveAddresses.length >= 100
+      ) {
+        showToast({
+          type: 'errorToast',
+          title: 'Limit reached',
+          message: 'You can only create up to 100 accounts',
+          autoHide: true,
+        });
+        return thunkAPI.rejectWithValue('Address limit reached');
+      }
       toastId = showToast({
         type: 'progressToast',
         title: `Adding to the ${wallet.walletName}`,
@@ -2378,7 +2394,7 @@ export const walletsSlice = createSlice({
             if ((isEVM && isSelectedEvm) || item?.chain_name === chainName) {
               return {
                 ...item,
-                deriveAddresses: getUniqueAccounts(
+                deriveAddresses: mergeUniqueAccounts(
                   oldDeriveAddress,
                   deriveAddresses,
                 ),

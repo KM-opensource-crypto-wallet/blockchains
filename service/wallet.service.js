@@ -52,7 +52,9 @@ export const getCoinSnapshot = async (
     let trxs = [];
     let utxos = [];
     let balance = 0;
-    let deriveAddresses = [];
+    let deriveAddresses = Array.isArray(nativeCoin?.deriveAddresses)
+      ? nativeCoin?.deriveAddresses
+      : [];
     const isBitcoin = isBitcoinChain(coinDef?.chain_name);
     const isStaking = isStakingChain(coinDef?.chain_name);
     let staking = [];
