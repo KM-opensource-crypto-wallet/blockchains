@@ -45,6 +45,30 @@ export const ThorChainService = {
       return [];
     }
   },
+  getThorTransaction: async txHash => {
+    try {
+      const resp = await axios.get(
+        `https://midgard.ninerealms.com/v2/actions?txid=${txHash}`,
+      );
+      const item = resp?.data?.actions?.[0];
+      if (!item) {
+        return null;
+      }
+      return {
+        txhash: item?.in?.[0]?.txID,
+        from: item?.in?.[0]?.address,
+        to: item?.out?.[0]?.address,
+        amount: item?.in?.[0]?.coins?.find?.(
+          subItem => subItem.asset === 'THOR.RUNE',
+        )?.amount,
+        timestamp: item?.date?.slice(0, -6),
+        status: item?.status?.toUpperCase(),
+      };
+    } catch (e) {
+      console.error('Error in getThortransaction', e);
+      return null;
+    }
+  },
   getTransactionStatus: async txHash => {
     try {
       const resp = await axios.get(

@@ -79,7 +79,7 @@ export const TezosChain = () => {
           const txHash = item?.hash;
           return {
             amount: bnValue.toString(),
-            link: txHash.substring(0, 13) + '...',
+            link: txHash,
             url: `${config.TEZOS_SCAN_URL}/${txHash}`,
             status: item?.status === 'applied' ? 'SUCCESS' : 'Pending',
             date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
@@ -88,6 +88,32 @@ export const TezosChain = () => {
             totalCourse: '0$',
           };
         });
+      } catch (e) {
+        console.error('error getting transactions for tezos', e);
+        return [];
+      }
+    },
+
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await Tzkt.getTezosTransaction(txHash);
+        const finalTransaction = transaction.data[0];
+        if (finalTransaction) {
+          return {
+            data: {
+              amount: finalTransaction.amount.toString() || '0',
+              link: txHash,
+              url: `${config.TEZOS_SCAN_URL}/${txHash}`,
+              status:
+                finalTransaction?.status === 'applied' ? 'SUCCESS' : 'Pending',
+              date: finalTransaction?.timestamp, //new Date(transaction.raw_data.timestamp),
+              from: finalTransaction?.sender?.address,
+              to: finalTransaction?.target?.address,
+              totalCourse: '0$',
+            },
+          };
+        }
+        return [];
       } catch (e) {
         console.error('error getting transactions for tezos', e);
         return [];

@@ -1039,7 +1039,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             }
             return {
               amount: bnValue.toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${SCAN_URL[getScanUrlName()]}/tx/${txHash}`,
               status: Number(item?.txreceipt_status) ? 'SUCCESS' : 'FAIL',
               date: item?.timeStamp * 1000, //new Date(transaction.raw_data.timestamp),
@@ -1100,7 +1100,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
         return {
           data: {
-            hash: tx.hash,
+            link: tx.hash,
             from: tx.from,
             to: tx.to,
             amount: tx.value.toString(),

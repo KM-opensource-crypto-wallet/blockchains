@@ -130,7 +130,7 @@ export const StellarChain = () => {
               amount: new BigNumber(amount)
                 .multipliedBy(new BigNumber(10000000))
                 .toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.STELLAR_SCAN_URL}/transactions/${txHash}`,
               status: item?.successful ? 'SUCCESS' : 'FAIL',
               date: item?.created_at, //new Date(transaction.raw_data.timestamp),
@@ -144,6 +144,43 @@ export const StellarChain = () => {
       } catch (e) {
         console.error(`error getting transactions for stellar ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const item = await stellarProvider
+          .transactions()
+          .transaction(txHash)
+          .call();
+        const operations = await stellarProvider
+          .operations()
+          .forTransaction(item.id)
+          .call();
+        const foundOperation = operations.records.find(operation => {
+          const type = operation?.type;
+          return type === 'create_account' || type === 'payment';
+        });
+        const sender = foundOperation?.from || foundOperation?.source_account;
+        const receiver = foundOperation?.to || foundOperation?.account;
+        const amount =
+          foundOperation?.amount || foundOperation?.starting_balance || '0';
+        return {
+          data: {
+            amount: new BigNumber(amount)
+              .multipliedBy(new BigNumber(10000000))
+              .toString(),
+            link: txHash,
+            url: `${config.STELLAR_SCAN_URL}/transactions/${txHash}`,
+            status: item?.successful ? 'SUCCESS' : 'FAIL',
+            date: item?.created_at,
+            from: sender,
+            to: receiver,
+            totalCourse: '0$',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for stellar ${e}`);
+        return null;
       }
     },
     send: async ({to, from, amount, privateKey, memo}) => {

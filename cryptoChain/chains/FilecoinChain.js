@@ -143,7 +143,7 @@ export const FilecoinChain = chain_name => {
           const txHash = item?.txHash || '';
           return {
             amount: item?.amount?.toString(),
-            link: txHash ? txHash.substring(0, 13) + '...' : '',
+            link: txHash ? txHash : '',
             url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
             status: item?.status === true ? 'SUCCESS' : 'FAILED',
             date: item?.timestamp ? new Date(item.timestamp) : new Date(),
@@ -151,6 +151,31 @@ export const FilecoinChain = chain_name => {
             to: item?.to,
           };
         });
+      } catch (e) {
+        console.error('error in get transactions from filecoin', e);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await FilScan.getTransaction({txHash});
+        const finalTransaction = transaction.data;
+        if (finalTransaction) {
+          return {
+            data: {
+              amount: finalTransaction?.amount?.toString(),
+              link: txHash ? txHash : '',
+              url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+              status: finalTransaction?.status === true ? 'SUCCESS' : 'FAILED',
+              date: finalTransaction?.timestamp
+                ? new Date(finalTransaction.timestamp)
+                : new Date(),
+              from: finalTransaction?.from,
+              to: finalTransaction?.to,
+            },
+          };
+        }
+        return [];
       } catch (e) {
         console.error('error in get transactions from filecoin', e);
         return [];

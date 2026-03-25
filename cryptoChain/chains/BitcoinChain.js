@@ -306,7 +306,7 @@ export const BitcoinChain = () => {
             const txHash = item?.hash;
             return {
               amount: item?.amount?.toString(),
-              link: txHash?.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
@@ -334,8 +334,8 @@ export const BitcoinChain = () => {
         if (!response) return null;
         return {
           data: {
-            amount: response?.amount.toString(),
-            hash: txHash,
+            amount: response?.amount?.toString() || '0',
+            link: response.hash,
             url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
             status: response?.status ? 'SUCCESS' : 'Pending',
             date: response?.timestamp,

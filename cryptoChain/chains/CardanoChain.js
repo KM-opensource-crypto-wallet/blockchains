@@ -75,7 +75,7 @@ export const CardanoChain = () => {
             const txHash = item?.txHash;
             return {
               amount: item?.amount?.toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.CARDANO_SCAN_URL}/transaction/${txHash}`,
               status: 'SUCCESS',
               date: new Date(item.timestamp),
@@ -88,6 +88,31 @@ export const CardanoChain = () => {
         return [];
       } catch (e) {
         console.error('error in get balance from cardano', e);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await CardanoChainService.getCardanoTransaction({
+          txHash,
+        });
+        if (transaction) {
+          return {
+            data: {
+              amount: transaction?.amount?.toString(),
+              link: txHash,
+              url: `${config.CARDANO_SCAN_URL}/transaction/${txHash}`,
+              status: 'SUCCESS',
+              date: new Date(transaction.timestamp),
+              from: transaction?.from,
+              to: transaction?.to,
+              totalCourse: '0$',
+            },
+          };
+        }
+        return [];
+      } catch (e) {
+        console.error('error in get transaction from cardano', e);
         return [];
       }
     },

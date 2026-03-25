@@ -104,7 +104,7 @@ export const PolkadotChain = () => {
 
             return {
               amount: item?.amount_v2 || '',
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.POLKADOT_SCAN_URL}/extrinsic/${item?.extrinsic_index}`,
               status: item?.success ? 'SUCCESS' : 'Failed',
               date: new Date(item?.block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
@@ -113,6 +113,30 @@ export const PolkadotChain = () => {
               totalCourse: '0$',
             };
           });
+        }
+        return [];
+      } catch (e) {
+        console.error(`error getting transactions for polkadot ${e}`);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await PolkadotScan.getTransaction(txHash);
+        if (transaction) {
+          const finalTransaction = transaction?.data?.transfer;
+          const extrinsic_index = transaction?.data?.extrinsic_index;
+          const block_timestamp = transaction?.data?.block_timestamp;
+          return {
+            amount: finalTransaction?.amount || '',
+            link: txHash,
+            url: `${config.POLKADOT_SCAN_URL}/extrinsic/${extrinsic_index}`,
+            status: finalTransaction?.success ? 'SUCCESS' : 'Failed',
+            date: new Date(block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
+            from: finalTransaction?.from,
+            to: finalTransaction?.to,
+            totalCourse: '0$',
+          };
         }
         return [];
       } catch (e) {

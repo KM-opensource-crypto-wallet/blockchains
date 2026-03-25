@@ -120,7 +120,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
             const txHash = item?.hash;
             return {
               amount: item?.amount.toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${scanUrl}/transaction/${txHash}`,
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
@@ -151,7 +151,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
           link: txHash,
           url: `${scanUrl}/transaction/${txHash}`,
           status: response?.status ? 'SUCCESS' : 'Pending',
-          date: response?.timestamp,
+          date: response?.timestamp ? new Date(response?.timestamp) : null,
           from: response?.from,
           to: response?.to,
           totalCourse: '0$',

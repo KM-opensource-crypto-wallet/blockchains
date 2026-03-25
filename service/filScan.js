@@ -31,6 +31,31 @@ export const FilScan = {
       return [];
     }
   },
+  getTransaction: async ({txHash}) => {
+    try {
+      const res = await FilScanApi.post('/MessageDetails', {
+        message_cid: txHash,
+      });
+      if (res?.data?.result?.MessageDetails) {
+        const {block_time, exit_code, from, to, value} =
+          res.data.result.MessageDetails.message_basic;
+        return {
+          data: {
+            txHash: txHash,
+            to: to,
+            from: from,
+            amount: value,
+            status: exit_code === 'Ok',
+            timestamp: block_time * 1000,
+          },
+        };
+      }
+      return [];
+    } catch (e) {
+      console.error('Error in getTransactions for filScan', e);
+      return [];
+    }
+  },
   getTransactionFees: async () => {
     let baseFee = '100';
     let gasUsed = '1000000';

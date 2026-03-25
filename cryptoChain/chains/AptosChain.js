@@ -171,11 +171,90 @@ export const AptosChain = () => {
         throw e;
       }
     },
-    getTransactions: async () => {
-      return [];
+    getTransactions: async ({address}) => {
+      try {
+        const transactions = await aptosProvider.getAccountTransactions({
+          accountAddress: address,
+          options: {limit: 10},
+        });
+        if (!Array.isArray(transactions)) {
+          return [];
+        }
+        const finalData = [];
+        transactions.forEach(item => {
+          if (item?.type !== 'user_transaction') {
+            return;
+          }
+          const payload = item?.payload;
+          const isTransfer =
+            payload?.function === '0x1::coin::transfer' ||
+            payload?.function === '0x1::aptos_account::transfer' ||
+            payload?.function === '0x1::aptos_account::transfer_coins';
+          if (!isTransfer) {
+            return;
+          }
+          const txHash = item?.hash;
+          const args = payload?.arguments || [];
+          const toAddress = args[0];
+          const amount = args[1];
+          if (!amount) {
+            return;
+          }
+          finalData.push({
+            amount: amount?.toString(),
+            link: txHash,
+            url: `${config.APTOS_SCAN_URL}/txn/${txHash}${
+              IS_SANDBOX ? '?network=testnet' : ''
+            }`,
+            status: item?.success ? 'SUCCESS' : 'Failed',
+            date: Math.floor(Number(item?.timestamp) / 1000),
+            from: item?.sender,
+            to: toAddress,
+            totalCourse: '0$',
+          });
+        });
+        return finalData;
+      } catch (e) {
+        console.error(`error getting transactions for aptos ${e}`);
+        return [];
+      }
     },
-    getTransaction: async () => {
-      return [];
+    getTransaction: async ({txHash}) => {
+      try {
+        if (!txHash) {
+          return null;
+        }
+        const item = await aptosProvider.getTransactionByHash({
+          transactionHash: txHash,
+        });
+        if (!item || item?.type !== 'user_transaction') {
+          return null;
+        }
+        const payload = item?.payload;
+        const args = payload?.arguments || [];
+        const toAddress = args[0];
+        const amount = args[1];
+        if (!amount) {
+          return null;
+        }
+        return {
+          data: {
+            amount: amount?.toString(),
+            link: txHash,
+            url: `${config.APTOS_SCAN_URL}/txn/${txHash}${
+              IS_SANDBOX ? '?network=testnet' : ''
+            }`,
+            status: item?.success ? 'SUCCESS' : 'Failed',
+            date: Math.floor(Number(item?.timestamp) / 1000),
+            from: item?.sender,
+            to: toAddress,
+            totalCourse: '0$',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for aptos ${e}`);
+        return null;
+      }
     },
     getTokenTransactions: async () => {
       return [];
