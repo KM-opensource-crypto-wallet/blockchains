@@ -1411,6 +1411,26 @@ export function extractTxHashFromEVMMissingError(error) {
   return null;
 }
 
+/**
+ * Merges newAccounts into oldAccounts, deduplicating by address OR derivePath.
+ * Old accounts (including custom ones) are always preserved.
+ */
+export const mergeUniqueAccounts = (oldAccounts, newAccounts) => {
+  if (!Array.isArray(oldAccounts) || !oldAccounts.length) {
+    return Array.isArray(newAccounts) ? newAccounts : [];
+  }
+  if (!Array.isArray(newAccounts) || !newAccounts.length) {
+    return oldAccounts;
+  }
+  const toAdd = newAccounts.filter(
+    n =>
+      !oldAccounts.some(
+        o => o.address === n.address || o.derivePath === n.derivePath,
+      ),
+  );
+  return [...oldAccounts, ...toAdd];
+};
+
 export const getWalletTotalBalance = coins => {
   let total = 0;
   coins?.forEach(coin => {

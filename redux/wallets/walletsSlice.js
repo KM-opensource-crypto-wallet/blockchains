@@ -46,6 +46,7 @@ import {
   generateUniqueKeyForChain,
   getNativeCoinByTokenCoin,
   isBitcoinChain,
+  mergeUniqueAccounts,
   parseBalance,
   validateSupportedChain,
   isDeriveAddressSupportChain,
@@ -2378,7 +2379,7 @@ export const walletsSlice = createSlice({
             if ((isEVM && isSelectedEvm) || item?.chain_name === chainName) {
               return {
                 ...item,
-                deriveAddresses: getUniqueAccounts(
+                deriveAddresses: mergeUniqueAccounts(
                   oldDeriveAddress,
                   deriveAddresses,
                 ),
