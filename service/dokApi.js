@@ -316,14 +316,16 @@ export const fetchBitcoinBalances = async payload => {
     // Restore privateKey to matching items in the response
     const data = resp?.data?.data;
     const deriveAddresses = data?.deriveAddresses;
-    data.deriveAddresses = Array.isArray(deriveAddresses)
+    const hydratedDeriveAddresses = Array.isArray(deriveAddresses)
       ? deriveAddresses.map(item => {
           const pk = privateKeyMap[item?.address];
           return pk ? {...item, privateKey: pk} : item;
         })
       : deriveAddresses;
-
-    return {status: resp?.status, data};
+    return {
+      status: resp?.status,
+      data: data ? {...data, deriveAddresses: hydratedDeriveAddresses} : data,
+    };
   } catch (e) {
     console.error('Error in fetchBitcoinBalances', JSON.stringify(e));
     throw e;
