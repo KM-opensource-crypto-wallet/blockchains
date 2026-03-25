@@ -65,11 +65,17 @@ const chains = {
   filecoin: FilecoinChain,
 };
 
-export const getChain = (chain, phrase) => {
-  return chains[chain]?.(chain, phrase);
+export const getChain = (chain, phrase, customRpcUrl) => {
+  return chains[chain]?.(chain, phrase, customRpcUrl);
 };
 
-export const getCoin = async (phrase, coin, transactionFee, walletData) => {
+export const getCoin = async (
+  phrase,
+  coin,
+  transactionFee,
+  walletData,
+  customRpcUrl,
+) => {
   const chainName = coin?.chain_name;
   const chainNameForNative = validateSupportedChain(coin?.chain_name);
   if (!chainNameForNative) {
@@ -77,7 +83,7 @@ export const getCoin = async (phrase, coin, transactionFee, walletData) => {
     return null;
   }
   let wallet;
-  const chain = getChain(chainName, phrase);
+  const chain = getChain(chainName, phrase, customRpcUrl);
   if (isAddressOrPrivateKeyExists(coin)) {
     wallet = {
       privateKey: coin?.privateKey,

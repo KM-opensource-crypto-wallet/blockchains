@@ -8,6 +8,7 @@ import {
   selectCurrentWallet,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {selectAllActiveCurrencies} from 'dok-wallet-blockchain-networks/redux/currency/currencySelectors';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {
   calculatePrice,
   createBalanceKey,
@@ -37,7 +38,17 @@ export const getCoinSnapshot = async (
   try {
     const coinDef = _coinDef ?? selectCurrentCoin(state);
     const wallet = _wallet ?? selectCurrentWallet(state);
-    const nativeCoin = await getCoin(wallet.phrase, coinDef, null, wallet);
+    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+      coinDef?.chain_name,
+      wallet?.clientId,
+    )(state);
+    const nativeCoin = await getCoin(
+      wallet.phrase,
+      coinDef,
+      null,
+      wallet,
+      customRpcUrl,
+    );
     let trxs = [];
     let utxos = [];
     let balance = 0;
@@ -190,7 +201,11 @@ export const getNativeCoin = async (state, coinSnapshot, walletSnapshot) => {
   if (coin?.type === 'token') {
     transactionFee = getTransferDataEstimateFee(state);
   }
-  return getCoin(wallet.phrase, coin, transactionFee, wallet);
+  const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+    coin?.chain_name,
+    wallet?.clientId,
+  )(state);
+  return getCoin(wallet.phrase, coin, transactionFee, wallet, customRpcUrl);
 };
 export const createCoins = async (
   wallet,

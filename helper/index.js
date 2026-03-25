@@ -872,6 +872,29 @@ export const PrivateKeyList = [
   },
 ];
 
+export const CustomRPCList = [
+  {label: 'Ethereum', value: 'ethereum'},
+  {label: 'Binance Smart Chain', value: 'binance_smart_chain'},
+  {label: 'Polygon', value: 'polygon'},
+  {label: 'Base', value: 'base'},
+  {label: 'Arbitrum', value: 'arbitrum'},
+  {label: 'Optimism', value: 'optimism'},
+  {
+    label: 'Optimism Binance Smart Chain',
+    value: 'optimism_binance_smart_chain',
+  },
+  {label: 'Avalanche', value: 'avalanche'},
+  {label: 'Fantom', value: 'fantom'},
+  {label: 'Gnosis', value: 'gnosis'},
+  {label: 'Viction', value: 'viction'},
+  {label: 'Linea', value: 'linea'},
+  {label: 'zkSync Era', value: 'zksync'},
+  {label: 'Ethereum Classic', value: 'ethereum_classic'},
+  {label: 'EthereumPoW', value: 'ethereum_pow'},
+  {label: 'Kava', value: 'kava'},
+  {label: 'Ink', value: 'ink'},
+  {label: 'Sei', value: 'sei'},
+];
 export const AUTO_LOCK = [
   {
     label: 'Immediate',
