@@ -1445,13 +1445,26 @@ export const mergeUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(newAccounts) || !newAccounts.length) {
     return oldAccounts;
   }
+
+  const newByAddress = new Map(newAccounts.map(n => [n.address, n]));
+  const newByDerivePath = new Map(newAccounts.map(n => [n.derivePath, n]));
+
+  const oldAddresses = new Set();
+  const oldDerivePaths = new Set();
+
+  const merged = oldAccounts.map(o => {
+    oldAddresses.add(o.address);
+    oldDerivePaths.add(o.derivePath);
+    const match =
+      newByAddress.get(o.address) ?? newByDerivePath.get(o.derivePath);
+    return match ? {...o, ...match} : o;
+  });
+
   const toAdd = newAccounts.filter(
-    n =>
-      !oldAccounts.some(
-        o => o.address === n.address || o.derivePath === n.derivePath,
-      ),
+    n => !oldAddresses.has(n.address) && !oldDerivePaths.has(n.derivePath),
   );
-  return [...oldAccounts, ...toAdd];
+
+  return [...merged, ...toAdd];
 };
 
 export const getWalletTotalBalance = coins => {

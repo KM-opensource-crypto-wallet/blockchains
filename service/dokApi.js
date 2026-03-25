@@ -306,7 +306,6 @@ export const fetchBitcoinBalances = async payload => {
           return item;
         })
       : payload?.derive_addresses;
-    console.log('sandti', sanitizedDeriveAddresses);
     const resp = await DokApi.post('/get-blockchair-api', {
       is_sandbox: IS_SANDBOX,
       type: 'get_bitcoin_balances',
@@ -317,8 +316,6 @@ export const fetchBitcoinBalances = async payload => {
     // Restore privateKey to matching items in the response
     const data = resp?.data?.data;
     const deriveAddresses = data?.deriveAddresses;
-    console.log('deriveAddresses', deriveAddresses);
-    console.log('privateKeyMap', privateKeyMap);
     data.deriveAddresses = Array.isArray(deriveAddresses)
       ? deriveAddresses.map(item => {
           const pk = privateKeyMap[item?.address];

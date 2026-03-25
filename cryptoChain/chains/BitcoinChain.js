@@ -109,15 +109,6 @@ export const BitcoinChain = () => {
       extendedPublicKey,
       deriveAddresses,
     }) => {
-      console.log(
-        `[BitcoinChain.getBalance] chain_name=${chain_name} address=${address}`,
-        '| deriveAddresses:',
-        Array.isArray(deriveAddresses)
-          ? deriveAddresses.length
-          : deriveAddresses,
-        '| extendedPublicKey:',
-        extendedPublicKey ? 'present' : 'missing',
-      );
       let newDeriveAddresses = deriveAddresses;
       try {
         if (
@@ -133,11 +124,9 @@ export const BitcoinChain = () => {
           }
         }
         if (newDeriveAddresses?.length && newDeriveAddresses?.[0]?.address) {
-          console.log('derive address', deriveAddresses);
           const resp = await fetchBitcoinBalances({
             derive_addresses: newDeriveAddresses,
           });
-          console.log('respne', resp.data);
           return resp?.data;
         } else {
           const deriveAddress = getDeriveAddressByChain(chain_name);

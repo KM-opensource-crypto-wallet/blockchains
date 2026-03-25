@@ -113,7 +113,6 @@ export const getCoin = async (
   } else if (phrase) {
     wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
     wallet.isNew = true;
-    console.log('waleteess', wallet);
   } else if (walletData?.privateKey && !walletData?.address) {
     wallet = await chain.createWalletByPrivateKey({
       chain_name: chainName,
@@ -135,23 +134,10 @@ export const getCoin = async (
 };
 
 const getBaseCoin = async (chain, wallet, coin) => {
-  console.log('walletss', wallet);
   // Prefer coin's stored deriveAddresses (from Redux); fall back to native wallet result
   const effectiveDeriveAddresses = wallet?.isNew
     ? mergeUniqueAccounts(coin?.deriveAddresses, wallet?.deriveAddresses)
     : coin?.deriveAddresses;
-
-  console.log(
-    `[getBaseCoin] chain=${coin?.chain_name} symbol=${coin?.symbol} type=${coin?.type}`,
-    '| coin.deriveAddresses:',
-    coin?.deriveAddresses?.length ?? 'undefined',
-    '| wallet.deriveAddresses:',
-    wallet?.deriveAddresses?.length ?? 'undefined',
-    '| wallet.isNew:',
-    wallet?.isNew,
-    '| effectiveDeriveAddresses:',
-    effectiveDeriveAddresses?.length ?? 'undefined',
-  );
 
   const coinWrapper = {
     type: 'coin',
