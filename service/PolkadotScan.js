@@ -13,4 +13,14 @@ export const PolkadotScan = {
       console.error('Error in get transaction PolkadotScan', e);
     }
   },
+  getTransaction: async txHash => {
+    try {
+      const resp = await PolkadotScanApi.post('/api/scan/extrinsic', {
+        hash: txHash,
+      });
+      return {status: resp?.status, data: resp?.data?.data};
+    } catch (e) {
+      console.error('Error in getTransaction PolkadotScan', e);
+    }
+  },
 };

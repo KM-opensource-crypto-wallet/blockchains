@@ -121,7 +121,7 @@ export const ThorChain = () => {
           const txHash = item?.txhash;
           return {
             amount: bnValue.toString(),
-            link: txHash.substring(0, 13) + '...',
+            link: txHash,
             url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
             status: 'SUCCESS',
             date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
@@ -133,6 +133,29 @@ export const ThorChain = () => {
       } catch (e) {
         console.error('error getting transactions for ThorChain', e);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await ThorChainService.getThorTransaction(txHash);
+        if (transaction) {
+          return {
+            data: {
+              amount: transaction.amount?.toString() || '0',
+              link: txHash,
+              url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
+              status: 'SUCCESS',
+              date: transaction?.timestamp, //new Date(transaction.raw_data.timestamp),
+              from: transaction?.from,
+              to: transaction?.to,
+              totalCourse: '0$',
+            },
+          };
+        }
+        return null;
+      } catch (e) {
+        console.error('error getting transactions for ThorChain', e);
+        return null;
       }
     },
 

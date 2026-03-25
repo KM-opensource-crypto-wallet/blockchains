@@ -580,7 +580,7 @@ export const SolanaChain = () => {
                 const txHash = item?.transaction?.signatures[0];
                 finalData.push({
                   amount: bnValue?.toString(),
-                  link: txHash.substring(0, 13) + '...',
+                  link: txHash,
                   url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
                     IS_SANDBOX ? '?cluster=devnet' : ''
                   }`,
@@ -615,7 +615,7 @@ export const SolanaChain = () => {
           return {
             data: {
               amount: bnValue?.toString(),
-              hash: txHash,
+              link: txHash,
               url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
                 IS_SANDBOX ? '?cluster=devnet' : ''
               }`,

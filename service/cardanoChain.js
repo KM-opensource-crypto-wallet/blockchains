@@ -32,4 +32,26 @@ export const CardanoChainService = {
       return [];
     }
   },
+  getCardanoTransaction: async ({txHash}) => {
+    try {
+      const resp = await BlockChairAPI.get(
+        `/cardano/raw/transaction/${txHash}`,
+      );
+      const item = resp.data?.data?.[txHash]?.transaction;
+      if (!item) {
+        return null;
+      }
+      return {
+        txHash: item?.ctsId,
+        timestamp: item?.ctsBlockTimeIssued * 1000,
+        to: item?.ctsOutputs[0]?.ctaAddress,
+        from: item?.ctsInputs?.[0]?.ctaAddress,
+        amount: item?.ctsOutputs?.[0]?.ctaAmount?.getCoin?.toString(),
+        fees: item?.ctsFees,
+      };
+    } catch (e) {
+      console.error('Error in getCardanoTransactionByHash', e);
+      return null;
+    }
+  },
 };

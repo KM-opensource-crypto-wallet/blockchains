@@ -235,7 +235,7 @@ export const TonChain = () => {
             }
             return {
               amount: amount,
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.TON_SCAN_URL}/tx/${txHash}`,
               status: from && to ? 'SUCCESS' : 'FAILED',
               date: date,
@@ -249,6 +249,49 @@ export const TonChain = () => {
       } catch (e) {
         console.error('error getting transactions for tonchain', e);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        if (!txHash) return null;
+        const res = await TonScan.getTransactionByHash({txHash});
+        const transactions = res?.data;
+        if (!Array.isArray(transactions) || transactions.length === 0) {
+          return null;
+        }
+        const item = transactions[0];
+        let date, to, from, amount;
+        from = Address.parse(item?.in_msg?.source)?.toString();
+        if (from) {
+          date = new Date(item?.now * 1000);
+          to = Address.parse(item?.in_msg?.destination).toString();
+          amount = item?.in_msg?.value || '0';
+        } else {
+          const outMsg = item?.out_msgs?.[0];
+          date = new Date(item?.now * 1000);
+          to = outMsg?.destination
+            ? Address.parse(outMsg?.destination).toString()
+            : undefined;
+          from = outMsg?.source
+            ? Address.parse(outMsg?.source).toString()
+            : undefined;
+          amount = outMsg?.value || '0';
+        }
+        return {
+          data: {
+            amount: amount || '0',
+            link: txHash,
+            url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+            status: from && to ? 'SUCCESS' : 'FAILED',
+            date: date,
+            from: from,
+            to: to,
+            totalCourse: '0$',
+          },
+        };
+      } catch (e) {
+        console.error('error getting transaction for tonchain', e);
+        return null;
       }
     },
     getTokenTransactions: async ({address, contractAddress}) => {

@@ -191,7 +191,7 @@ export const HederaChain = () => {
             const txHash = item?.transaction_id;
             return {
               amount: amount,
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
               status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
               date: date * 1000, //new Date(transaction.raw_data.timestamp),
@@ -200,6 +200,35 @@ export const HederaChain = () => {
               totalCourse: '0$',
             };
           });
+        }
+        return [];
+      } catch (e) {
+        console.error(`error getting transactions for hedera ${e}`);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await HEDERA?.getTransaction(txHash);
+        let finalTransaction = transaction.data;
+        if (finalTransaction) {
+          const date = finalTransaction?.consensus_timestamp?.substring(
+            0,
+            finalTransaction?.consensus_timestamp?.indexOf('.'),
+          );
+          return {
+            data: {
+              amount: finalTransaction?.transfers[1].amount,
+              link: txHash,
+              url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
+              status:
+                finalTransaction?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
+              date: date * 1000,
+              from: finalTransaction?.transfers[0].account,
+              to: finalTransaction?.transfers[1].account,
+              totalCourse: '0$',
+            },
+          };
         }
         return [];
       } catch (e) {

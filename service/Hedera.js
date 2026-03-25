@@ -38,4 +38,13 @@ export const HEDERA = {
       console.error('Error in HEDERA getTransactions', e);
     }
   },
+  getTransaction: async txHash => {
+    try {
+      const resp = await HEDERA_API.get(`/api/v1/transactions/${txHash}`);
+
+      return {status: resp?.status, data: resp?.data?.transactions[0]};
+    } catch (e) {
+      console.error('Error in HEDERA getTransactions', e);
+    }
+  },
 };

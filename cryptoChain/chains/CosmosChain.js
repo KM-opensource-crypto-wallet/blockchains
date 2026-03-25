@@ -153,7 +153,7 @@ export const CosmosChain = () => {
             const finalAmount = parseInt(amount || 0, 10);
             return {
               amount: finalAmount.toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
               status: !item?.code ? 'SUCCESS' : 'Failed',
               date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
@@ -163,6 +163,30 @@ export const CosmosChain = () => {
             };
           });
         }
+        return [];
+      } catch (e) {
+        console.error(`error getting transactions for cosmos ${e}`);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await CosmosScan.getTransaction({txHash});
+        if (transaction) {
+          return {
+            data: {
+              // amount: finalAmount.toString(),
+              link: txHash,
+              url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
+              status: transaction.success ? 'SUCCESS' : 'PENDING',
+              date: new Date(transaction?.timestamp), //new Date(transaction.raw_data.timestamp),
+              // from: sender,
+              // to: recipient,
+              totalCourse: '0$',
+            },
+          };
+        }
+
         return [];
       } catch (e) {
         console.error(`error getting transactions for cosmos ${e}`);

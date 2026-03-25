@@ -751,7 +751,7 @@ export const TronChain = () => {
             const fromAddress = tronWeb.address.fromHex(raw.owner_address);
             return {
               amount: raw?.amount?.toString(),
-              link: transaction.txID.substring(0, 13) + '...',
+              link: transaction.txID,
               url: `${config.TRON_SCAN_URL}/transaction/${transaction.txID}`,
               date: transaction.raw_data.timestamp, //new Date(transaction.raw_data.timestamp),
               status: transaction.ret?.[0]?.contractRet,
@@ -771,7 +771,7 @@ export const TronChain = () => {
     getTransaction: async ({txHash}) =>
       retryFunc(async tronWeb => {
         try {
-          if (!txHash) return;
+          if (!txHash) return null;
           const resp = await tronWeb.fullNode.request(
             `wallet/gettransactionbyid`,
             {
