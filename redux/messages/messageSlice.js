@@ -1,7 +1,11 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {getEthereumCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
+import {
+  getEthereumCoin,
+  selectCurrentWallet,
+} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {XMTP} from 'utils/xmtp';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
 /*
 Conversation data structure
@@ -52,7 +56,13 @@ export const getConversation = createAsyncThunk(
         console.warn('No ethereum chain found');
         throw new Error('No ethereum chain found');
       }
-      const etherChain = getChain('ethereum');
+      const currentWallet = selectCurrentWallet(currentState);
+      const customRPC = selectCustomRpcUrlByChainAndWallet(
+        'ethereum',
+        currentWallet?.clientId,
+      )(currentState);
+
+      const etherChain = getChain('ethereum', currentWallet?.phrase, customRPC);
       const wallet = etherChain?.getWallet({
         privateKey: ethereumCoin?.privateKey,
       });
