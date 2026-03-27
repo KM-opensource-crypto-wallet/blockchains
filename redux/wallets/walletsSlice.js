@@ -66,7 +66,7 @@ import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -1473,6 +1473,7 @@ export const addCustomDeriveAddress = createAsyncThunk(
         chain_name,
         wallet.phrase,
         derivePath,
+        IS_SANDBOX,
       );
       if (accountData?.account) {
         showToast({
@@ -1523,6 +1524,59 @@ export const searchCoinFromCurrency = createAsyncThunk(
     }
     dispatch(setCurrentCoin(foundCoin?._id));
     dispatch(refreshCurrentCoin({currentCoin: foundCoin}));
+  },
+);
+
+export const backfillBitcoinDerivePrivateKeys = createAsyncThunk(
+  'wallets/backfillBitcoinDerivePrivateKeys',
+  async (_, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const allWallets = selectAllWallets(currentState);
+    const corrections = [];
+    for (let walletIndex = 0; walletIndex < allWallets.length; walletIndex++) {
+      const wallet = allWallets[walletIndex];
+      if (!wallet?.phrase) {
+        continue;
+      }
+      const coins = Array.isArray(wallet.coins) ? wallet.coins : [];
+      for (const coin of coins) {
+        if (!isBitcoinChain(coin?.chain_name)) {
+          continue;
+        }
+        const deriveAddresses = Array.isArray(coin?.deriveAddresses)
+          ? coin.deriveAddresses
+          : [];
+        const missingKeyEntries = deriveAddresses.filter(
+          entry => entry?.derivePath && !entry?.privateKey,
+        );
+        if (!missingKeyEntries.length) {
+          continue;
+        }
+        const updates = [];
+        for (const entry of missingKeyEntries) {
+          try {
+            const result = await addCustomDeriveAddressToWallet(
+              coin.chain_name,
+              wallet.phrase,
+              entry.derivePath,
+              IS_SANDBOX,
+            );
+            if (result?.account?.privateKey) {
+              updates.push({
+                address: entry.address,
+                privateKey: result.account.privateKey,
+              });
+            }
+          } catch (e) {
+            console.error('Error backfilling bitcoin derive private key', e);
+          }
+        }
+        if (updates.length) {
+          corrections.push({walletIndex, chain_name: coin.chain_name, updates});
+        }
+      }
+    }
+    return corrections;
   },
 );
 
@@ -2455,6 +2509,34 @@ export const walletsSlice = createSlice({
         console.warn('some payload missing addCustomDeriveAddress', payload);
       }
     });
+    builder.addCase(
+      backfillBitcoinDerivePrivateKeys.fulfilled,
+      (state, {payload}) => {
+        if (!Array.isArray(payload) || !payload.length) {
+          return;
+        }
+        for (const {walletIndex, chain_name, updates} of payload) {
+          const wallet = state.allWallets[walletIndex];
+          if (!wallet) {
+            continue;
+          }
+          wallet.coins = wallet.coins.map(coin => {
+            if (coin.chain_name !== chain_name) {
+              return coin;
+            }
+            const deriveAddresses = Array.isArray(coin.deriveAddresses)
+              ? coin.deriveAddresses.map(entry => {
+                  const update = updates.find(u => u.address === entry.address);
+                  return update
+                    ? {...entry, privateKey: update.privateKey}
+                    : entry;
+                })
+              : coin.deriveAddresses;
+            return {...coin, deriveAddresses};
+          });
+        }
+      },
+    );
   },
 });
 
