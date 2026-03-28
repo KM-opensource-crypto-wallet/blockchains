@@ -294,12 +294,38 @@ export const getSellCryptoPaymentDetails = async payload => {
 
 export const fetchBitcoinBalances = async payload => {
   try {
+    // Strip privateKey before sending to backend; keep a map to restore after
+    const privateKeyMap = {};
+    const sanitizedDeriveAddresses = Array.isArray(payload?.derive_addresses)
+      ? payload.derive_addresses.map(item => {
+          if (item?.privateKey) {
+            privateKeyMap[item.address] = item.privateKey;
+            const {privateKey, ...rest} = item;
+            return rest;
+          }
+          return item;
+        })
+      : payload?.derive_addresses;
     const resp = await DokApi.post('/get-blockchair-api', {
       is_sandbox: IS_SANDBOX,
       type: 'get_bitcoin_balances',
       ...payload,
+      derive_addresses: sanitizedDeriveAddresses,
     });
-    return {status: resp?.status, data: resp?.data?.data};
+
+    // Restore privateKey to matching items in the response
+    const data = resp?.data?.data;
+    const deriveAddresses = data?.deriveAddresses;
+    const hydratedDeriveAddresses = Array.isArray(deriveAddresses)
+      ? deriveAddresses.map(item => {
+          const pk = privateKeyMap[item?.address];
+          return pk ? {...item, privateKey: pk} : item;
+        })
+      : deriveAddresses;
+    return {
+      status: resp?.status,
+      data: data ? {...data, deriveAddresses: hydratedDeriveAddresses} : data,
+    };
   } catch (e) {
     console.error('Error in fetchBitcoinBalances', JSON.stringify(e));
     throw e;

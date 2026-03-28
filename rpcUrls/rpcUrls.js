@@ -1,7 +1,6 @@
 import {fetchRpcUrls} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-import {compareAndSortRpcUrls} from 'dok-wallet-blockchain-networks/service/rpcService';
 import dayjs from 'dayjs';
 
 const allRPCUrl = {
@@ -252,29 +251,9 @@ let rpcUrls = {
   ),
 };
 
-export const fetchRPCUrl = async () => {
-  try {
-    const resp = await fetchRpcUrls();
-    const data = isValidObject(resp?.data) ? resp?.data : {};
-    const freeUrl = isValidObject(data?.free_url) ? data?.free_url : {};
-    const url = isValidObject(data?.url) ? data?.url : {};
-    rpcUrls = {
-      url: {
-        ...rpcUrls.url,
-        ...url,
-      },
-      free_url: {
-        ...rpcUrls.free_url,
-        ...freeUrl,
-      },
-    };
-  } catch (e) {
-    console.error('Error in fetchRPCUrl', e);
-  }
-};
-
 let lastCallTimeStamp;
-export const compareRpcUrls = async () => {
+
+export const fetchRPCUrl = async () => {
   try {
     if (
       lastCallTimeStamp &&
@@ -283,18 +262,17 @@ export const compareRpcUrls = async () => {
       throw new Error('last call made with 10 minutes');
     }
     lastCallTimeStamp = new Date();
-    const freeUrl = isValidObject(rpcUrls?.free_url) ? rpcUrls?.free_url : {};
-    const resp = await compareAndSortRpcUrls(freeUrl);
-    const data = isValidObject(resp) ? resp : {};
+
+    const resp = await fetchRpcUrls();
+    const data = isValidObject(resp?.data) ? resp?.data : {};
+    const freeUrl = isValidObject(data?.free_url) ? data?.free_url : {};
+    const url = isValidObject(data?.url) ? data?.url : {};
     rpcUrls = {
-      ...rpcUrls,
-      free_url: {
-        ...rpcUrls.free_url,
-        ...data,
-      },
+      url: Object.keys(url).length > 0 ? url : rpcUrls.url,
+      free_url: Object.keys(freeUrl).length > 0 ? freeUrl : rpcUrls.free_url,
     };
   } catch (e) {
-    console.error('Error in compare RPC urls', e);
+    console.error('Error in fetchRPCUrl', e);
   }
 };
 

@@ -217,6 +217,9 @@ export function validateBigNumberStr(number) {
   }
 }
 export function validateNumberInInput(text, decimals = 18) {
+  // Normalize locale-specific decimal separator (comma → dot)
+  text = text.replace(',', '.');
+
   // Remove leading zeros unless it's something like "0." or just "0"
   while (text.charAt(0) === '0' && text.charAt(1) !== '.' && text.length > 1) {
     text = text.substring(1);
@@ -351,7 +354,14 @@ export const isEip7702SupportedChain = chain_name =>
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
 
-const DERIVE_ADDRESS_SUPPORT_CHAIN = [...EVM_CHAINS, 'tron', 'solana'];
+const DERIVE_ADDRESS_SUPPORT_CHAIN = [
+  ...EVM_CHAINS,
+  'tron',
+  'solana',
+  'bitcoin',
+  'bitcoin_segwit',
+  'bitcoin_legacy',
+];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
 
@@ -862,6 +872,29 @@ export const PrivateKeyList = [
   },
 ];
 
+export const CustomRPCList = [
+  {label: 'Ethereum', value: 'ethereum'},
+  {label: 'Binance Smart Chain', value: 'binance_smart_chain'},
+  {label: 'Polygon', value: 'polygon'},
+  {label: 'Base', value: 'base'},
+  {label: 'Arbitrum', value: 'arbitrum'},
+  {label: 'Optimism', value: 'optimism'},
+  {
+    label: 'Optimism Binance Smart Chain',
+    value: 'optimism_binance_smart_chain',
+  },
+  {label: 'Avalanche', value: 'avalanche'},
+  {label: 'Fantom', value: 'fantom'},
+  {label: 'Gnosis', value: 'gnosis'},
+  {label: 'Viction', value: 'viction'},
+  {label: 'Linea', value: 'linea'},
+  {label: 'zkSync Era', value: 'zksync'},
+  {label: 'Ethereum Classic', value: 'ethereum_classic'},
+  {label: 'EthereumPoW', value: 'ethereum_pow'},
+  {label: 'Kava', value: 'kava'},
+  {label: 'Ink', value: 'ink'},
+  {label: 'Sei', value: 'sei'},
+];
 export const AUTO_LOCK = [
   {
     label: 'Immediate',
@@ -1078,10 +1111,34 @@ const solanaMDerivationPath = [
   },
 ];
 
+const bitcoinNativeSegwitDerivationPath = [
+  {
+    label: "Ledger (m/84'/0'/1'/0/0)",
+    value: "m/84'/0'/1'/0/0",
+  },
+];
+
+const bitcoinSegwitDerivationPath = [
+  {
+    label: "Ledger (m/49'/0'/1'/0/0)",
+    value: "m/49'/0'/1'/0/0",
+  },
+];
+
+const bitcoinLegacyDerivationPath = [
+  {
+    label: "Ledger (m/44'/0'/1'/0/0)",
+    value: "m/44'/0'/1'/0/0",
+  },
+];
+
 export const allDerivePath = {
   ethereum: EVMDerivationPath,
   solana: solanaMDerivationPath,
   tron: tronDerivationPath,
+  bitcoin: bitcoinNativeSegwitDerivationPath,
+  bitcoin_segwit: bitcoinSegwitDerivationPath,
+  bitcoin_legacy: bitcoinLegacyDerivationPath,
 };
 
 export const customObj = {
@@ -1376,6 +1433,39 @@ export function extractTxHashFromEVMMissingError(error) {
 
   return null;
 }
+
+/**
+ * Merges newAccounts into oldAccounts, deduplicating by address OR derivePath.
+ * Old accounts (including custom ones) are always preserved.
+ */
+export const mergeUniqueAccounts = (oldAccounts, newAccounts) => {
+  if (!Array.isArray(oldAccounts) || !oldAccounts.length) {
+    return Array.isArray(newAccounts) ? newAccounts : [];
+  }
+  if (!Array.isArray(newAccounts) || !newAccounts.length) {
+    return oldAccounts;
+  }
+
+  const newByAddress = new Map(newAccounts.map(n => [n.address, n]));
+  const newByDerivePath = new Map(newAccounts.map(n => [n.derivePath, n]));
+
+  const oldAddresses = new Set();
+  const oldDerivePaths = new Set();
+
+  const merged = oldAccounts.map(o => {
+    oldAddresses.add(o.address);
+    oldDerivePaths.add(o.derivePath);
+    const match =
+      newByAddress.get(o.address) ?? newByDerivePath.get(o.derivePath);
+    return match ? {...o, ...match} : o;
+  });
+
+  const toAdd = newAccounts.filter(
+    n => !oldAddresses.has(n.address) && !oldDerivePaths.has(n.derivePath),
+  );
+
+  return [...merged, ...toAdd];
+};
 
 export const getWalletTotalBalance = coins => {
   let total = 0;

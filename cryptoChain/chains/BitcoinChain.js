@@ -394,6 +394,40 @@ export const BitcoinChain = () => {
         }, 5000);
       });
     },
+    createCustomDerivedAddress: async ({chain_name, mnemonic, derivePath}) => {
+      try {
+        const customNetwork = getNetworkByChainName(chain_name);
+        const seed = bip39.mnemonicToSeedSync(mnemonic);
+        const bip32 = BIP32Factory(ecc);
+        const root = bip32.fromSeed(seed, customNetwork);
+        const child1 = root.derivePath(derivePath);
+        let data = {};
+        if (chain_name === 'bitcoin_legacy') {
+          data = bitcoin.payments.p2pkh({
+            pubkey: child1.publicKey,
+            network: customNetwork,
+          });
+        } else if (chain_name === 'bitcoin_segwit') {
+          const p2wpkh = bitcoin.payments.p2wpkh({
+            pubkey: child1.publicKey,
+            network: customNetwork,
+          });
+          data = bitcoin.payments.p2sh({
+            redeem: p2wpkh,
+          });
+        }
+        return {
+          account: {
+            privateKey: child1.toWIF(),
+            address: data.address,
+            derivePath: derivePath,
+          },
+        };
+      } catch (error) {
+        console.error(error);
+        throw error;
+      }
+    },
   };
 };
 

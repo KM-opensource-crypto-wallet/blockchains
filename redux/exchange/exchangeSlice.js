@@ -8,6 +8,10 @@ import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {isNameSupportChain} from 'dok-wallet-blockchain-networks/helper';
 import {showToast} from 'utils/toast';
 import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {
+  getCustomRPCWithData,
+  selectCustomRpcUrlByChainAndWallet,
+} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
 const initialState = {
   amountFrom: '',
@@ -52,7 +56,16 @@ export const calculateExchange = createAsyncThunk(
       let validName = null;
       if (customOption === 'Custom') {
         const toAssetChainName = selectedToAsset?.chain_name;
-        const chain = getChain(toAssetChainName);
+        const customRPC = selectCustomRpcUrlByChainAndWallet(
+          toAssetChainName,
+          selectedFromWallet?.clientId,
+        )(currentState);
+
+        const chain = getChain(
+          toAssetChainName,
+          selectedFromWallet?.phrase,
+          customRPC,
+        );
         const isValidAddress = chain.isValidAddress({
           address: customAddress,
         });
