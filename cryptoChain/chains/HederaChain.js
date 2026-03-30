@@ -218,14 +218,14 @@ export const HederaChain = () => {
           );
           return {
             data: {
-              amount: finalTransaction?.transfers[1].amount,
+              amount: finalTransaction?.transfers[2].amount,
               link: txHash,
               url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
               status:
                 finalTransaction?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
               date: date * 1000,
-              from: finalTransaction?.transfers[0].account,
-              to: finalTransaction?.transfers[1].account,
+              from: finalTransaction?.transfers[1].account,
+              to: finalTransaction?.transfers[2].account,
               totalCourse: '0$',
             },
           };

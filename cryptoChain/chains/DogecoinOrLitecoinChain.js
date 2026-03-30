@@ -147,14 +147,16 @@ export const DogecoinOrLitecoinChain = chain_name => {
         });
         if (!response) return null;
         return {
-          amount: response?.amount?.toString(),
-          link: txHash,
-          url: `${scanUrl}/transaction/${txHash}`,
-          status: response?.status ? 'SUCCESS' : 'Pending',
-          date: response?.timestamp ? new Date(response?.timestamp) : null,
-          from: response?.from,
-          to: response?.to,
-          totalCourse: '0$',
+          data: {
+            amount: response?.amount?.toString(),
+            link: txHash,
+            url: `${scanUrl}/transaction/${txHash}`,
+            status: response?.status ? 'SUCCESS' : 'Pending',
+            date: response?.timestamp ? new Date(response?.timestamp) : null,
+            from: response?.from,
+            to: response?.to,
+            totalCourse: '0$',
+          },
         };
       } catch (e) {
         console.error(`error getting transaction for ${chain_name} ${e}`);
