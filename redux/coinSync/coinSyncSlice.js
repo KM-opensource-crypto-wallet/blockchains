@@ -238,7 +238,7 @@ export const syncAllCoins = createAsyncThunk(
         );
 
         if (
-          new BigNumber(result?.totalAmount || 0).isGreaterThan(
+          new BigNumber(result?.totalBalance || 0).isGreaterThan(
             new BigNumber(0),
           )
         ) {
