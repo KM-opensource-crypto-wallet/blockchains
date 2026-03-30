@@ -125,11 +125,11 @@ const getUniqueCoins = coins => {
   }
 };
 
-const extractChainExistingCoins = coins => {
+const extractChainExistingCoins = (chain_existing_coin, coins) => {
   if (!Array.isArray(coins)) {
     return null;
   }
-  const chainWallets = {};
+  const chainWallets = chain_existing_coin || {};
   coins.forEach(item => {
     if (item?.chain_name && (item?.address || item?.privateKey)) {
       if (!chainWallets[item.chain_name]) {
@@ -1566,6 +1566,7 @@ export const walletsSlice = createSlice({
       if (Array.isArray(action?.payload)) {
         currentWallet.coins = action?.payload;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
           action?.payload,
         );
       }
@@ -2096,6 +2097,7 @@ export const walletsSlice = createSlice({
               item?.deriveAddresses?.[0]?.privateKey || item?.privateKey,
           }));
           currentWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallet.chain_existing_coin,
             currentWallet.coins,
           );
         }
@@ -2133,6 +2135,7 @@ export const walletsSlice = createSlice({
         }
       });
       currentWallet.chain_existing_coin = extractChainExistingCoins(
+        currentWallet.chain_existing_coin,
         currentWallet.coins,
       );
       currentWallet.isEVMAddressesAdded = false;
@@ -2220,7 +2223,7 @@ export const walletsSlice = createSlice({
         console.warn('walletIndex is incorrect', walletIndex);
         return;
       }
-      if (!Array.isArray(coins) && coins.length === 0) {
+      if (!Array.isArray(coins) || coins.length === 0) {
         console.warn('coins is incorrect', walletIndex);
         return;
       }
@@ -2228,6 +2231,7 @@ export const walletsSlice = createSlice({
       const wallet = allWallets[walletIndex];
       if (!wallet) {
         console.warn('wallet not found', walletIndex);
+        return;
       }
       const existingCoins = Array.isArray(wallet.coins) ? wallet.coins : [];
       wallet.coins = getUniqueCoins([
@@ -2257,8 +2261,10 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[currentWalletIndex] || {};
         currentWallets.coins = coinData;
-        currentWallets.chain_existing_coin =
-          extractChainExistingCoins(coinData);
+        currentWallets.chain_existing_coin = extractChainExistingCoins(
+          currentWallets.chain_existing_coin,
+          coinData,
+        );
       }
     });
     builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {
@@ -2276,6 +2282,7 @@ export const walletsSlice = createSlice({
           const newCoins = allNewCoins[i];
           tempWallet.coins = [...tempWallet.coins, ...newCoins];
           tempWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallets.chain_existing_coin,
             tempWallet.coins,
           );
           allWallets[i] = tempWallet;
@@ -2304,12 +2311,16 @@ export const walletsSlice = createSlice({
             }
           }
           currentWallets.coins = allCoins;
-          currentWallets.chain_existing_coin =
-            extractChainExistingCoins(allCoins);
+          currentWallets.chain_existing_coin = extractChainExistingCoins(
+            currentWallets.chain_existing_coin,
+            allCoins,
+          );
         } else {
           currentWallets.coins = allCoins;
-          currentWallets.chain_existing_coin =
-            extractChainExistingCoins(allCoins);
+          currentWallets.chain_existing_coin = extractChainExistingCoins(
+            currentWallets.chain_existing_coin,
+            allCoins,
+          );
         }
       }
     });
@@ -2329,10 +2340,11 @@ export const walletsSlice = createSlice({
           }
           return item;
         });
-        currentWallet.chain_existing_coin = extractChainExistingCoins(
-          currentWallet.coins,
-        );
       }
+      currentWallet.chain_existing_coin = extractChainExistingCoins(
+        currentWallet.chain_existing_coin,
+        currentWallet.coins,
+      );
     });
     builder.addCase(addCoinGroup.fulfilled, (state, {payload}) => {
       const newCoins = Array.isArray(payload.newCoins) ? payload.newCoins : [];
@@ -2361,6 +2373,7 @@ export const walletsSlice = createSlice({
           ...newCoins,
         ]);
         currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
           currentWallet.coins,
         );
       }
@@ -2371,6 +2384,7 @@ export const walletsSlice = createSlice({
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
         currentWallets.chain_existing_coin = extractChainExistingCoins(
+          currentWallets.chain_existing_coin,
           currentWallets.coins,
         );
       }
@@ -2382,7 +2396,10 @@ export const walletsSlice = createSlice({
           ...state.allWallets,
           ...newWallets.map(w => ({
             ...w,
-            chain_existing_coin: extractChainExistingCoins(w.coins),
+            chain_existing_coin: extractChainExistingCoins(
+              w.chain_existing_coin,
+              w.coins,
+            ),
           })),
         ];
       }
@@ -2405,6 +2422,7 @@ export const walletsSlice = createSlice({
       newStoreWallet.isEVMAddressesAdded = false;
       newStoreWallet.coinsSortOption = 'default';
       newStoreWallet.chain_existing_coin = extractChainExistingCoins(
+        newStoreWallet.chain_existing_coin,
         newStoreWallet.coins,
       );
 
