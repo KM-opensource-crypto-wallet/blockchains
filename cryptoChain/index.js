@@ -277,11 +277,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
         extendedPrivateKey:
           wallet.extendedPrivateKey || coin?.extendedPrivateKey,
       }),
-    waitForConfirmation: async payload =>
-      await chain?.waitForConfirmation({
-        ...payload,
-        privateKey: wallet.privateKey,
-      }),
+    waitForConfirmation: chain?.waitForConfirmation,
     getTransactions: async payload =>
       await chain?.getTransactions({
         address: wallet.address,
@@ -473,11 +469,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         ...payload,
       }),
 
-    waitForConfirmation: async payload =>
-      await chain?.waitForConfirmation({
-        ...payload,
-        privateKey: wallet.privateKey,
-      }),
+    waitForConfirmation: chain?.waitForConfirmation,
     getTransactions: async payload =>
       await chain?.getTokenTransactions({
         address: wallet.address,
