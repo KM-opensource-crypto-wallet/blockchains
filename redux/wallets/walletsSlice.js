@@ -2282,7 +2282,7 @@ export const walletsSlice = createSlice({
           const newCoins = allNewCoins[i];
           tempWallet.coins = [...tempWallet.coins, ...newCoins];
           tempWallet.chain_existing_coin = extractChainExistingCoins(
-            currentWallets.chain_existing_coin,
+            tempWallet.chain_existing_coin,
             tempWallet.coins,
           );
           allWallets[i] = tempWallet;
