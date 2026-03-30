@@ -13,12 +13,14 @@ import {
   checkValidChainForWalletImportWithPrivateKey,
 } from 'dok-wallet-blockchain-networks/helper';
 import {fetchCurrenciesAPI} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {createWalletForChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {
-  createWalletForChain,
-  getChain,
-} from 'dok-wallet-blockchain-networks/cryptoChain';
-import {setWalletChainExistingCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
-import {parseBalance} from '../../helper';
+  addLastCoinScanData,
+  setWalletChainExistingCoin,
+} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {getCoinSnapshot} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import BigNumber from 'bignumber.js';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
 const initialState = {
   // Status: 'idle' | 'fetching' | 'creating_wallets' | 'syncing' | 'completed' | 'error'
@@ -37,8 +39,14 @@ const initialState = {
   // Wallet index where syncing started (to add coins to correct wallet)
   syncingWalletIndex: null,
 
+  // Wallet name where syncing started (for display)
+  syncingWalletName: null,
+
   // Error
   error: null,
+
+  // Banner dismissed by user
+  isBannerDismissed: false,
 };
 
 // Get unique chain keys from coins (EVM chains share 'ethereum' key)
@@ -51,47 +59,6 @@ const getUniqueChainKeys = coins => {
     }
   });
   return Array.from(chainSet);
-};
-
-// Check balance for a single coin
-const checkCoinBalance = async (coin, chainWallets) => {
-  const chainName = coin?.chain_name;
-  const storageKey = isEVMChain(chainName) ? 'ethereum' : chainName;
-  const wallet = chainWallets[storageKey];
-
-  if (!wallet) {
-    return {coin, balance: 0, error: 'No wallet found'};
-  }
-
-  const chain = getChain(chainName);
-  if (!chain) {
-    return {coin, balance: 0, error: 'Chain not supported'};
-  }
-
-  try {
-    let balance;
-    if (coin?.type === 'token' && coin?.contractAddress) {
-      balance = await chain.getTokenBalance({
-        address: wallet.address,
-        contractAddress: coin.contractAddress,
-        decimal: coin.decimal,
-        symbol: coin.symbol,
-      });
-    } else {
-      balance = await chain.getBalance({
-        address: wallet.address,
-        extendedPublicKey: wallet.extendedPublicKey,
-        deriveAddresses: coin?.deriveAddresses,
-        chain_name: coin?.chain_name,
-      });
-    }
-
-    const numBalance = parseFloat(balance) || 0;
-    return {coin, balance: numBalance, error: null};
-  } catch (error) {
-    console.warn(`Balance check failed for ${coin.symbol}:`, error?.message);
-    return {coin, balance: 0, error: error?.message};
-  }
 };
 
 // Get existing chain wallet from current wallet's coins
@@ -127,6 +94,7 @@ export const syncAllCoins = createAsyncThunk(
     // Step 1: Fetch all supported coins
     thunkAPI.dispatch(setStatus('fetching'));
     thunkAPI.dispatch(setSyncingWalletIndex(currentWalletIndex));
+    thunkAPI.dispatch(setSyncingWalletName(currentWallet?.walletName || null));
     const resp = await fetchCurrenciesAPI({status: false, ignoreLimit: true});
     const allCoins = Array.isArray(resp?.data?.data) ? resp.data.data : [];
 
@@ -186,11 +154,16 @@ export const syncAllCoins = createAsyncThunk(
           });
           if (!isCompatible) continue;
         }
+        const customRPC = selectCustomRpcUrlByChainAndWallet(
+          chainKey,
+          currentWallet?.clientId,
+        )(state);
 
         const {wallet} = await createWalletForChain(
           currentWallet.phrase,
           {chain_name: chainKey},
           currentWallet,
+          customRPC,
         );
 
         if (wallet) {
@@ -214,6 +187,10 @@ export const syncAllCoins = createAsyncThunk(
         chainWallets,
       }),
     );
+    const currentUpdatedWallet = state?.allWallets?.[currentWalletIndex];
+    if (currentUpdatedWallet && chainWallets) {
+      currentUpdatedWallet.chain_existing_coin = chainWallets;
+    }
 
     // Step 4: Check balances for all coins (real-time updates)
     thunkAPI.dispatch(setStatus('syncing'));
@@ -245,37 +222,51 @@ export const syncAllCoins = createAsyncThunk(
       if (!validateSupportedChain(coin?.chain_name)) {
         continue;
       }
-
-      const result = await checkCoinBalance(coin, chainWallets);
-
-      if (result.balance > 0) {
-        const storageKey = isEVMChain(coin.chain_name)
-          ? 'ethereum'
-          : coin.chain_name;
-        const wallet = chainWallets[storageKey];
-        const currentPrice = priceObj[coin.symbol] || 0;
-
-        // Add coin with balance to the list (auto-selected)
-        thunkAPI.dispatch(
-          addCoinWithBalance({
-            ...coin,
-            address: wallet?.address,
-            privateKey: wallet?.privateKey,
-            publicKey: wallet?.publicKey,
-            extendedPublicKey: wallet?.extendedPublicKey,
-            extendedPrivateKey: wallet?.extendedPrivateKey,
-            totalBalance: parseBalance(
-              result.balance.toString(),
-              coin?.decimal,
-            ),
-            currencyRate: currentPrice,
-            isSelected: true,
-          }),
+      try {
+        const result = await getCoinSnapshot(
+          state,
+          coin,
+          currentUpdatedWallet,
+          priceObj,
+          false,
+          false,
+          false,
+          false,
+          false,
         );
+
+        if (
+          new BigNumber(result?.totalAmount || 0).isGreaterThan(
+            new BigNumber(0),
+          )
+        ) {
+          thunkAPI.dispatch(
+            addCoinWithBalance({
+              ...result,
+              isSelected: true,
+            }),
+          );
+        }
+      } catch (e) {
+        console.error('error in sync coin', e);
       }
     }
+    thunkAPI.dispatch(addLastCoinScanData({walletIndex: currentWalletIndex}));
 
     return {success: true};
+  },
+  {
+    condition: (_, {getState}) => {
+      const syncStatus = getState().coinSync?.status;
+      // Prevent concurrent scans
+      if (
+        syncStatus === 'syncing' ||
+        syncStatus === 'fetching' ||
+        syncStatus === 'creating_wallets'
+      ) {
+        return false;
+      }
+    },
   },
 );
 
@@ -295,6 +286,9 @@ export const coinSyncSlice = createSlice({
     },
     setSyncingWalletIndex: (state, action) => {
       state.syncingWalletIndex = action.payload;
+    },
+    setSyncingWalletName: (state, action) => {
+      state.syncingWalletName = action.payload;
     },
     setTotalCoins: (state, action) => {
       state.totalCoins = action.payload;
@@ -325,6 +319,9 @@ export const coinSyncSlice = createSlice({
         coin.isSelected = false;
       });
     },
+    dismissBanner: state => {
+      state.isBannerDismissed = true;
+    },
   },
   extraReducers: builder => {
     builder
@@ -335,6 +332,7 @@ export const coinSyncSlice = createSlice({
         state.totalCoins = 0;
         state.scannedCoins = 0;
         state.currentSyncingCoin = null;
+        state.syncingWalletName = null;
       })
       .addCase(syncAllCoins.fulfilled, state => {
         state.status = 'completed';
@@ -353,6 +351,7 @@ export const {
   cancelSync,
   setStatus,
   setSyncingWalletIndex,
+  setSyncingWalletName,
   setTotalCoins,
   setScannedCoins,
   setCurrentSyncingCoin,
@@ -360,6 +359,7 @@ export const {
   toggleCoinSelection,
   selectAllCoins,
   deselectAllCoins,
+  dismissBanner,
 } = coinSyncSlice.actions;
 
 export default coinSyncSlice.reducer;

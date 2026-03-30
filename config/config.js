@@ -4,7 +4,7 @@ import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
 
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export function getSecureRandomValues(length = 16) {
   const result = new Uint8Array(length);

@@ -4,6 +4,7 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {createSelector} from '@reduxjs/toolkit';
+import dayjs from 'dayjs';
 
 export const selectAllWallets = state => {
   return state.wallets?.allWallets;
@@ -361,3 +362,14 @@ export const getMasterClientId = state => {
   return state.wallets?.masterClientId;
 };
 export const getFailedTransaction = state => state.wallets?.failedTransaction;
+
+export const getLastCoinsScanTimestamp = state => {
+  const currentWallet = selectCurrentWallet(state);
+  return currentWallet?.lastCoinsScanTimestamp;
+};
+
+export const isCoinsScanTimestampValid = state => {
+  const timestamp = getLastCoinsScanTimestamp(state);
+  if (timestamp === null || timestamp === undefined) return true;
+  return dayjs().diff(dayjs(timestamp), 'hour') >= 24;
+};

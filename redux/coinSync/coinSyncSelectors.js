@@ -16,7 +16,13 @@ export const selectCurrentSyncingCoin = state =>
 export const selectSyncingWalletIndex = state =>
   state.coinSync?.syncingWalletIndex;
 
+export const selectSyncingWalletName = state =>
+  state.coinSync?.syncingWalletName || null;
+
 export const selectIsFetching = state => state.coinSync?.status === 'fetching';
+
+export const selectIsBannerDismissed = state =>
+  state.coinSync?.isBannerDismissed || false;
 
 export const selectIsCreatingWallets = state =>
   state.coinSync?.status === 'creating_wallets';

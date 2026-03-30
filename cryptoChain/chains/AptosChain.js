@@ -106,13 +106,15 @@ export const AptosChain = () => {
     },
     getTokenBalance: async ({address, contractAddress}) => {
       try {
-        const balance = await aptosProvider.getAccountCoinAmount({
+        // Extract base address (before ::) for FA lookup
+        const faAddress = contractAddress.split('::')[0];
+        const balance = await aptosProvider.getBalance({
           accountAddress: address,
-          coinType: contractAddress,
+          asset: faAddress,
         });
         return balance?.toString() || '0';
       } catch (e) {
-        console.error(`error getting token balance for cake ${e}`);
+        console.error(`error getting token balance for aptos ${e}`);
         return '0';
       }
     },

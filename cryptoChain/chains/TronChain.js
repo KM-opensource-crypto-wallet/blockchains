@@ -5,6 +5,7 @@ import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 import dayjs from 'dayjs';
+import trc20Abi from 'dok-wallet-blockchain-networks/abis/trc20.json';
 
 let accountInfo = {};
 let lastCallTimeStamp;
@@ -300,10 +301,13 @@ export const TronChain = () => {
       retryFunc(async tronWeb => {
         try {
           tronWeb.setAddress(contractAddress);
-          const contract = await tronWeb.contract().at(contractAddress);
+          let contract = await tronWeb.contract().at(contractAddress);
           let name = '';
           let decimals = '';
           let symbol = '';
+          if (!contract?.name) {
+            contract = tronWeb.contract(trc20Abi, contractAddress);
+          }
           if (contract?.name) {
             name = await contract.name().call();
             decimals = await contract.decimals().call();
@@ -696,9 +700,10 @@ export const TronChain = () => {
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async tronWeb => {
         try {
-          tronWeb.setAddress(contractAddress);
-          const contract = await tronWeb.contract().at(contractAddress);
-          return await contract.balanceOf(address).call();
+          tronWeb.setAddress(address);
+          const contract = tronWeb.contract(trc20Abi, contractAddress);
+          const balance = await contract.balanceOf(address).call();
+          return balance.toString();
         } catch (e) {
           console.error(`error getting token balance tron ${e}`);
           throw e;
