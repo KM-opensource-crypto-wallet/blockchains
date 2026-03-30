@@ -609,7 +609,9 @@ export const SolanaChain = () => {
           });
           if (!item) return null;
           const transactionDetails =
-            item?.transaction?.message?.instructions[0]?.parsed?.info;
+            item?.transaction?.message?.instructions?.find(
+              ix => ix?.parsed?.info?.lamports != null,
+            )?.parsed?.info;
           if (!transactionDetails?.lamports?.toString()) return null;
           const bnValue = transactionDetails?.lamports?.toString() || 0;
           return {

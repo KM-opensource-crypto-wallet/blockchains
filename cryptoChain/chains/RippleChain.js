@@ -113,14 +113,16 @@ export const RippleChain = () => {
         const tx = data?.result;
         const bnValue = BigInt(tx?.tx_json?.DeliverMax || 0);
         return {
-          amount: bnValue?.toString(),
-          link: txHash,
-          url: `${config.RIPPLE_SCAN_URL}/transactions/${txHash}`,
-          status: tx?.validated ? 'SUCCESS' : 'FAIL',
-          date: new Date(tx?.close_time_iso),
-          from: tx?.tx_json?.Account,
-          to: tx?.tx_json?.Destination,
-          totalCourse: '0$',
+          data: {
+            amount: bnValue?.toString(),
+            link: txHash,
+            url: `${config.RIPPLE_SCAN_URL}/transactions/${txHash}`,
+            status: tx?.validated ? 'SUCCESS' : 'FAIL',
+            date: new Date(tx?.close_time_iso),
+            from: tx?.tx_json?.Account,
+            to: tx?.tx_json?.Destination,
+            totalCourse: '0$',
+          },
         };
       } catch (e) {
         console.error(`error getting transaction for ripple ${e}`);
