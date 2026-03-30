@@ -205,10 +205,12 @@ export const syncAllCoins = createAsyncThunk(
       console.warn('Failed to fetch prices');
     }
 
+    let cancelled = false;
     for (let i = 0; i < coinsToCheck.length; i++) {
       // Check if cancelled
       const currentState = thunkAPI.getState();
       if (currentState.coinSync.status === 'idle') {
+        cancelled = true;
         break;
       }
 
@@ -251,6 +253,11 @@ export const syncAllCoins = createAsyncThunk(
         console.error('error in sync coin', e);
       }
     }
+
+    if (cancelled) {
+      return {success: false, cancelled: true};
+    }
+
     thunkAPI.dispatch(addLastCoinScanData({walletIndex: currentWalletIndex}));
 
     return {success: true};

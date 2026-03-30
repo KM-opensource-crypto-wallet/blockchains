@@ -94,7 +94,6 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
     chain_existing_coin &&
     !(isBitcoinChain(chainName) && APP_VERSION !== coin.appVersion)
   ) {
-    console.log('sssss');
     wallet = {
       privateKey: chain_existing_coin.privateKey,
       address: chain_existing_coin.address,
