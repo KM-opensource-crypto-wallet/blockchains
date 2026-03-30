@@ -125,6 +125,27 @@ const getUniqueCoins = coins => {
   }
 };
 
+const extractChainExistingCoins = (chain_existing_coin, coins) => {
+  if (!Array.isArray(coins)) {
+    return null;
+  }
+  const chainWallets = chain_existing_coin || {};
+  coins.forEach(item => {
+    if (item?.chain_name && (item?.address || item?.privateKey)) {
+      if (!chainWallets[item.chain_name]) {
+        chainWallets[item.chain_name] = {
+          address: item?.address,
+          privateKey: item?.privateKey,
+          publicKey: item?.publicKey,
+          extendedPublicKey: item?.extendedPublicKey,
+          extendedPrivateKey: item?.extendedPrivateKey,
+        };
+      }
+    }
+  });
+  return chainWallets;
+};
+
 const refreshCoinData = (dispatch, currentCoin) => {
   if (
     MainNavigation.getCurrentRouteName() === 'TransactionList' ||
@@ -1530,6 +1551,13 @@ export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
+    setWalletChainExistingCoin: (state, action) => {
+      const {walletIndex, chainWallets} = action.payload;
+      const wallet = state.allWallets[walletIndex];
+      if (wallet) {
+        wallet.chain_existing_coin = chainWallets;
+      }
+    },
     setCoinsInCurrentWallet: (state, action) => {
       // get the current wallet
       const allWallets = state.allWallets;
@@ -1537,6 +1565,10 @@ export const walletsSlice = createSlice({
       const currentWallet = allWallets[currentWalletIndex] || {};
       if (Array.isArray(action?.payload)) {
         currentWallet.coins = action?.payload;
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
+          action?.payload,
+        );
       }
     },
     setWalletPosition: (state, {payload}) => {
@@ -2064,6 +2096,10 @@ export const walletsSlice = createSlice({
             privateKey:
               item?.deriveAddresses?.[0]?.privateKey || item?.privateKey,
           }));
+          currentWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallet.chain_existing_coin,
+            currentWallet.coins,
+          );
         }
         newWallet[i] = currentWallet;
       }
@@ -2098,6 +2134,10 @@ export const walletsSlice = createSlice({
           return item;
         }
       });
+      currentWallet.chain_existing_coin = extractChainExistingCoins(
+        currentWallet.chain_existing_coin,
+        currentWallet.coins,
+      );
       currentWallet.isEVMAddressesAdded = false;
     },
     addPendingTransactions: (state, action) => {
@@ -2177,6 +2217,41 @@ export const walletsSlice = createSlice({
         );
       }
     },
+    addCoinsToWallet: (state, action) => {
+      const {walletIndex, coins} = action?.payload;
+      if (walletIndex == null) {
+        console.warn('walletIndex is incorrect', walletIndex);
+        return;
+      }
+      if (!Array.isArray(coins) || coins.length === 0) {
+        console.warn('coins is incorrect', walletIndex);
+        return;
+      }
+      const allWallets = state.allWallets;
+      const wallet = allWallets[walletIndex];
+      if (!wallet) {
+        console.warn('wallet not found', walletIndex);
+        return;
+      }
+      const existingCoins = Array.isArray(wallet.coins) ? wallet.coins : [];
+      wallet.coins = getUniqueCoins([
+        ...existingCoins,
+        ...coins.map(item => ({...item, isInWallet: true})),
+      ]);
+    },
+    addLastCoinScanData: (state, action) => {
+      const {walletIndex} = action?.payload;
+      if (walletIndex == null) {
+        console.warn('walletIndex is incorrect', walletIndex);
+        return;
+      }
+      const allWallets = state.allWallets;
+      const wallet = allWallets[walletIndex];
+      if (!wallet) {
+        console.warn('wallet not found', walletIndex);
+      }
+      wallet.lastCoinsScanTimestamp = new Date().toISOString();
+    },
   },
   extraReducers: builder => {
     builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
@@ -2186,6 +2261,10 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[currentWalletIndex] || {};
         currentWallets.coins = coinData;
+        currentWallets.chain_existing_coin = extractChainExistingCoins(
+          currentWallets.chain_existing_coin,
+          coinData,
+        );
       }
     });
     builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {
@@ -2202,6 +2281,10 @@ export const walletsSlice = createSlice({
           const tempWallet = allWallets[i];
           const newCoins = allNewCoins[i];
           tempWallet.coins = [...tempWallet.coins, ...newCoins];
+          tempWallet.chain_existing_coin = extractChainExistingCoins(
+            tempWallet.chain_existing_coin,
+            tempWallet.coins,
+          );
           allWallets[i] = tempWallet;
         }
         state.allWallets = allWallets;
@@ -2228,8 +2311,16 @@ export const walletsSlice = createSlice({
             }
           }
           currentWallets.coins = allCoins;
+          currentWallets.chain_existing_coin = extractChainExistingCoins(
+            currentWallets.chain_existing_coin,
+            allCoins,
+          );
         } else {
           currentWallets.coins = allCoins;
+          currentWallets.chain_existing_coin = extractChainExistingCoins(
+            currentWallets.chain_existing_coin,
+            allCoins,
+          );
         }
       }
     });
@@ -2250,6 +2341,10 @@ export const walletsSlice = createSlice({
           return item;
         });
       }
+      currentWallet.chain_existing_coin = extractChainExistingCoins(
+        currentWallet.chain_existing_coin,
+        currentWallet.coins,
+      );
     });
     builder.addCase(addCoinGroup.fulfilled, (state, {payload}) => {
       const newCoins = Array.isArray(payload.newCoins) ? payload.newCoins : [];
@@ -2277,6 +2372,10 @@ export const walletsSlice = createSlice({
           }),
           ...newCoins,
         ]);
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
+          currentWallet.coins,
+        );
       }
     });
     builder.addCase(addToken.fulfilled, (state, {payload}) => {
@@ -2284,12 +2383,25 @@ export const walletsSlice = createSlice({
         const allWallets = state.allWallets;
         const currentWallets = allWallets[state.currentWalletIndex] || {};
         currentWallets.coins = [...currentWallets.coins, payload];
+        currentWallets.chain_existing_coin = extractChainExistingCoins(
+          currentWallets.chain_existing_coin,
+          currentWallets.coins,
+        );
       }
     });
     builder.addCase(createWalletsBatch.fulfilled, (state, {payload}) => {
       const newWallets = payload?.newWallets || [];
       if (newWallets.length > 0) {
-        state.allWallets = [...state.allWallets, ...newWallets];
+        state.allWallets = [
+          ...state.allWallets,
+          ...newWallets.map(w => ({
+            ...w,
+            chain_existing_coin: extractChainExistingCoins(
+              w.chain_existing_coin,
+              w.coins,
+            ),
+          })),
+        ];
       }
     });
     builder.addCase(createWallet.fulfilled, (state, {payload}) => {
@@ -2309,6 +2421,10 @@ export const walletsSlice = createSlice({
       newStoreWallet.chain_name = chain_name;
       newStoreWallet.isEVMAddressesAdded = false;
       newStoreWallet.coinsSortOption = 'default';
+      newStoreWallet.chain_existing_coin = extractChainExistingCoins(
+        newStoreWallet.chain_existing_coin,
+        newStoreWallet.coins,
+      );
 
       // coinsAdapter.addMany(newCoinsState, payload.newStoreWallet.coins);
       // Add the new wallet to the wallets state
@@ -2460,6 +2576,7 @@ export const walletsSlice = createSlice({
 
 export const {
   setCurrentCoin,
+  setWalletChainExistingCoin,
   updateWalletName,
   setCurrentWalletIndex,
   updateUserCoins,
@@ -2501,6 +2618,8 @@ export const {
   deleteCoin,
   setFailedTransaction,
   removeUnClaimedLightningBTC,
+  addCoinsToWallet,
+  addLastCoinScanData,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators

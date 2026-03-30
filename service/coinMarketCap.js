@@ -46,11 +46,22 @@ export const getPrice = async (symbol, currency) => {
     ) {
       lastCallTimeStamp = new Date();
       let resp;
+      const cleanedSymbols = symbol
+        .split(',')
+        .map(s =>
+          s
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, ''),
+        )
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i) // remove duplicates
+        .join(',');
       if (isWeb) {
-        resp = await getCurrencyRate({symbol, currency});
+        resp = await getCurrencyRate({cleanedSymbols, currency});
         priceInfo = resp?.data;
       } else {
-        resp = await fetchWithRetry(symbol, currency);
+        resp = await fetchWithRetry(cleanedSymbols, currency);
         priceInfo = {
           ...priceInfo,
           ...formatCurrencyPrice(resp?.data?.data, currency),

@@ -2,6 +2,7 @@ import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronC
 import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
 import {
   isAddressOrPrivateKeyExists,
+  isBitcoinChain,
   mergeUniqueAccounts,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -22,6 +23,7 @@ import {HederaChain} from './chains/HederaChain';
 import {CardanoChain} from './chains/CardanoChain';
 import {FilecoinChain} from './chains/FilecoinChain';
 import {BitcoinLightningChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinLightningChain';
+import {APP_VERSION} from 'utils/common';
 
 const chains = {
   tron: TronChain,
@@ -69,21 +71,17 @@ export const getChain = (chain, phrase, customRpcUrl) => {
   return chains[chain]?.(chain, phrase, customRpcUrl);
 };
 
-export const getCoin = async (
-  phrase,
-  coin,
-  transactionFee,
-  walletData,
-  customRpcUrl,
-) => {
+const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
   const chainName = coin?.chain_name;
-  const chainNameForNative = validateSupportedChain(coin?.chain_name);
+
+  const chainNameForNative = validateSupportedChain(chainName);
   if (!chainNameForNative) {
-    console.error('chain not supported');
-    return null;
+    return {wallet: null, chain: null};
   }
-  let wallet;
+  let wallet = null;
   const chain = getChain(chainName, phrase, customRpcUrl);
+  const chain_existing_coin =
+    walletData?.chain_existing_coin?.[chainNameForNative];
   if (isAddressOrPrivateKeyExists(coin)) {
     wallet = {
       privateKey: coin?.privateKey,
@@ -92,24 +90,26 @@ export const getCoin = async (
       extendedPublicKey: coin?.extendedPublicKey,
       extendedPrivateKey: coin?.extendedPrivateKey,
     };
+  } else if (
+    chain_existing_coin &&
+    !(isBitcoinChain(chainName) && APP_VERSION !== coin.appVersion)
+  ) {
+    wallet = {
+      privateKey: chain_existing_coin.privateKey,
+      address: chain_existing_coin.address,
+      publicKey: chain_existing_coin.publicKey,
+      extendedPublicKey: chain_existing_coin.extendedPublicKey,
+      extendedPrivateKey: chain_existing_coin.extendedPrivateKey,
+    };
   } else if (phrase && chainName === 'bitcoin_lightning') {
-    const lightningChain = BitcoinLightningChain(chainName, phrase);
-
-    wallet = await lightningChain.generateSparkAddress();
-  }
-  // else if (phrase && chainName === 'bitcoin_taproot') {
-  //   wallet = await BitcoinChain().createBitcoinTaprootWallet({
-  //     mnemonic: phrase,
-  //   });
-  // }
-  else if (phrase && chainName === 'stellar') {
-    wallet = StellarChain().createStellarWallet({
-      mnemonic: phrase,
-    });
+    wallet = await BitcoinLightningChain(
+      chainName,
+      phrase,
+    ).generateSparkAddress();
+  } else if (phrase && chainName === 'stellar') {
+    wallet = StellarChain().createStellarWallet({mnemonic: phrase});
   } else if (phrase && chainName === 'hedera') {
-    wallet = await HederaChain().getOrCreateHederaWallet({
-      mnemonic: phrase,
-    });
+    wallet = await HederaChain().getOrCreateHederaWallet({mnemonic: phrase});
   } else if (phrase) {
     wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
     wallet.isNew = true;
@@ -123,9 +123,30 @@ export const getCoin = async (
       privateKey: walletData?.privateKey,
       address: walletData?.address,
     };
-  } else {
+  }
+  return {wallet, chain};
+};
+
+export const getCoin = async (
+  phrase,
+  coin,
+  transactionFee,
+  walletData,
+  customRpcUrl,
+) => {
+  const {wallet, chain} = await resolveWallet({
+    phrase,
+    coin,
+    walletData,
+    customRpcUrl,
+  });
+  if (!chain) {
+    throw new Error('chain not found');
+  }
+  if (!wallet) {
     throw new Error('getCoin condition not found');
   }
+
   if (coin?.type === 'token' && coin.contractAddress) {
     return await getTokenCoin(chain, wallet, coin, transactionFee);
   } else {
@@ -568,6 +589,27 @@ const hashObject = {
   sei: 'hash',
   cardano: '',
   filecoin: '',
+};
+
+export const createWalletForChain = async (
+  phrase,
+  coin,
+  walletData,
+  customRpcUrl,
+) => {
+  const {wallet, chain} = await resolveWallet({
+    phrase,
+    coin,
+    walletData,
+    customRpcUrl,
+  });
+  if (!chain) {
+    throw new Error('chain not found');
+  }
+  if (!wallet) {
+    throw new Error('getCoin condition not found');
+  }
+  return {wallet, chain};
 };
 
 export const getHashString = (data, type) => {

@@ -71,6 +71,42 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     });
   }
 
+  async function revokeAuthorization(walletSigner, evmProvider) {
+    try {
+      const currentNonce = await evmProvider.getTransactionCount(
+        walletSigner.address,
+      );
+      const revokeAuth = await walletSigner.authorize({
+        address: ethers.ZeroAddress,
+        nonce: currentNonce + 1,
+      });
+      const feeData = await evmProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const revokeTx = {
+        type: 4,
+        from: walletSigner.address,
+        to: walletSigner.address,
+        value: 0n,
+        data: '0x',
+        nonce: currentNonce,
+        authorizationList: [revokeAuth],
+        maxFeePerGas: gasPrice,
+        maxPriorityFeePerGas: gasPrice,
+        gasLimit: 50000n,
+      };
+      if (isEip1559NotSupported(chain_name)) {
+        delete revokeTx.type;
+        delete revokeTx.maxFeePerGas;
+        delete revokeTx.maxPriorityFeePerGas;
+        revokeTx.gasPrice = gasPrice;
+      }
+      const txResponse = await walletSigner.sendTransaction(revokeTx);
+      console.log('Authorization revoked, tx hash:', txResponse.hash);
+    } catch (e) {
+      console.error('Failed to revoke authorization:', e);
+    }
+  }
+
   function validatePriorityFee(maxPriorityFeePerGas, finalGasPrice) {
     if (!maxPriorityFeePerGas || !finalGasPrice) {
       return maxPriorityFeePerGas;
@@ -571,7 +607,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       ).getNonce({
         address: fromAddress,
       });
-    } else if (existingNonce) {
+    } else if (existingNonce != null) {
       currentNonce = existingNonce;
     }
     if (isLayer2Chain(chain_name) && !ignoreLayer2) {
@@ -697,7 +733,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           // Create authorization with incremented nonce for same-wallet transactions
           const auth = await createAuthorization(
             walletSigner,
-            currentNonce + 1,
+            Number(currentNonce) + 1,
             BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
           );
           const options = {
@@ -1373,7 +1409,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           // Create authorization for gas estimation consistency
           const tempAuth = await createAuthorization(
             walletSigner,
-            nonce + 1,
+            Number(nonce) + 1,
             BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
           );
           const tempOptions = {
@@ -1395,7 +1431,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         // Create authorization with incremented nonce for same-wallet transactions
         const auth = await createAuthorization(
           walletSigner,
-          nonce + 1,
+          Number(nonce) + 1,
           BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
         );
         const options = {

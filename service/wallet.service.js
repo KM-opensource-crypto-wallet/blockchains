@@ -149,7 +149,6 @@ export const getCoinSnapshot = async (
       ...coinDef,
       appVersion: APP_VERSION,
       privateKey: nativeCoin.privateKey,
-      phrase: nativeCoin.phrase,
       address: nativeCoin.address,
       publicKey: nativeCoin?.publicKey,
       extendedPublicKey: nativeCoin?.extendedPublicKey,
@@ -172,8 +171,6 @@ export const getCoinSnapshot = async (
       transactions: finalTransactions,
       staking: finalStaking,
       stakingInfo,
-      energyBalance: parseBalance(energyBalance, coinDef?.decimal),
-      bandwidthBalance: parseBalance(bandwidthBalance, coinDef?.decimal),
     };
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;
@@ -181,6 +178,15 @@ export const getCoinSnapshot = async (
     }
     if (listOfUnClaimedDeposits !== undefined) {
       newCoin.listOfUnClaimedDeposits = listOfUnClaimedDeposits;
+    }
+    if (energyBalance !== undefined) {
+      newCoin.energyBalance = parseBalance(energyBalance, coinDef?.decimal);
+    }
+    if (bandwidthBalance !== undefined) {
+      newCoin.bandwidthBalance = parseBalance(
+        bandwidthBalance,
+        coinDef?.decimal,
+      );
     }
     return newCoin;
   } catch (err) {
