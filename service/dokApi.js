@@ -411,6 +411,49 @@ export const getIPAddress = async () => {
   }
 };
 
+export const createSubscription = async payload => {
+  try {
+    const resp = await DokApi.post('/notification-subscriptions', payload);
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in createSubscription', JSON.stringify(e));
+    throw e;
+  }
+};
+
+export const updateSubscription = async (id, payload) => {
+  try {
+    const resp = await DokApi.patch(
+      `/notification-subscriptions/${id}`,
+      payload,
+    );
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in updateSubscription', JSON.stringify(e));
+    throw e;
+  }
+};
+
+export const deleteSubscription = async id => {
+  try {
+    const resp = await DokApi.delete(`/notification-subscriptions/${id}`);
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in deleteSubscription', JSON.stringify(e));
+    throw e;
+  }
+};
+
+export const getSubscriptionsByUser = async userId => {
+  try {
+    const resp = await DokApi.get(`/notification-subscriptions/${userId}`);
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in getSubscriptionsByUser', JSON.stringify(e));
+    throw e;
+  }
+};
+
 export const getAllBlockchairAPI = async payload => {
   try {
     const resp = await DokApi.post('/get-all-blockchair-api', payload, {

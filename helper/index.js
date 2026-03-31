@@ -1512,3 +1512,13 @@ export const formatBalance = value => {
   }
   return num.toFixed(2);
 };
+
+export const toDirection = (notifyOnReceive, notifyOnSend) => {
+  if (notifyOnReceive && notifyOnSend) {
+    return 'both';
+  }
+  if (notifyOnReceive) {
+    return 'in';
+  }
+  return 'out';
+};
