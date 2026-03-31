@@ -67,7 +67,6 @@ export const TronChain = () => {
     const providers = buildTronProviders();
     for (let i = 0; i < providers.length; i++) {
       try {
-        console.log('proivdeere', providers[i]);
         const tronWeb = new TronWeb(providers[i]);
         return await cb(tronWeb);
       } catch (e) {
