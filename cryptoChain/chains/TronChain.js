@@ -41,10 +41,16 @@ export const TronChain = () => {
     const apiKey1 = getRPCUrl('tron_api_key');
     const apiKey2 = getRPCUrl('tron_api_key_2');
     if (apiKey1) {
-      providers.push({...tronGridOptions, 'TRON-PRO-API-KEY': apiKey1});
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey1},
+      });
     }
     if (apiKey2) {
-      providers.push({...tronGridOptions, 'TRON-PRO-API-KEY': apiKey2});
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey2},
+      });
     }
 
     return providers;
