@@ -343,6 +343,8 @@ export const BitcoinChain = () => {
             to: response?.to,
             fee: response?.fee,
             totalCourse: '0',
+            blockNumber: response?.blockNumber || null,
+            confirmations: response?.confirmations ?? null,
           },
         };
       } catch (e) {

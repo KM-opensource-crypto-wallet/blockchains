@@ -183,6 +183,8 @@ export const CosmosChain = () => {
               // from: sender,
               // to: recipient,
               totalCourse: '0$',
+              blockNumber: transaction?.data?.blockNumber ?? null,
+              confirmations: transaction?.data?.confirmations ?? null,
             },
           };
         }

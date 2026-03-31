@@ -95,6 +95,8 @@ export const ThorChain = () => {
               from: transaction?.from,
               to: transaction?.to,
               totalCourse: '0$',
+              blockNumber: transaction.blockNumber,
+              confirmations: transaction.confirmations,
             },
           };
         }

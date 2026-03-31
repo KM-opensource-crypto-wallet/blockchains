@@ -1082,22 +1082,21 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           return null;
         }
         let blockTimestamp = null;
+        let confirmations = null;
         if (receipt?.blockNumber) {
           try {
-            const fetchRequest = new FetchRequest(allRpcUrls[0]);
-            fetchRequest.timeout = TIMEOUT;
-            const provider = new JsonRpcProvider(fetchRequest, chainId, {
-              staticNetwork: true,
-            });
-            const block = await provider.getBlock(receipt.blockNumber);
+            const [block, conf] = await Promise.all([
+              receipt.getBlock(),
+              receipt.confirmations(),
+            ]);
             blockTimestamp = block?.timestamp
               ? `0x${block.timestamp.toString(16)}`
               : null;
+            confirmations = parseInt(conf, 16);
           } catch (e) {
-            console.warn('Could not fetch block timestamp', e);
+            console.warn('Could not fetch block info', e);
           }
         }
-
         return {
           data: {
             link: tx.hash,
@@ -1105,9 +1104,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             to: tx.to,
             amount: tx.value.toString(),
             blockNumber: tx.blockNumber
-              ? `0x${tx.blockNumber.toString(16)}`
+              ? parseInt(String(tx.blockNumber), 10)
               : null,
             blockTimestamp,
+            confirmations,
             gasPrice: tx.gasPrice ? `0x${tx.gasPrice.toString(16)}` : null,
             gasUsed: receipt?.gasUsed
               ? `0x${receipt.gasUsed.toString(16)}`

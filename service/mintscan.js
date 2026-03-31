@@ -19,7 +19,15 @@ export const CosmosScan = {
   getTransaction: async ({txHash}) => {
     try {
       const resp = await COSMOS_API.get(`/v1/search/transactions/${txHash}`);
-      return {status: resp?.status, data: resp?.data?.[0]};
+      const item = resp?.data?.[0];
+      return {
+        status: resp?.status,
+        data: {
+          ...item,
+          blockNumber: item?.height ?? null,
+          confirmations: item?.confirmations ?? null,
+        },
+      };
     } catch (e) {
       console.error('Error in CosmosScan getTransaction', e);
     }

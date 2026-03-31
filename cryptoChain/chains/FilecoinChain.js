@@ -172,6 +172,8 @@ export const FilecoinChain = chain_name => {
                 : new Date(),
               from: finalTransaction?.from,
               to: finalTransaction?.to,
+              blockNumber: finalTransaction?.blockNumber ?? null,
+              confirmations: finalTransaction?.confirmations ?? null,
             },
           };
         }

@@ -156,6 +156,8 @@ export const DogecoinOrLitecoinChain = chain_name => {
             from: response?.from,
             to: response?.to,
             totalCourse: '0$',
+            blockNumber: response?.blockNumber ?? null,
+            confirmations: response?.confirmations ?? null,
           },
         };
       } catch (e) {

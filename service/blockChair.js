@@ -78,6 +78,8 @@ const parseBlockchainTransactions = (txs, walletAddresses) => {
         fee: fee.toString(),
         from: isOutgoing ? senderAddress : inputs[0]?.recipient,
         to: isOutgoing ? primaryRecipient : internalOutputs[0]?.recipient,
+        blockNumber: tx.transaction?.block_id || null,
+        confirmations: tx.transaction?.confirmations ?? null,
       };
     })
     .sort(

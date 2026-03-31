@@ -97,11 +97,11 @@ export const TezosChain = () => {
     getTransaction: async ({txHash}) => {
       try {
         const transaction = await Tzkt.getTezosTransaction(txHash);
-        const finalTransaction = transaction.data[0];
+        const finalTransaction = transaction?.data?.[0];
         if (finalTransaction) {
           return {
             data: {
-              amount: finalTransaction.amount.toString() || '0',
+              amount: finalTransaction?.amount?.toString() || '0',
               link: txHash,
               url: `${config.TEZOS_SCAN_URL}/${txHash}`,
               status:

@@ -47,13 +47,20 @@ export const ThorChainService = {
   },
   getThorTransaction: async txHash => {
     try {
-      const resp = await axios.get(
-        `https://midgard.ninerealms.com/v2/actions?txid=${txHash}`,
-      );
+      const [resp, latestBlockResp] = await Promise.all([
+        axios.get(`https://midgard.ninerealms.com/v2/actions?txid=${txHash}`),
+        axios.get('https://thornode.ninerealms.com/thorchain/lastblock'),
+      ]);
       const item = resp?.data?.actions?.[0];
       if (!item) {
         return null;
       }
+      const blockNumber = item?.height ?? null;
+      const latestBlock = latestBlockResp?.data?.[0]?.thorchain ?? null;
+      const confirmations =
+        blockNumber !== null && latestBlock !== null
+          ? latestBlock - blockNumber
+          : null;
       return {
         txhash: item?.in?.[0]?.txID,
         from: item?.in?.[0]?.address,
@@ -63,6 +70,8 @@ export const ThorChainService = {
         )?.amount,
         timestamp: item?.date?.slice(0, -6),
         status: item?.status?.toUpperCase(),
+        blockNumber,
+        confirmations,
       };
     } catch (e) {
       console.error('Error in getThortransaction', e);

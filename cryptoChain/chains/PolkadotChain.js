@@ -122,11 +122,25 @@ export const PolkadotChain = () => {
     },
     getTransaction: async ({txHash}) => {
       try {
-        const transaction = await PolkadotScan.getTransaction(txHash);
+        const [transaction, provider] = await Promise.all([
+          PolkadotScan.getTransaction(txHash),
+          createOrGetPolkadotProvider(),
+        ]);
         if (transaction) {
           const finalTransaction = transaction?.data?.transfer;
           const extrinsic_index = transaction?.data?.extrinsic_index;
           const block_timestamp = transaction?.data?.block_timestamp;
+          const blockNumber = transaction?.data?.block_num ?? null;
+          let confirmations = null;
+          if (blockNumber !== null && provider) {
+            try {
+              const lastHeader = await provider.rpc.chain.getHeader();
+              const latestBlockNumber = lastHeader.number.toNumber();
+              confirmations = latestBlockNumber - blockNumber;
+            } catch (e) {
+              console.warn('Could not fetch latest block for confirmations', e);
+            }
+          }
           return {
             data: {
               amount: finalTransaction?.amount || '',
@@ -137,6 +151,8 @@ export const PolkadotChain = () => {
               from: finalTransaction?.from,
               to: finalTransaction?.to,
               totalCourse: '0$',
+              blockNumber,
+              confirmations,
             },
           };
         }
