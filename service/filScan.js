@@ -27,7 +27,7 @@ export const FilScan = {
       }
       return [];
     } catch (e) {
-      console.error('Error in getTransaction for filScan', e);
+      console.error('Error in getTransactions for filScan', e);
       return [];
     }
   },
@@ -59,10 +59,10 @@ export const FilScan = {
           },
         };
       }
-      return [];
+      return {data: null};
     } catch (e) {
       console.error('Error in getTransactions for filScan', e);
-      return [];
+      return {data: null};
     }
   },
   getTransactionFees: async () => {

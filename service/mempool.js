@@ -211,7 +211,12 @@ export const Mempool = {
           : [address]
         : [];
       const [parsed] = parseReadableTransactions([tx], finalAddresses);
-      const tipHeight = tipResp?.data ? parseInt(String(tipResp.data), 10) : null;
+      const parsedTipHeight = tipResp?.data
+        ? parseInt(String(tipResp.data), 10)
+        : null;
+      const tipHeight = Number.isFinite(parsedTipHeight)
+        ? parsedTipHeight
+        : null;
       const confirmations =
         tipHeight !== null && parsed.blockNumber !== null
           ? tipHeight - parsed.blockNumber
