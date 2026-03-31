@@ -71,6 +71,7 @@ const parseReadableTransactions = (txs, walletAddresses) => {
         to: isOutgoing
           ? primaryRecipient
           : internalOutputs[0]?.scriptpubkey_address,
+        blockNumber: tx.status?.block_height || null,
       };
     })
     .sort(
@@ -198,7 +199,10 @@ export const Mempool = {
   },
   getTransaction: async ({transactionId, chain, address, derive_addresses}) => {
     try {
-      const resp = await APIProvider[chain].get(`/tx/${transactionId}`);
+      const [resp, tipResp] = await Promise.all([
+        APIProvider[chain].get(`/tx/${transactionId}`),
+        APIProvider[chain].get('/blocks/tip/height').catch(() => null),
+      ]);
       const tx = resp?.data;
       if (!tx) return null;
       const finalAddresses = address
@@ -207,7 +211,12 @@ export const Mempool = {
           : [address]
         : [];
       const [parsed] = parseReadableTransactions([tx], finalAddresses);
-      return parsed;
+      const tipHeight = tipResp?.data ? parseInt(String(tipResp.data), 10) : null;
+      const confirmations =
+        tipHeight !== null && parsed.blockNumber !== null
+          ? tipHeight - parsed.blockNumber
+          : null;
+      return {...parsed, confirmations};
     } catch (e) {
       console.error(`Error in ${chain} for get transaction`, e?.response?.data);
       throw e;

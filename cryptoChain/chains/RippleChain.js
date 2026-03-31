@@ -105,13 +105,22 @@ export const RippleChain = () => {
     getTransaction: async ({txHash}) => {
       try {
         await rippleProvider.connect();
-        const data = await rippleProvider.request({
-          command: 'tx',
-          transaction: txHash,
-          binary: false,
-        });
+        const [data, ledgerData] = await Promise.all([
+          rippleProvider.request({
+            command: 'tx',
+            transaction: txHash,
+            binary: false,
+          }),
+          rippleProvider.request({command: 'ledger_current'}).catch(() => null),
+        ]);
         const tx = data?.result;
         const bnValue = BigInt(tx?.tx_json?.DeliverMax || 0);
+        const blockNumber = tx?.ledger_index ?? null;
+        const currentLedger = ledgerData?.result?.ledger_current_index ?? null;
+        const confirmations =
+          blockNumber !== null && currentLedger !== null
+            ? currentLedger - blockNumber
+            : null;
         return {
           data: {
             amount: bnValue?.toString(),
@@ -122,6 +131,8 @@ export const RippleChain = () => {
             from: tx?.tx_json?.Account,
             to: tx?.tx_json?.Destination,
             totalCourse: '0$',
+            blockNumber,
+            confirmations,
           },
         };
       } catch (e) {

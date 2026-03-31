@@ -148,10 +148,15 @@ export const StellarChain = () => {
     },
     getTransaction: async ({txHash}) => {
       try {
-        const item = await stellarProvider
-          .transactions()
-          .transaction(txHash)
-          .call();
+        const [item, latestLedgerResp] = await Promise.all([
+          stellarProvider.transactions().transaction(txHash).call(),
+          stellarProvider
+            .ledgers()
+            .order('desc')
+            .limit(1)
+            .call()
+            .catch(() => null),
+        ]);
         const operations = await stellarProvider
           .operations()
           .forTransaction(item.id)
@@ -164,6 +169,12 @@ export const StellarChain = () => {
         const receiver = foundOperation?.to || foundOperation?.account;
         const amount =
           foundOperation?.amount || foundOperation?.starting_balance || '0';
+        const blockNumber = item?.ledger_attr ?? null;
+        const latestLedger = latestLedgerResp?.records?.[0]?.sequence ?? null;
+        const confirmations =
+          blockNumber !== null && latestLedger !== null
+            ? latestLedger - blockNumber
+            : null;
         return {
           data: {
             amount: new BigNumber(amount)
@@ -176,6 +187,8 @@ export const StellarChain = () => {
             from: sender,
             to: receiver,
             totalCourse: '0$',
+            blockNumber,
+            confirmations,
           },
         };
       } catch (e) {

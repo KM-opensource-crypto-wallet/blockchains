@@ -237,6 +237,22 @@ export const AptosChain = () => {
         if (!amount) {
           return null;
         }
+        let confirmations = null;
+        const txVersion = item?.version
+          ? parseInt(String(item.version), 10)
+          : null;
+        if (txVersion !== null) {
+          try {
+            const ledgerInfo = await aptosProvider.getLedgerInfo();
+            const currentVersion = parseInt(
+              String(ledgerInfo?.ledger_version),
+              10,
+            );
+            confirmations = currentVersion - txVersion;
+          } catch (e) {
+            console.warn('Could not fetch ledger info for confirmations', e);
+          }
+        }
         return {
           data: {
             amount: amount?.toString(),
@@ -249,6 +265,8 @@ export const AptosChain = () => {
             from: item?.sender,
             to: toAddress,
             totalCourse: '0$',
+            blockNumber: txVersion,
+            confirmations,
           },
         };
       } catch (e) {

@@ -227,6 +227,8 @@ export const HederaChain = () => {
               from: finalTransaction?.transfers[1].account,
               to: finalTransaction?.transfers[2].account,
               totalCourse: '0$',
+              blockNumber: finalTransaction?.blockNumber ?? null,
+              confirmations: finalTransaction?.confirmations ?? null,
             },
           };
         }

@@ -603,10 +603,13 @@ export const SolanaChain = () => {
     getTransaction: async ({txHash}) =>
       retryFunc(async solanaProvider => {
         try {
-          if (!txHash) return;
-          const item = await solanaProvider.getParsedTransaction(txHash, {
-            maxSupportedTransactionVersion: 0,
-          });
+          if (!txHash) return null;
+          const [item, currentSlot] = await Promise.all([
+            solanaProvider.getParsedTransaction(txHash, {
+              maxSupportedTransactionVersion: 0,
+            }),
+            solanaProvider.getSlot().catch(() => null),
+          ]);
           if (!item) return null;
           const transactionDetails =
             item?.transaction?.message?.instructions?.find(
@@ -614,6 +617,11 @@ export const SolanaChain = () => {
             )?.parsed?.info;
           if (!transactionDetails?.lamports?.toString()) return null;
           const bnValue = transactionDetails?.lamports?.toString() || 0;
+          const blockNumber = item?.slot ?? null;
+          const confirmations =
+            blockNumber !== null && currentSlot !== null
+              ? currentSlot - blockNumber
+              : null;
           return {
             data: {
               amount: bnValue?.toString(),
@@ -626,6 +634,8 @@ export const SolanaChain = () => {
               from: transactionDetails?.source,
               to: transactionDetails?.destination,
               totalCourse: '0',
+              blockNumber,
+              confirmations,
             },
           };
         } catch (e) {

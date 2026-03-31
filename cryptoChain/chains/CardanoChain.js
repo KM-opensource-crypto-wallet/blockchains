@@ -107,6 +107,8 @@ export const CardanoChain = () => {
               from: transaction?.from,
               to: transaction?.to,
               totalCourse: '0$',
+              blockNumber: transaction?.blockNumber ?? null,
+              confirmations: transaction?.confirmations ?? null,
             },
           };
         }

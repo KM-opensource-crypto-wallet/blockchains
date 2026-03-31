@@ -27,4 +27,13 @@ export const TonScan = {
       console.error('Error in getTransactionByHash for ton', e);
     }
   },
+  getMasterchainInfo: async () => {
+    try {
+      const resp = await TonScanAPI.get('/api/v3/masterchainInfo');
+      return resp?.data?.last?.seqno ?? null;
+    } catch (e) {
+      console.error('Error in getMasterchainInfo for ton', e);
+      return null;
+    }
+  },
 };

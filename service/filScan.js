@@ -27,18 +27,25 @@ export const FilScan = {
       }
       return [];
     } catch (e) {
-      console.error('Error in getTransactions for filScan', e);
+      console.error('Error in getTransaction for filScan', e);
       return [];
     }
   },
   getTransaction: async ({txHash}) => {
     try {
-      const res = await FilScanApi.post('/MessageDetails', {
-        message_cid: txHash,
-      });
+      const [res, tipRes] = await Promise.all([
+        FilScanApi.post('/MessageDetails', {message_cid: txHash}),
+        FilScanApi.post('/FinalHeight', {}).catch(() => null),
+      ]);
       if (res?.data?.result?.MessageDetails) {
-        const {block_time, exit_code, from, to, value} =
+        const {block_time, exit_code, from, to, value, height} =
           res.data.result.MessageDetails.message_basic;
+        const blockNumber = height ?? null;
+        const tipHeight = tipRes?.data?.result?.final_height ?? null;
+        const confirmations =
+          tipHeight !== null && blockNumber !== null
+            ? tipHeight - blockNumber
+            : null;
         return {
           data: {
             txHash: txHash,
@@ -47,6 +54,8 @@ export const FilScan = {
             amount: value,
             status: exit_code === 'Ok',
             timestamp: block_time * 1000,
+            blockNumber,
+            confirmations,
           },
         };
       }

@@ -48,6 +48,8 @@ export const CardanoChainService = {
         from: item?.ctsInputs?.[0]?.ctaAddress,
         amount: item?.ctsOutputs?.[0]?.ctaAmount?.getCoin?.toString(),
         fees: item?.ctsFees,
+        blockNumber: item?.ctsBlockHeight ?? null,
+        confirmations: item?.ctsConfirmations ?? null,
       };
     } catch (e) {
       console.error('Error in getCardanoTransactionByHash', e);
