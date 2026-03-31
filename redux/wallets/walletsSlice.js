@@ -1092,6 +1092,16 @@ export const sendFunds = createAsyncThunk(
                 : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
             }`,
             toastId,
+            props: {
+              onViewTransaction: () => {
+                MainNavigation.navigate({
+                  name: 'TransactionDetails',
+                  params: {
+                    transaction: {...pendingTransaction, status: 'SUCCESS'},
+                  },
+                });
+              },
+            },
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
