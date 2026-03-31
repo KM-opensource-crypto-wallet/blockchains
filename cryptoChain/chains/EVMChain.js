@@ -16,6 +16,7 @@ import erc1155Abi from 'dok-wallet-blockchain-networks/abis/erc1155.json';
 import {EvmServices} from 'dok-wallet-blockchain-networks/service/evmServices';
 import {
   getFreeRPCUrl,
+  getPremiumRPCUrl,
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
@@ -27,6 +28,7 @@ import {
   isLayer2Chain,
   isValidEVMTransactionHash,
   parseBalance,
+  safelyJsonParse,
   sleep,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -54,10 +56,13 @@ const ADDITIONAL_ESTIMATE_GAS = {
 };
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
-  let allRpcUrls = customRpcUrl ? [customRpcUrl] : getFreeRPCUrl(chain_name);
+  const premiumRpcUrls = customRpcUrl ? [] : getPremiumRPCUrl(chain_name);
+  const freeRpcUrls = customRpcUrl ? [] : getFreeRPCUrl(chain_name);
+  let allRpcUrls = customRpcUrl
+    ? [customRpcUrl]
+    : [...premiumRpcUrls, ...freeRpcUrls];
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
-  console.log('All rpcs', allRpcUrls);
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
@@ -392,8 +397,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }
   };
 
-  const createSendTransactionsPromises = (finalWallet, tx) => {
-    return allRpcUrls.map(async rpcUrl => {
+  const createSendTransactionsPromises = (finalWallet, tx, rpcUrls) => {
+    return rpcUrls.map(async rpcUrl => {
       try {
         const fetchRequest = new FetchRequest(rpcUrl);
         fetchRequest.timeout = TIMEOUT;
@@ -432,32 +437,57 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   };
 
   const createSendTransaction = async (wallet, tx) => {
-    let allResp = await Promise.allSettled(
-      createSendTransactionsPromises(wallet, tx),
+    const extractResult = allResp => {
+      const submittedTxs = [];
+      for (const item of allResp) {
+        const txData = item?.value?.resp;
+        if (txData?.hash) {
+          return {result: txData};
+        }
+        if (
+          txData &&
+          typeof txData === 'string' &&
+          !submittedTxs.includes(txData)
+        ) {
+          submittedTxs.push(txData);
+        }
+      }
+      if (submittedTxs.length > 0) {
+        return {result: submittedTxs};
+      }
+      return null;
+    };
+
+    // Phase 1: Try premium RPCs first (skipped when customRpcUrl is set)
+    if (!customRpcUrl && premiumRpcUrls.length > 0) {
+      const premiumResp = await Promise.allSettled(
+        createSendTransactionsPromises(wallet, tx, premiumRpcUrls),
+      );
+      const premiumResult = extractResult(premiumResp);
+      if (premiumResult) {
+        return premiumResult.result;
+      }
+      // All premium RPCs failed — fall through to free RPCs
+    }
+
+    // Phase 2: Free RPCs (or sole customRpcUrl)
+    const fallbackUrls = customRpcUrl ? [customRpcUrl] : freeRpcUrls;
+    const allResp = await Promise.allSettled(
+      createSendTransactionsPromises(wallet, tx, fallbackUrls),
     );
-    const submittedTxs = [];
-    for (let i = 0; i < allResp.length; i++) {
-      const txData = allResp[i]?.value.resp;
-      const error = allResp[i]?.value.error;
-      if (txData?.hash) {
-        return txData;
-      }
-      if (
-        txData &&
-        typeof txData === 'string' &&
-        !submittedTxs.includes(txData)
-      ) {
-        submittedTxs.push(txData);
-      }
-      if (submittedTxs.length && i === allResp.length - 1) {
-        return submittedTxs;
-      }
-      if (i === allResp.length - 1 && error) {
+    const freeResult = extractResult(allResp);
+    if (freeResult) {
+      return freeResult.result;
+    }
+
+    // All RPCs failed — throw first error found
+    for (const item of allResp) {
+      if (item?.value?.error) {
         console.error(
           '[EVM] All RPC endpoints failed, throwing error:',
-          error.message,
+          item.value.error.message,
         );
-        throw error;
+        throw item.value.error;
       }
     }
   };
