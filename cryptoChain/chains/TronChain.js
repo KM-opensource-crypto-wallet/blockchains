@@ -1,5 +1,8 @@
 import {TronWeb} from 'tronweb';
-import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  getPremiumRPCUrl,
+  getRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {convertToSmallAmount} from 'dok-wallet-blockchain-networks/helper';
 import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
@@ -17,15 +20,43 @@ const removeSubstringFromPrivateKey = privateKey => {
 };
 
 export const TronChain = () => {
-  const TRON_API_KEYS = [null];
-  if (getRPCUrl('tron_api_key')) {
-    TRON_API_KEYS.push(getRPCUrl('tron_api_key'));
-  }
-  if (getRPCUrl('tron_api_key_2')) {
-    TRON_API_KEYS.push(getRPCUrl('tron_api_key_2'));
-  }
-  let defaultTronWeb = null;
+  // Build ordered provider list: premium RPCs first, then trongrid with API keys as fallback.
+  // Each entry is a TronWeb options object.
+  const buildTronProviders = () => {
+    const providers = [];
 
+    // Premium providers (QuickNode, Alchemy, etc.) — each URL is a standalone fullHost
+    const premiumUrls = getPremiumRPCUrl('tron');
+    for (const url of premiumUrls) {
+      providers.push({fullHost: url});
+    }
+
+    // Trongrid fallback — retry with no key, then each API key in turn
+    const tronGridOptions = {
+      fullHost: getRPCUrl('tron_full_host'),
+      solidityNode: getRPCUrl('tron_solidity_node'),
+      eventServer: getRPCUrl('tron_event_server'),
+    };
+    providers.push({...tronGridOptions}); // no API key
+    const apiKey1 = getRPCUrl('tron_api_key');
+    const apiKey2 = getRPCUrl('tron_api_key_2');
+    if (apiKey1) {
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey1},
+      });
+    }
+    if (apiKey2) {
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey2},
+      });
+    }
+
+    return providers;
+  };
+
+  let defaultTronWeb = null;
   try {
     const options = {
       fullHost: getRPCUrl('tron_full_host'),
@@ -39,22 +70,20 @@ export const TronChain = () => {
   }
 
   const retryFunc = async (cb, defaultResponse) => {
-    for (let i = 0; i < TRON_API_KEYS.length; i++) {
+    const providers = buildTronProviders();
+    for (let i = 0; i < providers.length; i++) {
       try {
-        const options = {
-          fullHost: getRPCUrl('tron_full_host'),
-          solidityNode: getRPCUrl('tron_solidity_node'),
-          eventServer: getRPCUrl('tron_event_server'),
-        };
-        const apiKey = TRON_API_KEYS[i];
-        if (apiKey) {
-          options['TRON-PRO-API-KEY'] = apiKey;
-        }
-        const tronWeb = new TronWeb(options);
+        const tronWeb = new TronWeb(providers[i]);
         return await cb(tronWeb);
       } catch (e) {
-        console.error('Error for tron ', i, 'Errors:', e);
-        if (i === TRON_API_KEYS.length - 1) {
+        console.error(
+          'Error for tron provider',
+          i,
+          providers[i].fullHost,
+          'Errors:',
+          e,
+        );
+        if (i === providers.length - 1) {
           if (defaultResponse) {
             return defaultResponse;
           } else {

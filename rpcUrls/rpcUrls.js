@@ -1,5 +1,8 @@
 import {fetchRpcUrls} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
+import {
+  isValidObject,
+  safelyJsonParse,
+} from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import dayjs from 'dayjs';
 
@@ -287,4 +290,23 @@ export const getFreeRPCUrl = chain_name => {
   return Array.isArray(currentFreeUrls) && currentFreeUrls?.length
     ? currentFreeUrls
     : [rpcUrls?.url[chain_name]];
+};
+
+export const getPremiumRPCUrl = chain_name => {
+  try {
+    const raw = process.env.PREMIUM_RPC_URLS;
+    if (!raw) {
+      return [];
+    }
+    const parsed = safelyJsonParse(raw);
+    const chainEntry = parsed?.[chain_name];
+    if (!chainEntry) {
+      return [];
+    }
+    const network = IS_SANDBOX ? 'testnet' : 'mainnet';
+    const urls = chainEntry[network];
+    return Array.isArray(urls) && urls.length > 0 ? urls : [];
+  } catch {
+    return [];
+  }
 };
