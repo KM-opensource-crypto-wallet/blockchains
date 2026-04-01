@@ -582,7 +582,7 @@ const hashObject = {
   gnosis: 'hash',
   viction: 'hash',
   // ! polkadot: 'hash',
-  // ! ton: 'hash',
+  ton: 'hash',
   dogecoin: '',
   aptos: '',
   linea: 'hash',

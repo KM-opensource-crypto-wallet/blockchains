@@ -264,10 +264,14 @@ export const TonChain = () => {
         }
         const item = transactions[0];
         let date, to, from, amount;
-        from = Address.parse(item?.in_msg?.source)?.toString();
+        from = item?.in_msg?.source
+          ? Address.parse(item?.in_msg?.source)?.toString()
+          : undefined;
         if (from) {
           date = new Date(item?.now * 1000);
-          to = Address.parse(item?.in_msg?.destination).toString();
+          to = item?.in_msg?.destination
+            ? Address.parse(item?.in_msg?.destination)?.toString()
+            : undefined;
           amount = item?.in_msg?.value || '0';
         } else {
           const outMsg = item?.out_msgs?.[0];
@@ -363,6 +367,7 @@ export const TonChain = () => {
             }),
           ],
         });
+
         await walletContract.send(transfer);
         return {seqno, walletContract};
       } catch (e) {

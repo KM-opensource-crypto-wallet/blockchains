@@ -1032,6 +1032,7 @@ export const sendFunds = createAsyncThunk(
           url: `${
             SCAN_URL[getScanUrlName(currentCoin?.chain_name)]
           }/tx/${tx_hash}`,
+          currentCoin: currentCoin,
         };
         toastId = showToast({
           type: 'progressToast',
@@ -1076,12 +1077,16 @@ export const sendFunds = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
-        } else if (confirmTransaction && !txData?.isExchange) {
+        } else if (confirmTransaction) {
           showToast({
             type: 'successToast',
-            title: 'Transaction Successful',
+            title: txData?.isExchange
+              ? 'Exchange Successful'
+              : 'Transaction Successful',
             message: `Your transaction completed successfully.${
-              txData?.isBatchTransaction
+              txData?.isExchange
+                ? ` You just exchanged: ${txData?.amount} ${txData?.currentCoin?.symbol}`
+                : txData?.isBatchTransaction
                 ? 'Batch transactions are completed successfully.'
                 : txData?.isCreateStaking
                 ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
@@ -1226,12 +1231,33 @@ export const sendPendingTransactions = createAsyncThunk(
           ? thunkAPI.dispatch(setUpdateTransactionSubmitting(false))
           : thunkAPI.dispatch(setPendingTransferSubmitting(false));
 
+        const tx_hash = getHashString(res, currentCoin?.chain_name);
+        const pendingTransaction = {
+          to: payload?.to,
+          from: payload?.from || currentCoin?.address,
+          status: 'PENDING',
+          date: new Date().toISOString(),
+          link: tx_hash,
+          url: `${
+            SCAN_URL[getScanUrlName(currentCoin?.chain_name)]
+          }/tx/${tx_hash}`,
+          currentCoin: currentCoin,
+        };
+
         toastId = showToast({
           type: 'progressToast',
           title: 'Updated Transaction In-progress',
           message:
             'Your Updated transaction submitted successfully. Once the transaction completed you will be notified.',
           autoHide: false,
+          props: {
+            onViewTransaction: () => {
+              MainNavigation.navigate({
+                name: 'TransactionDetails',
+                params: {transaction: pendingTransaction},
+              });
+            },
+          },
         });
         let key = null;
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -1275,6 +1301,16 @@ export const sendPendingTransactions = createAsyncThunk(
             title: 'Transaction Successful',
             message: 'Your transaction completed successfully',
             toastId,
+            props: {
+              onViewTransaction: () => {
+                MainNavigation.navigate({
+                  name: 'TransactionDetails',
+                  params: {
+                    transaction: {...pendingTransaction, status: 'SUCCESS'},
+                  },
+                });
+              },
+            },
           });
         }
         refreshCoinData(thunkAPI.dispatch, null);
