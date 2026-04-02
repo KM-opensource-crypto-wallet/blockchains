@@ -718,10 +718,20 @@ export const TronChain = () => {
             'get',
           );
           return resp?.data?.map(transaction => {
-            const raw = transaction.raw_data.contract[0].parameter.value;
+            const contract = transaction.raw_data.contract[0];
+            const contractType = contract?.type;
+            const raw = contract.parameter.value;
             const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+            let amount;
+            if (contractType === 'FreezeBalanceV2Contract') {
+              amount = raw?.frozen_balance?.toString();
+            } else if (contractType === 'UnfreezeBalanceV2Contract') {
+              amount = raw?.unfreeze_balance?.toString();
+            } else {
+              amount = raw?.amount?.toString();
+            }
             return {
-              amount: raw?.amount?.toString(),
+              amount,
               link: transaction.txID,
               url: `${config.TRON_SCAN_URL}/transaction/${transaction.txID}`,
               date: transaction.raw_data.timestamp, //new Date(transaction.raw_data.timestamp),
@@ -752,11 +762,24 @@ export const TronChain = () => {
           );
           const transaction = resp;
           if (!transaction) return null;
-          const raw = transaction.raw_data.contract[0].parameter.value;
+          const contract = transaction.raw_data.contract[0];
+          const contractType = contract?.type;
+          const raw = contract.parameter.value;
           const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+          const toAddress = raw.to_address
+            ? tronWeb.address.fromHex(raw.to_address)
+            : undefined;
+          let amount;
+          if (contractType === 'FreezeBalanceV2Contract') {
+            amount = raw?.frozen_balance?.toString();
+          } else if (contractType === 'UnfreezeBalanceV2Contract') {
+            amount = raw?.unfreeze_balance?.toString();
+          } else {
+            amount = raw?.amount?.toString();
+          }
           return {
             data: {
-              amount: raw?.amount?.toString(),
+              amount,
               link: txHash,
               url: `${config.TRON_SCAN_URL}/transaction/${txHash}`,
               date: transaction.raw_data.timestamp,
@@ -764,7 +787,7 @@ export const TronChain = () => {
               fee: transaction.ret?.[0]?.fee,
               net_fee: transaction.net_fee,
               from: fromAddress,
-              to: tronWeb.address.fromHex(raw.to_address),
+              to: toAddress,
               blockNumber: transaction.blockNumber,
               totalCourse: '0',
             },
