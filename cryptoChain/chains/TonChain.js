@@ -27,9 +27,8 @@ const findTxHashBySeqno = async (tonClient, address, seqno) => {
       if (!tx.inMessage?.body) {
         continue;
       }
-      // body is already a Cell in @ton/ton — no fromBoc needed
       const slice = tx.inMessage.body.beginParse();
-      slice.loadBits(512); // skip 64-byte ed25519 signature
+      slice.loadBits(512); // skip ed25519 signature
       slice.loadUint(32); // subwallet_id
       slice.loadUint(32); // valid_until
       const txSeqno = slice.loadUint(32);
@@ -276,9 +275,31 @@ export const TonChain = () => {
     },
     getTransaction: async ({txHash}) => {
       try {
-        if (!txHash) return null;
+        let resolvedTxHash = null;
+        if (typeof txHash === 'object' && txHash !== null) {
+          const {seqno, walletContract} = txHash;
+          for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const currentSeqno = await walletContract.getSeqno();
+            if (currentSeqno >= seqno) {
+              resolvedTxHash = await findTxHashBySeqno(
+                tonClient,
+                walletContract.address,
+                seqno,
+              );
+              if (resolvedTxHash) {
+                break;
+              }
+            }
+          }
+        } else if (typeof txHash === 'string') {
+          resolvedTxHash = txHash;
+        }
+
+        if (!resolvedTxHash) return null;
+
         const [res, latestSeqno] = await Promise.all([
-          TonScan.getTransactionByHash({txHash}),
+          TonScan.getTransactionByHash({txHash: resolvedTxHash}),
           TonScan.getMasterchainInfo(),
         ]);
         const transactions = res?.data;
@@ -315,8 +336,8 @@ export const TonChain = () => {
         return {
           data: {
             amount: amount || '0',
-            link: txHash,
-            url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+            link: resolvedTxHash,
+            url: `${config.TON_SCAN_URL}/tx/${resolvedTxHash}`,
             status: from && to ? 'SUCCESS' : 'FAILED',
             date: date,
             from: from,
@@ -392,18 +413,7 @@ export const TonChain = () => {
         });
 
         await walletContract.send(transfer);
-        let txHash = null;
-        for (let i = 0; i < 10; i++) {
-          await new Promise(r => setTimeout(r, 5000));
-          const currentSeqno = await walletContract.getSeqno();
-          if (currentSeqno >= seqno) {
-            txHash = await findTxHashBySeqno(tonClient, wallet.address, seqno);
-            if (txHash) {
-              break;
-            }
-          }
-        }
-        return {seqno, walletContract, txHash};
+        return {seqno, walletContract};
       } catch (e) {
         console.error('Error in send ton transaction', e);
       }
