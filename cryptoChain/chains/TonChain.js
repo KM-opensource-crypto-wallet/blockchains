@@ -20,6 +20,29 @@ import BigNumber from 'bignumber.js';
 import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
 import {WL_APP_NAME} from 'utils/wlData';
 
+const findTxHashBySeqno = async (tonClient, address, seqno) => {
+  const txs = await tonClient.getTransactions(address, {limit: 20});
+  for (const tx of txs) {
+    try {
+      if (!tx.inMessage?.body) {
+        continue;
+      }
+      // body is already a Cell in @ton/ton — no fromBoc needed
+      const slice = tx.inMessage.body.beginParse();
+      slice.loadBits(512); // skip 64-byte ed25519 signature
+      slice.loadUint(32); // subwallet_id
+      slice.loadUint(32); // valid_until
+      const txSeqno = slice.loadUint(32);
+      if (txSeqno === seqno) {
+        return tx.hash().toString('hex');
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  return null;
+};
+
 export const TonChain = () => {
   const tonClient = new TonClient({
     endpoint: getRPCUrl('ton'),
@@ -369,7 +392,18 @@ export const TonChain = () => {
         });
 
         await walletContract.send(transfer);
-        return {seqno, walletContract};
+        let txHash = null;
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 5000));
+          const currentSeqno = await walletContract.getSeqno();
+          if (currentSeqno >= seqno) {
+            txHash = await findTxHashBySeqno(tonClient, wallet.address, seqno);
+            if (txHash) {
+              break;
+            }
+          }
+        }
+        return {seqno, walletContract, txHash};
       } catch (e) {
         console.error('Error in send ton transaction', e);
       }
