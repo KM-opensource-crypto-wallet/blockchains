@@ -1021,9 +1021,6 @@ export const sendFunds = createAsyncThunk(
         }
 
         let tx_hash = getHashString(res, currentCoin?.chain_name);
-        if (currentCoin?.chain_name === 'ton') {
-          tx_hash = tx_hash.txHash;
-        }
         const pendingTransaction = {
           amount: txData?.amount,
           to: txData?.to,
