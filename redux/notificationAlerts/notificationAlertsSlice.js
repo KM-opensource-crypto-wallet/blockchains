@@ -5,7 +5,7 @@ import {
   deleteSubscription,
   getSubscriptionsByUser,
 } from '../../service/dokApi';
-import {getMasterClientId} from '../wallets/walletsSelector';
+import {getMasterClientId, selectAllWallets} from '../wallets/walletsSelector';
 import {toDirection} from 'dok-wallet-blockchain-networks/helper';
 
 /**
@@ -37,7 +37,11 @@ export const createCustomAlert = createAsyncThunk(
       });
       return {...payload, backendId: result?.data?._id ?? null};
     } catch (err) {
-      return rejectWithValue(err?.message);
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to create alert';
+      return rejectWithValue(message);
     }
   },
 );
@@ -47,11 +51,12 @@ export const createCustomAlert = createAsyncThunk(
  */
 export const updateAlertThunk = createAsyncThunk(
   'notificationAlerts/updateAlert',
-  async ({payload}) => {
+  async ({payload, oneSignalPlayerId}) => {
     if (payload.backendId) {
       await updateSubscription(payload.backendId, {
         direction: toDirection(payload.notifyOnReceive, payload.notifyOnSend),
         minAmount: payload.minAmount ? parseFloat(payload.minAmount) : null,
+        ...(oneSignalPlayerId ? {oneSignalPlayerId} : {}),
       }).catch(err => console.error('updateAlertThunk error:', err?.message));
     }
     return payload;
@@ -65,9 +70,53 @@ export const fetchSubscriptionsThunk = createAsyncThunk(
   'notificationAlerts/fetchSubscriptions',
   async (_, {getState, rejectWithValue}) => {
     try {
-      const userId = getMasterClientId(getState());
+      const state = getState();
+      const userId = getMasterClientId(state);
       const result = await getSubscriptionsByUser(userId);
-      return Array.isArray(result?.data) ? result.data : [];
+      const subs = Array.isArray(result?.data) ? result.data : [];
+
+      const localAlerts = state.notificationAlerts?.notificationAlerts ?? [];
+      const localBackendIds = new Set(
+        localAlerts.map(a => a.backendId).filter(Boolean),
+      );
+      const wallets = selectAllWallets(state);
+
+      const missingAlerts = subs
+        .filter(sub => !localBackendIds.has(sub._id))
+        .reduce((acc, sub) => {
+          const wallet = wallets.find(w => w.clientId === sub.walletId);
+          if (!wallet) {
+            return acc;
+          }
+          const coin = wallet.coins?.find(
+            c =>
+              c.chain_name === sub.coin?.chain_name &&
+              c.symbol === sub.coin?.symbol,
+          );
+          acc.push({
+            id: sub._id,
+            backendId: sub._id,
+            walletClientId: sub.walletId,
+            walletId: sub.walletId,
+            walletName: wallet.walletName,
+            coinId: coin?._id ?? null,
+            coinName: coin?.name ?? sub.coin.symbol,
+            coinIcon: coin?.icon ?? null,
+            coinSymbol: sub.coin.symbol,
+            chainName: sub.coin.chain_name,
+            chainDisplayName: sub.coin.chain_display_name || '',
+            coinType: sub.coin.isNative ? 'coin' : 'token',
+            coinDecimal: sub.coin.decimal ?? 18,
+            contractAddress: sub.coin.contractAddress ?? null,
+            wallet: sub.wallet,
+            minAmount: sub.minAmount ?? null,
+            notifyOnReceive: ['receive', 'both'].includes(sub.direction),
+            notifyOnSend: ['send', 'both'].includes(sub.direction),
+          });
+          return acc;
+        }, []);
+
+      return {subs, missingAlerts};
     } catch (err) {
       return rejectWithValue(err?.message);
     }
@@ -127,22 +176,12 @@ export const notificationAlertsSlice = createSlice({
         );
       })
       .addCase(fetchSubscriptionsThunk.fulfilled, (state, {payload}) => {
-        const backendIds = new Set(payload.map(sub => sub._id));
-        const backendMap = {};
-        for (const sub of payload) {
-          const key = `${sub.walletId}_${sub.coin?.symbol}_${sub.coin?.chain_name}_${sub.wallet}`;
-          backendMap[key] = sub._id;
-        }
-        state.notificationAlerts = state.notificationAlerts
-          .filter(alert => !alert.backendId || backendIds.has(alert.backendId))
-          .map(alert => {
-            const key = `${alert.walletId}_${alert.coinSymbol}_${alert.chainName}_${alert.wallet}`;
-            const backendId = backendMap[key];
-            if (backendId && alert.backendId !== backendId) {
-              return {...alert, backendId};
-            }
-            return alert;
-          });
+        const {subs, missingAlerts} = payload;
+        const backendIds = new Set(subs.map(sub => sub._id));
+        state.notificationAlerts = state.notificationAlerts.filter(
+          alert => !alert.backendId || backendIds.has(alert.backendId),
+        );
+        state.notificationAlerts.push(...missingAlerts);
       });
   },
 });
