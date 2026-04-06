@@ -61,6 +61,7 @@ import {
   getLargestNumber,
   getWalletTotalBalance,
   delay,
+  getStakignKey,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -386,8 +387,8 @@ export const addToken = createAsyncThunk(
       customRpcUrl,
     );
     const isBitcoin = isBitcoinChain(tokenData?.chain_name);
-    const isStaking = isStakingChain(tokenData?.chain_name);
-
+    const stakingKey = getStakignKey(tokenData?.chain_name, tokenData?.symbol);
+    const isStaking = isStakingChain(stakingKey);
     const symbol = tokenData.symbol;
     const localCurrency = currentState.settings.localCurrency || 'USD';
     const priceObj = await getPrice(symbol, localCurrency);
@@ -543,17 +544,6 @@ export const refreshCurrentCoin = createAsyncThunk(
     const symbol = currentCoin?.symbol;
     const localCurrency = currentState.settings.localCurrency || 'USD';
     const priceObj = await getPrice(symbol, localCurrency);
-    const updatedCurrentCoin = await getCoinSnapshot(
-      currentState,
-      currentCoin,
-      currentWallet,
-      priceObj,
-      false,
-      isFetchTransactions,
-      isFetchStaking,
-      isFetchUTXOs,
-      isFetchUnclaimDeposit,
-    );
     let updatedNativeCoin;
     if (parentCoin) {
       const parentPriceObj = await getPrice(parentCoin?.symbol, localCurrency);
@@ -568,6 +558,17 @@ export const refreshCurrentCoin = createAsyncThunk(
         false,
       );
     }
+    const updatedCurrentCoin = await getCoinSnapshot(
+      currentState,
+      currentCoin,
+      currentWallet,
+      priceObj,
+      false,
+      isFetchTransactions,
+      isFetchStaking,
+      isFetchUTXOs,
+      isFetchUnclaimDeposit,
+    );
     return {updatedCurrentCoin, updatedNativeCoin};
   },
 );

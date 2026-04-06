@@ -365,11 +365,19 @@ const DERIVE_ADDRESS_SUPPORT_CHAIN = [
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
 
-const STAKING_CHAINS = ['solana', 'tron'];
+const STAKING_CHAINS = [
+  'solana_sol',
+  'tron_trx',
+  'ethereum_usdt',
+  'ethereum_usdc',
+];
 
 export const isStakingChain = chain_name => STAKING_CHAINS.includes(chain_name);
 
-const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = ['solana'];
+export const getStakignKey = (chain_name, symbol) =>
+  `${chain_name}_${symbol}`.toLowerCase();
+
+const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = ['solana', 'ethereum'];
 
 export const isValidatorSupportCreateStakingScreen = chain_name =>
   VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN.includes(chain_name);
@@ -422,7 +430,7 @@ const EPOCH_TIME_SUPPORT_CHAIN = ['solana'];
 export const isSupportEpochTime = chain_name =>
   EPOCH_TIME_SUPPORT_CHAIN.includes(chain_name);
 
-const UNSTAKING_BUTTON_CHAIN = ['tron'];
+const UNSTAKING_BUTTON_CHAIN = ['tron', 'ethereum'];
 
 export const isShowUnstakingButton = chain_name =>
   UNSTAKING_BUTTON_CHAIN.includes(chain_name);
