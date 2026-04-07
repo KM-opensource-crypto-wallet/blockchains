@@ -179,7 +179,7 @@ export const FilecoinChain = chain_name => {
         }
         return [];
       } catch (e) {
-        console.error('error in get transactions from filecoin', e);
+        console.error('error in get transaction from filecoin', e);
         return [];
       }
     },
