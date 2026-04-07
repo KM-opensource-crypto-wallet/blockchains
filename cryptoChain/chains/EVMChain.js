@@ -1718,6 +1718,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             }
             throw new Error(reason);
           }
+        } else if (
+          typeof transaction === 'string' &&
+          isValidEVMTransactionHash(transaction)
+        ) {
+          // Hash string — transaction was already confirmed internally (e.g. AAVE staking)
+          // Just fetch the receipt to confirm it exists on-chain
+          console.log('wait for transaction by hash', transaction);
+          const receipt = await evmProvider.getTransactionReceipt(transaction);
+          if (receipt) {
+            return receipt;
+          }
+          // Receipt not yet indexed, treat as pending
+          return 'pending';
         } else if (Array.isArray(transaction)) {
           console.log('wait multiples transaction', transaction);
           // Handle transactions that were already in the mempool
