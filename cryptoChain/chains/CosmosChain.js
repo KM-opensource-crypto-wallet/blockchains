@@ -175,13 +175,13 @@ export const CosmosChain = () => {
         if (transaction) {
           return {
             data: {
-              // amount: finalAmount.toString(),
+              amount: transaction?.data?.amount ?? '0',
               link: txHash,
               url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
-              status: transaction.data.success ? 'SUCCESS' : 'PENDING',
-              date: new Date(transaction?.data?.timestamp), //new Date(transaction.raw_data.timestamp),
-              // from: sender,
-              // to: recipient,
+              status: transaction.data.success ? 'SUCCESS' : 'FAILED',
+              date: new Date(transaction?.data?.timestamp),
+              from: transaction?.data?.from ?? null,
+              to: transaction?.data?.to ?? null,
               totalCourse: '0$',
               blockNumber: transaction?.data?.blockNumber ?? null,
               confirmations: transaction?.data?.confirmations ?? null,
