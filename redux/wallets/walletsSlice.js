@@ -898,6 +898,7 @@ export const sendFunds = createAsyncThunk(
             stakingBalance: txData?.stakingBalance,
             resourceType: txData?.resourceType,
             memo: txData?.memo,
+            stakingProviderName: txData?.stakingProviderName,
           })
         : txData?.isCreateVote
         ? await nativeCoin.createStakingWithValidator({
@@ -928,6 +929,7 @@ export const sendFunds = createAsyncThunk(
             stakingAddress: txData?.stakingAddress,
             resourceType: txData?.resourceType,
             memo: txData?.memo,
+            stakingProviderName: txData?.stakingProviderName,
           })
         : txData?.isWithdrawStaking
         ? await nativeCoin.withdrawStaking({

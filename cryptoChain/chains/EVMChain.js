@@ -46,12 +46,10 @@ import {
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {
-  aaveDataProviderContractAddress,
   aavePoolContractAddress,
   EvmStakingProvider,
-} from 'dok-wallet-blockchain-networks/service/evmStakingProvider';
+} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 import aavePoolABI from '../../abis/aave_pool.json';
-import aaveDataProviderABI from '../../abis/aave_data_provider.json';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -1771,96 +1769,38 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       privateKey,
       contractAddress,
       decimals,
+      stakingProviderName,
     }) =>
-      retryFunc(async evmProvider => {
-        const wallet = new ethers.Wallet(privateKey);
-        const walletSigner = wallet.connect(evmProvider);
-        const tokenContract = new ethers.Contract(
-          contractAddress,
-          localErc20ABI,
-          walletSigner,
-        );
-        const amountInWei = parseUnits(amount.toString(), decimals);
-
-        const balance = await tokenContract.balanceOf(from);
-        if (balance < amountInWei) {
-          throw new Error('Insufficient balance');
-        }
-
-        const allowance = await tokenContract.allowance(
-          from,
-          aavePoolContractAddress,
-        );
-        if (allowance < amountInWei) {
-          const approveTx = await tokenContract.approve(
-            aavePoolContractAddress,
-            amountInWei,
-          );
-          await approveTx.wait();
-        }
-
-        const pool = new ethers.Contract(
-          aavePoolContractAddress,
-          aavePoolABI,
-          walletSigner,
-        );
-        const gasLimit = await pool.supply.estimateGas(
-          contractAddress,
-          amountInWei,
-          from,
-          0,
-        );
-
-        await pool.supply.staticCall(contractAddress, amountInWei, from, 0, {
-          gasLimit,
-        });
-
-        const tx = await pool.supply(contractAddress, amountInWei, from, 0, {
-          gasLimit,
-        });
-        await tx.wait();
-
-        return tx.hash;
-      }, null),
-    deactivateStaking: async ({from, privateKey, contractAddress}) =>
-      retryFunc(async evmProvider => {
-        try {
-          const wallet = new ethers.Wallet(privateKey);
-          const walletSigner = wallet.connect(evmProvider);
-          const pool = new ethers.Contract(
-            aavePoolContractAddress,
-            aavePoolABI,
-            walletSigner,
-          );
-
-          const gasLimit = await pool.withdraw.estimateGas(
-            contractAddress,
-            ethers.MaxUint256,
+      retryFunc(
+        async evmProvider =>
+          EvmStakingProvider.createStaking({
             from,
-          );
-
-          await pool.withdraw.staticCall(
+            amount,
+            privateKey,
             contractAddress,
-            ethers.MaxUint256,
+            decimals,
+            stakingProviderName,
+            evmProvider,
+          }),
+        null,
+      ),
+    deactivateStaking: async ({
+      from,
+      privateKey,
+      contractAddress,
+      stakingProviderName,
+    }) =>
+      retryFunc(
+        async evmProvider =>
+          await EvmStakingProvider.unStaking({
             from,
-          );
-
-          const tx = await pool.withdraw(
+            privateKey,
             contractAddress,
-            ethers.MaxUint256,
-            from,
-            {
-              gasLimit,
-            },
-          );
-          await tx.wait();
-
-          return tx.hash;
-        } catch (error) {
-          console.log(error);
-          throw error;
-        }
-      }, null),
+            stakingProviderName,
+            evmProvider,
+          }),
+        null,
+      ),
     getStakingValidators: async ({address, contractAddress}) => {
       try {
         const providerList = await EvmStakingProvider.getlistOfProviders({
@@ -1890,38 +1830,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }) =>
       retryFunc(async evmProvider => {
         try {
-          const wallet = new ethers.Wallet(privateKey);
-          const walletSigner = wallet.connect(evmProvider);
-          const amountInWei = parseUnits(amount.toString(), decimals);
-          const pool = new ethers.Contract(
-            aavePoolContractAddress,
-            aavePoolABI,
-            walletSigner,
-          );
-
-          let estimateGas;
-          try {
-            // Works when allowance is already set
-            estimateGas = await pool.supply.estimateGas(
+          const {estimateGas} =
+            await EvmStakingProvider.getEstimateFeeForStaking({
+              from: fromAddress,
+              amount,
+              privateKey,
               contractAddress,
-              amountInWei,
-              fromAddress,
-              0,
-            );
-          } catch {
-            // Allowance not yet set — estimate approve gas + known Aave v3 supply cost
-            const tokenContract = new ethers.Contract(
-              contractAddress,
-              localErc20ABI,
-              walletSigner,
-            );
-            const approveGas = await tokenContract.approve.estimateGas(
-              aavePoolContractAddress,
-              amountInWei,
-            );
-            // Aave v3 supply consistently costs 220k-280k gas for USDT/USDC
-            estimateGas = approveGas + 300000n;
-          }
+              decimals,
+              evmProvider,
+            });
 
           const {gasPrice: gasFee} = await getEtherGasPrice(
             feesType,
@@ -1939,21 +1856,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contractAddress,
       privateKey,
       feesType,
+      stakingProviderName,
     }) =>
       retryFunc(async evmProvider => {
         try {
-          const wallet = new ethers.Wallet(privateKey);
-          const walletSigner = wallet.connect(evmProvider);
-          const pool = new ethers.Contract(
-            aavePoolContractAddress,
-            aavePoolABI,
-            walletSigner,
-          );
-          const estimateGas = await pool.withdraw.estimateGas(
-            contractAddress,
-            ethers.MaxUint256,
-            fromAddress,
-          );
+          const {estimateGas} =
+            await EvmStakingProvider.getEstimateFeeForDeactivateStaking({
+              from: fromAddress,
+              privateKey,
+              contractAddress,
+              stakingProviderName,
+              evmProvider,
+            });
           const {gasPrice: gasFee} = await getEtherGasPrice(
             feesType,
             evmProvider,
@@ -2015,32 +1929,20 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return [];
       }
     },
-    getStakingBalance: async ({address, contractAddress}) =>
-      retryFunc(async evmProvider => {
-        try {
-          const dataProvider = new ethers.Contract(
-            aaveDataProviderContractAddress,
-            aaveDataProviderABI,
-            evmProvider,
-          );
-          const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+    getStakingBalance: async ({
+      address,
+      contractAddress,
+      stakingProviderName,
+    }) =>
+      retryFunc(
+        async evmProvider =>
+          await EvmStakingProvider.getStakingBalance({
+            address,
             contractAddress,
-          );
-          const aToken = new ethers.Contract(
-            aTokenAddress,
-            localErc20ABI,
+            stakingProviderName,
             evmProvider,
-          );
-          const balance = await aToken.balanceOf(address);
-          return {
-            stakingBalance: balance.toString() || '0',
-            energyBalance: '0',
-            bandwidthBalance: '0',
-          };
-        } catch (error) {
-          console.error('[getStakingBalance] error:', error?.message, error);
-          throw error;
-        }
-      }, null),
+          }),
+        null,
+      ),
   };
 };
