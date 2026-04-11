@@ -166,10 +166,23 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         gasPrice: parseBalance(bnGasPrice.toFixed(0), 9),
       },
     ];
-    const finalGasPrice =
+    let finalGasPrice =
       feesType === 'normal'
         ? BigInt(bnGasPrice.toFixed(0))
         : BigInt(bnMultiplyGasPrice.toFixed(0));
+
+    // For EIP-1559 chains, ensure maxFeePerGas >= baseFeePerGas to avoid
+    // "max fee per gas less than block base fee" errors caused by stale fee data.
+    // ethers computes maxFeePerGas = 2 * baseFee + tip, so we can recover baseFee.
+    if (
+      feeData?.maxFeePerGas != null &&
+      feeData?.maxPriorityFeePerGas != null
+    ) {
+      const currentMaxFee = feeData.maxFeePerGas;
+      if (finalGasPrice < currentMaxFee) {
+        finalGasPrice = currentMaxFee;
+      }
+    }
 
     let maxPriorityFeePerGas =
       feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name);
