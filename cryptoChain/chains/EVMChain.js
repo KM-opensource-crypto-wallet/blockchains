@@ -174,10 +174,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     // For EIP-1559 chains, ensure maxFeePerGas >= baseFeePerGas to avoid
     // "max fee per gas less than block base fee" errors caused by stale fee data.
     // ethers computes maxFeePerGas = 2 * baseFee + tip, so we can recover baseFee.
-    if (
-      feeData?.maxFeePerGas != null &&
-      feeData?.maxPriorityFeePerGas != null
-    ) {
+    if (feeData?.maxFeePerGas != null) {
       const currentMaxFee = feeData.maxFeePerGas;
       if (finalGasPrice < currentMaxFee) {
         finalGasPrice = currentMaxFee;
