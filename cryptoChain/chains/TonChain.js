@@ -23,20 +23,16 @@ import {WL_APP_NAME} from 'utils/wlData';
 const findTxHashBySeqno = async (tonClient, address, seqno) => {
   const txs = await tonClient.getTransactions(address, {limit: 20});
   for (const tx of txs) {
-    try {
-      if (!tx.inMessage?.body) {
-        continue;
-      }
-      const slice = tx.inMessage.body.beginParse();
-      slice.loadBits(512); // skip ed25519 signature
-      slice.loadUint(32); // subwallet_id
-      slice.loadUint(32); // valid_until
-      const txSeqno = slice.loadUint(32);
-      if (txSeqno === seqno) {
-        return tx.hash().toString('hex');
-      }
-    } catch (e) {
+    if (!tx.inMessage?.body) {
       continue;
+    }
+    const slice = tx.inMessage.body.beginParse();
+    slice.loadBits(512); // skip ed25519 signature
+    slice.loadUint(32); // subwallet_id
+    slice.loadUint(32); // valid_until
+    const txSeqno = slice.loadUint(32);
+    if (txSeqno === seqno) {
+      return tx.hash().toString('hex');
     }
   }
   return null;

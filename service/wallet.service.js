@@ -51,7 +51,7 @@ export const getCoinSnapshot = async (
       customRpcUrl,
     );
     let trxs = [];
-    let trx = [];
+    let trx = null;
     let utxos = [];
     let balance = 0;
     let deriveAddresses = Array.isArray(nativeCoin?.deriveAddresses)

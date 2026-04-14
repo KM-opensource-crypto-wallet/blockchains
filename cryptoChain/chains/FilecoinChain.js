@@ -177,10 +177,10 @@ export const FilecoinChain = chain_name => {
             },
           };
         }
-        return [];
+        return {data: null};
       } catch (e) {
         console.error('error in get transaction from filecoin', e);
-        return [];
+        return {data: null};
       }
     },
     send: async ({
