@@ -186,10 +186,12 @@ export const AptosChain = () => {
             return;
           }
           const payload = item?.payload;
+          const coinType = payload?.type_arguments?.[0];
           const isTransfer =
-            payload?.function === '0x1::coin::transfer' ||
             payload?.function === '0x1::aptos_account::transfer' ||
-            payload?.function === '0x1::aptos_account::transfer_coins';
+            ((payload?.function === '0x1::coin::transfer' ||
+              payload?.function === '0x1::aptos_account::transfer_coins') &&
+              coinType === APT_COIN);
           if (!isTransfer) {
             return;
           }

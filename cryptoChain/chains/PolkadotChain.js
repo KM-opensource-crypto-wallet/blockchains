@@ -156,10 +156,9 @@ export const PolkadotChain = () => {
             },
           };
         }
-        return [];
       } catch (e) {
         console.error(`error getting transactions for polkadot ${e}`);
-        return [];
+        return null;
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee, gasFee}) => {

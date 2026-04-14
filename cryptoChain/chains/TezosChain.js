@@ -113,10 +113,10 @@ export const TezosChain = () => {
             },
           };
         }
-        return [];
+        return {data: null};
       } catch (e) {
         console.error('error getting transactions for tezos', e);
-        return [];
+        return {data: null};
       }
     },
     createWalletByPrivateKey: async ({privateKey}) => {

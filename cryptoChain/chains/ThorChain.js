@@ -144,7 +144,7 @@ export const ThorChain = () => {
               amount: transaction.amount?.toString() || '0',
               link: txHash,
               url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
-              status: 'SUCCESS',
+              status: transaction?.status || 'PENDING',
               date: transaction?.timestamp, //new Date(transaction.raw_data.timestamp),
               from: transaction?.from,
               to: transaction?.to,
@@ -154,10 +154,10 @@ export const ThorChain = () => {
             },
           };
         }
-        return null;
+        return {data: null};
       } catch (e) {
         console.error('error getting transactions for ThorChain', e);
-        return null;
+        return {data: null};
       }
     },
 

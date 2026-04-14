@@ -74,6 +74,7 @@ export const HEDERA = {
       };
     } catch (e) {
       console.error('Error in HEDERA getTransaction', e);
+      return {status: null, data: null};
     }
   },
 };

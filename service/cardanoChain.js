@@ -44,7 +44,7 @@ export const CardanoChainService = {
       return {
         txHash: item?.ctsId,
         timestamp: item?.ctsBlockTimeIssued * 1000,
-        to: item?.ctsOutputs[0]?.ctaAddress,
+        to: item?.ctsOutputs?.[0]?.ctaAddress,
         from: item?.ctsInputs?.[0]?.ctaAddress,
         amount: item?.ctsOutputs?.[0]?.ctaAmount?.getCoin?.toString(),
         fees: item?.ctsFees,

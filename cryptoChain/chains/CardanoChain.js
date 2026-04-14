@@ -112,10 +112,10 @@ export const CardanoChain = () => {
             },
           };
         }
-        return [];
+        return {data: null};
       } catch (e) {
         console.error('error in get transaction from cardano', e);
-        return [];
+        return {data: null};
       }
     },
     getTokenTransactions: async () => {

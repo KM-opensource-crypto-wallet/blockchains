@@ -232,10 +232,10 @@ export const HederaChain = () => {
             },
           };
         }
-        return [];
+        return {data: null};
       } catch (e) {
         console.error(`error getting transactions for hedera ${e}`);
-        return [];
+        return {data: null};
       }
     },
 
