@@ -2,6 +2,7 @@ import {FetchRequest, JsonRpcProvider} from 'ethers';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {aaveProvider} from './aave';
 import {compoundProvider} from './compoundFinance';
+import {sparkProvider} from './spark';
 
 export {aavePoolContractAddress, aaveDataProviderContractAddress} from './aave';
 
@@ -13,7 +14,7 @@ const createEvmProvider = () => {
 };
 
 // Add new providers here — each must implement fetchData or leave it undefined for static data
-const providers = [aaveProvider, compoundProvider];
+const providers = [aaveProvider, compoundProvider, sparkProvider];
 
 export const EvmStakingProvider = {
   createStaking: async ({
