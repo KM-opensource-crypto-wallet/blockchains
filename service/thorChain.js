@@ -62,7 +62,7 @@ export const ThorChainService = {
         return {accountNumber: 0, sequence: 0};
       }
       console.error('Error in getAccountInfo', e);
-      return {accountNumber: 0, sequence: 0};
+      throw e;
     }
   },
   broadcastTx: async txBytes => {
