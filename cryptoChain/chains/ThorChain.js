@@ -40,17 +40,71 @@ export const ThorChain = () => {
               AssetRuneNative,
               Client,
             } = require('@xchainjs/xchain-thorchain');
+            const {
+              DirectSecp256k1HdWallet,
+              encodePubkey,
+              makeAuthInfoBytes,
+              makeSignDoc,
+            } = require('@cosmjs/proto-signing');
+            const {encodeSecp256k1Pubkey} = require('@cosmjs/amino');
+            const {TxRaw} = require('cosmjs-types/cosmos/tx/v1beta1/tx');
+            const {fromBase64, toBase64} = require('@cosmjs/encoding');
+            const {makeClientPath} = require('@xchainjs/xchain-cosmos-sdk');
+
             const thorClient = new Client({phrase});
+            const sender = thorClient.getAddress(0);
             const finalAmount = assetToBase(assetAmount(amount, 8));
-            const txid = await thorClient.transfer({
-              amount: finalAmount,
+            const txMemo = memo || `transfer from ${WL_APP_NAME}`;
+
+            // Build tx body locally — no network needed
+            const {rawUnsignedTx} = await thorClient.prepareTx({
+              sender,
               recipient: to,
-              memo: memo || `transfer from ${WL_APP_NAME}`,
               asset: AssetRuneNative,
+              amount: finalAmount,
+              memo: txMemo,
             });
-            resolve(txid);
+            const decodedRaw = TxRaw.decode(fromBase64(rawUnsignedTx));
+
+            const {accountNumber, sequence} =
+              await ThorChainService.getAccountInfo(sender);
+
+            // Sign locally
+            const signer = await DirectSecp256k1HdWallet.fromMnemonic(phrase, {
+              prefix: 'thor',
+              hdPaths: [makeClientPath("m/44'/931'/0'/0/0")],
+            });
+            const [signerAccount] = await signer.getAccounts();
+
+            const pubkey = encodePubkey(
+              encodeSecp256k1Pubkey(signerAccount.pubkey),
+            );
+            const authInfoBytes = makeAuthInfoBytes(
+              [{pubkey, sequence}],
+              [],
+              6000000,
+            );
+            const signDoc = makeSignDoc(
+              decodedRaw.bodyBytes,
+              authInfoBytes,
+              'thorchain-1',
+              accountNumber,
+            );
+            const {signature} = await signer.signDirect(sender, signDoc);
+
+            const txRaw = TxRaw.fromPartial({
+              bodyBytes: decodedRaw.bodyBytes,
+              authInfoBytes,
+              signatures: [fromBase64(signature.signature)],
+            });
+
+            const txHash = await ThorChainService.broadcastTx(
+              TxRaw.encode(txRaw).finish(),
+            );
+
+            resolve(txHash);
           } catch (e) {
-            console.error('Error in send ThorChain transaction', e);
+            console.error('Error in send ThorChain transaction', e?.message);
             reject(e);
           }
         }, 600);
