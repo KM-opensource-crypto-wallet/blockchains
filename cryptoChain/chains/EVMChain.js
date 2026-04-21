@@ -1813,6 +1813,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           image: provider.icon,
           apy_estimate: parseFloat(provider.apy) || 0,
           activated_stake: parseFloat(provider.stakedAmount) || 0,
+          totalStaked: provider.totalStaked ?? null,
         }));
         return {validators, selectedVotes: null};
       } catch (e) {
@@ -1905,6 +1906,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             },
             apy: provider.apy,
             stakedAmount: provider.stakedAmount,
+            totalStaked: provider.totalStaked ?? null,
+            reward: provider.reward ?? null,
           }));
       } catch (error) {
         console.log('[getStaking] error:', error);

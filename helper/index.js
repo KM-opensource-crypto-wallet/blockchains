@@ -1,5 +1,11 @@
 import BigNumber from 'bignumber.js';
-import {formatUnits, isHexString, parseUnits, toUtf8String} from 'ethers';
+import {
+  ethers,
+  formatUnits,
+  isHexString,
+  parseUnits,
+  toUtf8String,
+} from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import {APP_VERSION} from 'utils/common';
@@ -16,6 +22,15 @@ import {
   selectCurrentWallet,
 } from '../redux/wallets/walletsSelector';
 dayjs.extend(duration);
+
+export const getTokenLogoUrl = contractAddress => {
+  try {
+    const checksumAddress = ethers.getAddress(contractAddress);
+    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${checksumAddress}/logo.png`;
+  } catch {
+    return null;
+  }
+};
 
 export function getCustomizePublicAddress(str) {
   return `${str?.substring(0, 8) || ''}...${

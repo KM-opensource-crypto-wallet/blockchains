@@ -25,7 +25,9 @@ const aaveFetchData = async ({
 
   let stakedAmount = null;
   let stakedAmountRaw = null;
-  if (walletAddress && dataProviderContractAddress && dataProviderABI) {
+  let totalStaked = null;
+
+  if (dataProviderContractAddress && dataProviderABI) {
     const dataProvider = new ethers.Contract(
       dataProviderContractAddress,
       dataProviderABI,
@@ -35,16 +37,25 @@ const aaveFetchData = async ({
       contractAddress,
     );
     const aToken = new ethers.Contract(aTokenAddress, erc20, evmProvider);
-    const balance = await aToken.balanceOf(walletAddress);
-    stakedAmount = formatUnits(balance, tokenDecimals);
-    stakedAmountRaw = balance.toString();
+
+    const [totalSupply, userBalance] = await Promise.all([
+      aToken.totalSupply(),
+      walletAddress ? aToken.balanceOf(walletAddress) : Promise.resolve(null),
+    ]);
+
+    totalStaked = formatUnits(totalSupply, tokenDecimals);
+
+    if (userBalance !== null) {
+      stakedAmount = formatUnits(userBalance, tokenDecimals);
+      stakedAmountRaw = userBalance.toString();
+    }
   }
 
-  return {apy, stakedAmount, stakedAmountRaw};
+  return {apy, stakedAmount, stakedAmountRaw, totalStaked};
 };
 
 export const aaveProvider = {
-  icon: 'https://cdn-icons-png.flaticon.com/512/17978/17978942.png',
+  icon: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5e9ziszHC3fEt6o0kQRkcvljRNKwcOi4-3w&s',
   name: 'Aave',
   apy: '0% APY',
   stakedAmount: '0',

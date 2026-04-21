@@ -9,4 +9,5 @@
     "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
     "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
     "function convertToShares(uint256 assets) view returns (uint256)",
+    "function totalAssets() view returns (uint256)",
 ]
