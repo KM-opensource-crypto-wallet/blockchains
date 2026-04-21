@@ -223,12 +223,11 @@ export const fetchFeesInfo = async () => {
 
 export const getBuyCryptoQuote = async payload => {
   try {
-    const ipAddress = await getIPAddress();
     const resp = await DokApi.post('/get-buy-crypto-quote', {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: {...payload, ipAddress},
+      crypto_payload: {...payload},
     });
     return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
@@ -239,12 +238,11 @@ export const getBuyCryptoQuote = async payload => {
 
 export const getSellCryptoQuote = async payload => {
   try {
-    const ipAddress = await getIPAddress();
     const resp = await DokApi.post('/get-sell-crypto-quote', {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: {...payload, ipAddress},
+      crypto_payload: {...payload},
     });
     return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
@@ -397,17 +395,6 @@ export const createExchange = async payload => {
   } catch (e) {
     console.error('Error in createExchange', JSON.stringify(e));
     throw e;
-  }
-};
-
-export const getIPAddress = async () => {
-  try {
-    const resp = await DokApi.get('/get-ip-address', {
-      timeout: 30000,
-    });
-    return resp?.data?.ipAddress;
-  } catch (e) {
-    return '192.168.1.1';
   }
 };
 
