@@ -1,0 +1,6 @@
+[
+  "function balanceOf(address owner) view returns (uint256)",
+  "function convertToExitAssets(uint256 shares) view returns (uint256 assets)",
+  "function requestRedeem(uint256 shares, address receiver) external returns (uint256 escrowShares)",
+  "function totalAssets() view returns (uint256)"
+]

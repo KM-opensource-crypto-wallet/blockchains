@@ -1,6 +1,7 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
 import erc20 from '../../abis/erc20.json';
 import morphoVaultAbi from '../../abis/spark_abi.json'; // MetaMorpho vaults implement ERC4626
+import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
 // Steakhouse MetaMorpho vaults on Ethereum mainnet
 const MORPHO_VAULT_BY_TOKEN = {
@@ -11,6 +12,14 @@ const MORPHO_VAULT_BY_TOKEN = {
 };
 
 const MORPHO_GRAPHQL_URL = 'https://blue-api.morpho.org/graphql';
+const MERKL_API_BASE = 'https://api.merkl.xyz/v4';
+const MERKL_DISTRIBUTOR = '0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae';
+const MORPHO_TOKEN = '0x58D97B57BB95320F9a05dC918Aef65434969c2B2';
+const MORPHO_TOKEN_DECIMALS = 18;
+
+const merklDistributorAbi = [
+  'function claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs) external',
+];
 
 const getVaultAddress = contractAddress =>
   MORPHO_VAULT_BY_TOKEN[
@@ -226,19 +235,82 @@ export const morphoProvider = {
         evmProvider,
       );
 
+      const [totalAssets, userShares] = await Promise.all([
+        vault.totalAssets(),
+        walletAddress ? vault.balanceOf(walletAddress) : Promise.resolve(null),
+      ]);
+
+      const totalStaked = formatUnits(totalAssets, tokenDecimals);
+
       let stakedAmount = null;
       let stakedAmountRaw = null;
-      if (walletAddress) {
-        const shares = await vault.balanceOf(walletAddress);
-        const assets = await vault.convertToAssets(shares);
+      if (userShares !== null) {
+        const assets = await vault.convertToAssets(userShares);
         stakedAmountRaw = assets.toString();
         stakedAmount = formatUnits(assets, tokenDecimals);
       }
 
-      return {apy, stakedAmount, stakedAmountRaw};
+      return {apy, stakedAmount, stakedAmountRaw, totalStaked};
     } catch (error) {
       console.warn('[morphoProvider] fetchData error:', error);
       return null;
+    }
+  },
+  getRewards: async ({from}) => {
+    const rewardBase = {
+      token: MORPHO_TOKEN,
+      symbol: 'MORPHO',
+      logo: getTokenLogoUrl(MORPHO_TOKEN),
+    };
+    try {
+      const response = await fetch(
+        `${MERKL_API_BASE}/userRewards?user=${from}&chainId=1`,
+      );
+      if (!response.ok) throw new Error(`Merkl API error: ${response.status}`);
+      const data = await response.json();
+      // data is keyed by token address (may be checksummed or lowercase)
+      const morphoKey = Object.keys(data).find(
+        k => k.toLowerCase() === MORPHO_TOKEN.toLowerCase(),
+      );
+      const unclaimed = morphoKey ? data[morphoKey]?.unclaimed ?? '0' : '0';
+      return {
+        ...rewardBase,
+        amount: formatUnits(BigInt(unclaimed), MORPHO_TOKEN_DECIMALS),
+      };
+    } catch (error) {
+      console.warn('[morphoProvider getRewards] error:', error?.message);
+      return {...rewardBase, amount: '0'};
+    }
+  },
+  claimRewards: async ({from, privateKey, evmProvider}) => {
+    try {
+      const response = await fetch(
+        `${MERKL_API_BASE}/claim?user=${from}&chainId=1`,
+      );
+      if (!response.ok) throw new Error(`Merkl API error: ${response.status}`);
+      const claimData = await response.json();
+      if (!claimData?.tokens?.length) {
+        console.log('[morphoProvider] No claimable Merkl rewards');
+        return null;
+      }
+      const wallet = new ethers.Wallet(privateKey);
+      const walletSigner = wallet.connect(evmProvider);
+      const distributor = new ethers.Contract(
+        MERKL_DISTRIBUTOR,
+        merklDistributorAbi,
+        walletSigner,
+      );
+      const tx = await distributor.claim(
+        claimData.users,
+        claimData.tokens,
+        claimData.amounts,
+        claimData.proofs,
+      );
+      const receipt = await tx.wait();
+      return receipt.hash;
+    } catch (error) {
+      console.log('[morphoProvider claimRewards] error:', error);
+      throw error;
     }
   },
 };

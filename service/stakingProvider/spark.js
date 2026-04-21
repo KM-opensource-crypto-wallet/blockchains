@@ -1,6 +1,7 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
 import erc20 from '../../abis/erc20.json';
 import sparkAbi from '../../abis/spark_abi.json';
+import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 const SPARK_VAULT_BY_TOKEN = {
   '0xdAC17F958D2ee523a2206206994597C13D831ec7':
     '0xe2e7a17dFf93280dec073C995595155283e3C372', // USDT → spUSDT
@@ -8,16 +9,19 @@ const SPARK_VAULT_BY_TOKEN = {
     '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d', // USDC → spUSDC
 };
 
+const TOKEN_SYMBOL_BY_ADDRESS = {
+  '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'USDT',
+  '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48': 'USDC',
+};
+
+const getTokenSymbol = contractAddress =>
+  TOKEN_SYMBOL_BY_ADDRESS[contractAddress] ?? null;
+
 export const sparkProvider = {
   icon: 'https://pbs.twimg.com/profile_images/1856332015341084672/lF5ZZXRm_400x400.jpg',
   name: 'Spark',
   apy: '0% APY',
   stakedAmount: '0',
-  stakedAmountRaw: null,
-  poolContractAddress: 'aavePoolContractAddress',
-  poolABI: 'aavePoolABI',
-  dataProviderContractAddress: 'aaveDataProviderContractAddress',
-  dataProviderABI: 'aaveDataProviderABI',
   createStaking: async (
     {from, amount, privateKey, contractAddress, decimals, evmProvider},
     provider,
@@ -186,33 +190,50 @@ export const sparkProvider = {
       const result = supplyAPY.toFixed(2);
       console.log(`Spark Supply APY for ${contractAddress}:`, result + '%');
 
+      const [totalAssets, userShares] = await Promise.all([
+        vault.totalAssets(),
+        walletAddress ? vault.balanceOf(walletAddress) : Promise.resolve(null),
+      ]);
+
+      const totalStaked = formatUnits(totalAssets, tokenDecimals);
+
       let stakedAmount = null;
       let stakedAmountRaw = null;
-      if (walletAddress) {
-        const shares = await vault.balanceOf(walletAddress);
-        const assets = await vault.convertToAssets(shares);
+      if (userShares !== null) {
+        const assets = await vault.convertToAssets(userShares);
         stakedAmountRaw = assets.toString();
         stakedAmount = formatUnits(assets, tokenDecimals);
       }
 
-      return {apy: result, stakedAmount, stakedAmountRaw};
+      return {apy: result, stakedAmount, stakedAmountRaw, totalStaked};
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
   getRewards: async ({from, evmProvider, contractAddress}) => {
-    try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
-      if (!vaultAddress)
-        throw new Error(`No Spark vault for token: ${contractAddress}`);
+    const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+    if (!vaultAddress) return null;
 
-      const vault = new ethers.Contract(vaultAddress, sparkAbi, evmProvider);
+    const vault = new ethers.Contract(vaultAddress, sparkAbi, evmProvider);
+    const rewardBase = {
+      token: contractAddress,
+      symbol: getTokenSymbol(contractAddress),
+      logo: getTokenLogoUrl(contractAddress),
+    };
+
+    try {
+      const currentBlock = await evmProvider.getBlockNumber();
+      // look back ~1 year of Ethereum blocks; stays within most RPC limits
+      const fromBlock = Math.max(0, currentBlock - 3000000);
 
       const [depositEvents, withdrawEvents, currentAssetsInWei] =
         await Promise.all([
-          vault.queryFilter(vault.filters.Deposit(null, from)),
-          vault.queryFilter(vault.filters.Withdraw(null, null, from)),
+          vault.queryFilter(vault.filters.Deposit(null, from), fromBlock),
+          vault.queryFilter(
+            vault.filters.Withdraw(null, null, from),
+            fromBlock,
+          ),
           vault.assetsOf(from),
         ]);
 
@@ -225,16 +246,16 @@ export const sparkProvider = {
         0n,
       );
       const principal = totalDeposited - totalWithdrawn;
-
       const rewardsInWei = currentAssetsInWei - principal;
 
       return {
-        token: contractAddress, // USDT or USDC — yield is paid in the same underlying asset
+        ...rewardBase,
         amount: formatUnits(rewardsInWei > 0n ? rewardsInWei : 0n, 6),
       };
     } catch (error) {
-      console.log(error);
-      throw error;
+      console.log('[spark getRewards] error:', error?.message);
+      // fall back to showing 0 rewards rather than breaking the UI
+      return {...rewardBase, amount: '0'};
     }
   },
   claimRewards: async ({from, contractAddress, privateKey, evmProvider}) => {

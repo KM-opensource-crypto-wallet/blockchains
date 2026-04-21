@@ -1,6 +1,8 @@
 import {ethers, parseUnits} from 'ethers';
 import erc20 from '../../abis/erc20.json';
 import cometContractABI from '../../abis/comet_compound_abi.json';
+import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
+
 // token contract address → Compound V3 Comet contract address
 export const TOKEN_TO_COMET_ADDRESS = {
   '0xdAC17F958D2ee523a2206206994597C13D831ec7':
@@ -22,10 +24,6 @@ export const compoundProvider = {
   apy: '0% APY',
   stakedAmount: '0',
   stakedAmountRaw: null,
-  poolContractAddress: 'aavePoolContractAddress',
-  poolABI: cometContractABI,
-  dataProviderContractAddress: '',
-  dataProviderABI: 'aaveDataProviderABI',
   createStaking: async (
     {from, amount, privateKey, contractAddress, decimals, evmProvider},
     provider,
@@ -132,7 +130,6 @@ export const compoundProvider = {
     provider,
   ) => {
     try {
-      debugger;
       const cometAddress = getCometAddress(contractAddress);
       const comet = new ethers.Contract(
         cometAddress,
@@ -245,15 +242,21 @@ export const compoundProvider = {
         100
       ).toFixed(2);
 
+      const [totalSupply, userBalance] = await Promise.all([
+        comet.totalSupply(),
+        walletAddress ? comet.balanceOf(walletAddress) : Promise.resolve(null),
+      ]);
+
+      const totalStaked = ethers.formatUnits(totalSupply, tokenDecimals);
+
       let stakedAmount = null;
       let stakedAmountRaw = null;
-      if (walletAddress) {
-        const balance = await comet.balanceOf(walletAddress);
-        stakedAmountRaw = balance.toString();
-        stakedAmount = ethers.formatUnits(balance, tokenDecimals);
+      if (userBalance !== null) {
+        stakedAmountRaw = userBalance.toString();
+        stakedAmount = ethers.formatUnits(userBalance, tokenDecimals);
       }
 
-      return {apy, stakedAmount, stakedAmountRaw};
+      return {apy, stakedAmount, stakedAmountRaw, totalStaked};
     } catch (e) {
       console.warn('[compoundProvider] fetchData error:', e);
       return null;
@@ -273,6 +276,8 @@ export const compoundProvider = {
       return {
         token: rewardToken,
         amount: ethers.formatUnits(rewardAmount, 18), // COMP = 18 decimals
+        symbol: 'COMP',
+        logo: getTokenLogoUrl(rewardToken),
       };
     } catch (error) {}
   },

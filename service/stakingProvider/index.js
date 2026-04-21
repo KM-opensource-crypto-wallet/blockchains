@@ -4,6 +4,8 @@ import {aaveProvider} from './aave';
 import {compoundProvider} from './compoundFinance';
 import {sparkProvider} from './spark';
 import {morphoProvider} from './morpho';
+import {mapleProvider} from './maple';
+import {fluidProvider} from './fluid';
 
 export {aavePoolContractAddress, aaveDataProviderContractAddress} from './aave';
 
@@ -20,6 +22,8 @@ const providers = [
   compoundProvider,
   sparkProvider,
   morphoProvider,
+  mapleProvider,
+  fluidProvider,
 ];
 
 export const EvmStakingProvider = {
@@ -141,34 +145,50 @@ export const EvmStakingProvider = {
     walletAddress,
     tokenDecimals = 6,
   }) => {
-    const evmProvider = createEvmProvider();
-
     const results = await Promise.all(
       providers.map(async provider => {
         if (typeof provider.fetchData !== 'function' || !contractAddress) {
           return provider;
         }
+        const evmProvider = createEvmProvider();
+        let result = provider;
         try {
           const data = await provider.fetchData(
             {evmProvider, contractAddress, walletAddress, tokenDecimals},
             provider,
           );
-          if (!data) {
-            return provider;
+          if (data) {
+            const updates = {apy: `${data.apy}% APY`};
+            if (data.stakedAmount !== null) {
+              updates.stakedAmount = data.stakedAmount;
+              updates.stakedAmountRaw = data.stakedAmountRaw;
+            }
+            if (data.totalStaked !== null && data.totalStaked !== undefined) {
+              updates.totalStaked = data.totalStaked;
+            }
+            result = {...provider, ...updates};
           }
-          const updates = {apy: `${data.apy}% APY`};
-          if (data.stakedAmount !== null) {
-            updates.stakedAmount = data.stakedAmount;
-            updates.stakedAmountRaw = data.stakedAmountRaw;
-          }
-          return {...provider, ...updates};
         } catch (e) {
           console.warn(
             `[EvmStakingProvider] Failed to fetch data for ${provider.name}:`,
             e,
           );
-          return provider;
         }
+        if (typeof provider.getRewards === 'function' && walletAddress) {
+          try {
+            result = {
+              ...result,
+              reward: await provider.getRewards({
+                from: walletAddress,
+                evmProvider,
+                contractAddress,
+              }),
+            };
+          } catch (e) {
+            result = {...result, reward: null};
+          }
+        }
+        return result;
       }),
     );
     return results;
