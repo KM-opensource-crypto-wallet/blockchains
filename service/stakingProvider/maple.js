@@ -3,22 +3,46 @@ import erc20 from '../../abis/erc20.json';
 import maplePoolABI from '../../abis/maple_pool.json';
 import mapleSyrupRouterABI from '../../abis/maple_syrup_router.json';
 
-const POOL_PERMISSION_MANAGER = '0xBe10aDcE8B6E3E02Db384E7FaDA5395DD113D8b3';
-const POOL_PERMISSION_MANAGER_ABI = [
-  'function hasPermission(address poolManager, address lender, bytes32 functionId) view returns (bool)',
-];
+const MAPLE_DEPOSIT_DATA = ethers.encodeBytes32String('0:dokwallet');
 
-const checkMapleAuthorization = async (
-  evmProvider,
-  poolAddress,
-  walletAddress,
-) => {
-  const ppm = new ethers.Contract(
-    POOL_PERMISSION_MANAGER,
-    POOL_PERMISSION_MANAGER_ABI,
-    evmProvider,
-  );
-  return ppm.hasPermission(poolAddress, walletAddress, ethers.id('P:deposit'));
+// Returns { isSyrupLender: boolean }
+const checkMapleSyrupLender = async walletAddress => {
+  const query = `{ account(id: "${walletAddress.toLowerCase()}") { isSyrupLender } }`;
+  const response = await fetch(MAPLE_GRAPHQL_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query}),
+  });
+  const json = await response.json();
+  return json?.data?.account?.isSyrupLender === true;
+};
+
+// Fetches authorization signature via Maple GraphQL for non-whitelisted wallets.
+// v is raw (0 or 1) from the API and must be converted to 27/28 per Maple docs.
+const fetchMapleAuthSignature = async (walletAddress, poolAddress) => {
+  try {
+    const query = `{ getPoolSignature(lender: "${walletAddress}", poolId: "${poolAddress}") { deadline bitmap r s v } }`;
+    const response = await fetch(MAPLE_GRAPHQL_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query}),
+    });
+    const json = await response.json();
+    const sig = json?.data?.getPoolSignature;
+    if (!sig?.bitmap || !sig?.deadline || sig?.v == null) return null;
+    const rawV = Number(sig.v);
+    const v = rawV === 0 ? 27 : 28;
+    const toHex = val => (String(val).startsWith('0x') ? val : `0x${val}`);
+    return {
+      bitmap: sig.bitmap,
+      deadline: sig.deadline,
+      v,
+      r: toHex(sig.r),
+      s: toHex(sig.s),
+    };
+  } catch {
+    return null;
+  }
 };
 
 // Maple Finance syrupUSDC and syrupUSDT vaults on Ethereum mainnet
@@ -64,19 +88,19 @@ export const mapleProvider = {
   stakedAmountRaw: null,
   createStaking: async (
     {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
+    _provider,
   ) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
         throw new Error(`No Maple vault for token: ${contractAddress}`);
 
-      const isAuthorized = await checkMapleAuthorization(
-        evmProvider,
-        config.poolAddress,
-        from,
-      );
-      if (!isAuthorized)
+      const [isSyrupLender, authSig] = await Promise.all([
+        checkMapleSyrupLender(from),
+        fetchMapleAuthSignature(from, config.poolAddress),
+      ]);
+
+      if (!isSyrupLender && !authSig)
         throw new Error(
           'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
         );
@@ -111,7 +135,21 @@ export const mapleProvider = {
         mapleSyrupRouterABI,
         walletSigner,
       );
-      const tx = await router.deposit(amountInWei, ethers.ZeroHash);
+
+      let tx;
+      if (isSyrupLender) {
+        tx = await router.deposit(amountInWei, MAPLE_DEPOSIT_DATA);
+      } else {
+        tx = await router.authorizeAndDeposit(
+          authSig.bitmap,
+          authSig.deadline,
+          authSig.v,
+          authSig.r,
+          authSig.s,
+          amountInWei,
+          MAPLE_DEPOSIT_DATA,
+        );
+      }
       const receipt = await tx.wait();
 
       return receipt.hash;
@@ -122,18 +160,18 @@ export const mapleProvider = {
   },
   getEstimateFeeForStaking: async (
     {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
+    _provider,
   ) => {
     const config = getVaultConfig(contractAddress);
     if (!config)
       throw new Error(`No Maple vault found for token: ${contractAddress}`);
 
-    const isAuthorized = await checkMapleAuthorization(
-      evmProvider,
-      config.poolAddress,
-      from,
-    );
-    if (!isAuthorized)
+    const [isSyrupLender, authSig] = await Promise.all([
+      checkMapleSyrupLender(from),
+      fetchMapleAuthSignature(from, config.poolAddress),
+    ]);
+
+    if (!isSyrupLender && !authSig)
       throw new Error(
         'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
       );
@@ -157,20 +195,21 @@ export const mapleProvider = {
     try {
       estimateGas = await router.deposit.estimateGas(
         amountInWei,
-        ethers.ZeroHash,
+        MAPLE_DEPOSIT_DATA,
       );
     } catch {
       const approveGas = await tokenContract.approve.estimateGas(
         config.routerAddress,
         amountInWei,
       );
-      estimateGas = approveGas + 250000n;
+      // authorizeAndDeposit costs slightly more than a plain deposit
+      estimateGas = approveGas + (isSyrupLender ? 250000n : 300000n);
     }
     return {estimateGas};
   },
   unStaking: async (
     {from, privateKey, contractAddress, evmProvider},
-    provider,
+    _provider,
   ) => {
     try {
       const config = getVaultConfig(contractAddress);
@@ -186,7 +225,7 @@ export const mapleProvider = {
       );
 
       const shares = await pool.balanceOf(from);
-      const tx = await pool.requestRedeem(shares, from);
+      const tx = await pool.requestRedeem(shares, from); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
       const receipt = await tx.wait();
 
       return receipt.hash;
@@ -227,7 +266,7 @@ export const mapleProvider = {
   },
   getStakingBalance: async (
     {evmProvider, address, contractAddress},
-    provider,
+    _provider,
   ) => {
     try {
       const config = getVaultConfig(contractAddress);
@@ -253,7 +292,7 @@ export const mapleProvider = {
   },
   fetchData: async (
     {evmProvider, contractAddress, walletAddress, tokenDecimals},
-    provider,
+    _provider,
   ) => {
     try {
       const config = getVaultConfig(contractAddress);
