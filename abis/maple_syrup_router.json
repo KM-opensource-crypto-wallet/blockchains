@@ -1,0 +1,4 @@
+[
+  "function deposit(uint256 amount, bytes32 depositData) external returns (uint256 shares)",
+  "function authorizeAndDeposit(uint256 bitmap, uint256 deadline, uint8 auth_v, bytes32 auth_r, bytes32 auth_s, uint256 amount, bytes32 depositData) external returns (uint256 shares)"
+]
