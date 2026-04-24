@@ -1,9 +1,7 @@
 import ECPairFactory from 'ecpair';
 import ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
-import {
-  config,
-} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
@@ -19,7 +17,6 @@ const chainDetails = {
   litecoin: 'ltc',
   bitcoin_cash: 'bch',
 };
-
 
 const ALL_NETWORKS = {
   bitcoin_cash: config.BITCOIN_CASH_NETWORK,
