@@ -1,7 +1,10 @@
 import {TronWeb} from 'tronweb';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {convertToSmallAmount} from 'dok-wallet-blockchain-networks/helper';
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  convertToSmallAmount,
+  getExplorerTxUrl,
+} from 'dok-wallet-blockchain-networks/helper';
+import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 import dayjs from 'dayjs';
@@ -733,7 +736,7 @@ export const TronChain = () => {
             return {
               amount,
               link: transaction.txID,
-              url: `${config.TRON_SCAN_URL}/transaction/${transaction.txID}`,
+              url: getExplorerTxUrl('tron', transaction.txID),
               date: transaction.raw_data.timestamp, //new Date(transaction.raw_data.timestamp),
               status: transaction.ret?.[0]?.contractRet,
               fee: transaction.ret?.[0]?.fee, // total fee
@@ -781,7 +784,7 @@ export const TronChain = () => {
             data: {
               amount,
               link: txHash,
-              url: `${config.TRON_SCAN_URL}/transaction/${txHash}`,
+              url: getExplorerTxUrl('tron', txHash),
               date: transaction.raw_data.timestamp,
               status: transaction.ret?.[0]?.contractRet,
               fee: transaction.ret?.[0]?.fee,
@@ -946,7 +949,7 @@ export const TronChain = () => {
             return {
               amount: raw?.toString(),
               link: transaction.transaction_id.substring(0, 13) + '...',
-              url: `${config.TRON_SCAN_URL}/transaction/${transaction.transaction_id}`,
+              url: getExplorerTxUrl('tron', transaction.transaction_id),
               status: 'SUCCESS',
               date: transaction?.block_timestamp, //new Date(transaction.raw_data.timestamp),
               from: fromAddress,

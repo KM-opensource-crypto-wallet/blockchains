@@ -3,9 +3,11 @@ import {validateAddress, ValidationResult} from '@taquito/utils';
 import {InMemorySigner} from '@taquito/signer';
 import BigNumber from 'bignumber.js';
 import {Tzkt} from 'dok-wallet-blockchain-networks/service/tzkt';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
+import {
+  getExplorerTxUrl,
+  parseBalance,
+} from 'dok-wallet-blockchain-networks/helper';
 
 export const TezosChain = () => {
   const tezosProvider = new TezosToolkit(getRPCUrl('tezos'));
@@ -80,7 +82,7 @@ export const TezosChain = () => {
           return {
             amount: bnValue.toString(),
             link: txHash,
-            url: `${config.TEZOS_SCAN_URL}/${txHash}`,
+            url: getExplorerTxUrl('tezos', txHash),
             status: item?.status === 'applied' ? 'SUCCESS' : 'Pending',
             date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
             from: item?.sender?.address,
@@ -103,7 +105,7 @@ export const TezosChain = () => {
             data: {
               amount: finalTransaction?.amount?.toString() || '0',
               link: txHash,
-              url: `${config.TEZOS_SCAN_URL}/${txHash}`,
+              url: getExplorerTxUrl('tezos', txHash),
               status:
                 finalTransaction?.status === 'applied' ? 'SUCCESS' : 'Pending',
               date: finalTransaction?.timestamp, //new Date(transaction.raw_data.timestamp),

@@ -363,6 +363,9 @@ export const getMasterClientId = state => {
 };
 export const getFailedTransaction = state => state.wallets?.failedTransaction;
 
+export const selectCurrentCoinRecentTransaction = state =>
+  selectCurrentCoin(state)?.recentTransaction;
+
 export const getLastCoinsScanTimestamp = state => {
   const currentWallet = selectCurrentWallet(state);
   return currentWallet?.lastCoinsScanTimestamp;

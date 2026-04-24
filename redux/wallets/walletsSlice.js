@@ -23,6 +23,7 @@ import {
   fetchBatchTransactionBalances,
   getCoinSnapshot,
   getNativeCoin,
+  getSingleTransaction,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
   _currentWalletIndexSelector,
@@ -61,12 +62,13 @@ import {
   getLargestNumber,
   getWalletTotalBalance,
   delay,
+  getExplorerTxUrl,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config, SCAN_URL} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -84,7 +86,6 @@ import {
 import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
-import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
@@ -147,17 +148,17 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
   return chainWallets;
 };
 
-const refreshCoinData = (dispatch, currentCoin) => {
-  if (
-    MainNavigation.getCurrentRouteName() === 'TransactionList' ||
-    MainNavigation.getCurrentRouteName() === '/home/transactions'
-  ) {
+const refreshCoinData = (dispatch, currentCoin, txHash = null) => {
+  const routeName = MainNavigation.getCurrentRouteName();
+  if (routeName === 'TransactionList' || routeName === '/home/transactions') {
     dispatch(
       refreshCurrentCoin({
         currentCoin,
         fetchTransaction: true,
       }),
     );
+  } else if (routeName === 'TransactionDetails') {
+    dispatch(refreshCurrentCoin({currentCoin, txHash}));
   } else {
     dispatch(refreshCoins());
   }
@@ -511,7 +512,6 @@ export const refreshCoins = createAsyncThunk(
             false,
             false,
             false,
-            false,
           );
         }),
       );
@@ -531,10 +531,10 @@ export const refreshCurrentCoin = createAsyncThunk(
     const currentCoin =
       refreshData?.currentCoin || selectCurrentCoin(currentState);
     const isFetchTransactions = refreshData?.fetchTransaction || false;
-    const txHash = refreshData?.txHash || '';
     const isFetchUTXOs = refreshData?.fetchUTXOs || false;
     const isFetchStaking = refreshData?.isFetchStaking || false;
     const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
+    const txHash = refreshData?.txHash || null;
     const allCoins = selectUserCoins(currentState);
     const parentCoin = getNativeCoinByTokenCoin(allCoins, currentCoin);
     const validatedChainName = validateSupportedChain(currentCoin?.chain_name);
@@ -552,10 +552,10 @@ export const refreshCurrentCoin = createAsyncThunk(
       priceObj,
       false,
       isFetchTransactions,
-      txHash,
       isFetchStaking,
       isFetchUTXOs,
       isFetchUnclaimDeposit,
+      txHash,
     );
     let updatedNativeCoin;
     if (parentCoin) {
@@ -568,10 +568,33 @@ export const refreshCurrentCoin = createAsyncThunk(
         false,
         false,
         false,
-        false,
       );
     }
     return {updatedCurrentCoin, updatedNativeCoin};
+  },
+);
+
+export const fetchTransactionByHash = createAsyncThunk(
+  'wallets/fetchTransactionByHash',
+  async ({txHash, currentWallet, currentCoin}, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const localCurrentWallet =
+      currentWallet || selectCurrentWallet(currentState);
+    const localCurrentCoin = currentCoin || selectCurrentCoin(currentState);
+    const validatedChainName = validateSupportedChain(
+      localCurrentCoin?.chain_name,
+    );
+    if (!localCurrentCoin || !validatedChainName || !txHash) {
+      return null;
+    }
+    const recentTransaction = await getSingleTransaction(
+      currentState,
+      localCurrentCoin,
+      localCurrentWallet,
+      txHash,
+    );
+
+    return {recentTransaction, coinId: localCurrentCoin._id};
   },
 );
 
@@ -839,15 +862,6 @@ export const handleUnclaimedData = createAsyncThunk(
   },
 );
 
-const getScanUrlName = chain_name => {
-  if (chain_name === 'polygon') {
-    return getRPCUrl('polygon_blockscout')
-      ? 'polygon_blockscout'
-      : 'polygon_scan';
-  }
-  return chain_name;
-};
-
 export const sendFunds = createAsyncThunk(
   'wallets/sendFunds',
   async (txData, thunkAPI) => {
@@ -1029,9 +1043,7 @@ export const sendFunds = createAsyncThunk(
           date: new Date().toISOString(),
           link: tx_hash,
           totalCourse: txData.totalCourse,
-          url: `${
-            SCAN_URL[getScanUrlName(currentCoin?.chain_name)]
-          }/tx/${tx_hash}`,
+          url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
           currentCoin: currentCoin,
         };
         toastId = showToast({
@@ -1109,7 +1121,7 @@ export const sendFunds = createAsyncThunk(
             },
           });
         }
-        refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
+        refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
         return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
@@ -1238,9 +1250,7 @@ export const sendPendingTransactions = createAsyncThunk(
           status: 'PENDING',
           date: new Date().toISOString(),
           link: tx_hash,
-          url: `${
-            SCAN_URL[getScanUrlName(currentCoin?.chain_name)]
-          }/tx/${tx_hash}`,
+          url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
           currentCoin: currentCoin,
         };
 
@@ -2400,6 +2410,19 @@ export const walletsSlice = createSlice({
             allCoins,
           );
         }
+      }
+    });
+    builder.addCase(fetchTransactionByHash.fulfilled, (state, {payload}) => {
+      if (!payload?.recentTransaction) {
+        return;
+      }
+      const {recentTransaction, coinId} = payload;
+      const currentWallets = state.allWallets[state.currentWalletIndex] || {};
+      const allCoins = [...currentWallets.coins];
+      const foundIndex = allCoins.findIndex(item => item?._id === coinId);
+      if (foundIndex !== -1) {
+        allCoins[foundIndex] = {...allCoins[foundIndex], recentTransaction};
+        currentWallets.coins = allCoins;
       }
     });
     builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {

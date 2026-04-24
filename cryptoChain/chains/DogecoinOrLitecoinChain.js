@@ -1,10 +1,13 @@
 import ECPairFactory from 'ecpair';
 import ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  config,
+} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -17,11 +20,6 @@ const chainDetails = {
   bitcoin_cash: 'bch',
 };
 
-const ALL_SCAN_URL = {
-  bitcoin_cash: config.BITCOIN_CASH_SCAN_URL,
-  dogecoin: config.DOGECOIN_SCAN_URL,
-  litecoin: config.LITECOIN_SCAN_URL,
-};
 
 const ALL_NETWORKS = {
   bitcoin_cash: config.BITCOIN_CASH_NETWORK,
@@ -32,7 +30,6 @@ const ALL_NETWORKS = {
 export const DogecoinOrLitecoinChain = chain_name => {
   const isBitcoinCash = chain_name === 'bitcoin_cash';
   const network = ALL_NETWORKS[chain_name];
-  const scanUrl = ALL_SCAN_URL[chain_name];
 
   return {
     isValidAddress: ({address}) => {
@@ -121,7 +118,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
             return {
               amount: item?.amount.toString(),
               link: txHash,
-              url: `${scanUrl}/transaction/${txHash}`,
+              url: getExplorerTxUrl(chain_name, txHash),
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -150,7 +147,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
           data: {
             amount: response?.amount?.toString(),
             link: txHash,
-            url: `${scanUrl}/transaction/${txHash}`,
+            url: getExplorerTxUrl(chain_name, txHash),
             status: response?.status ? 'SUCCESS' : 'Pending',
             date: response?.timestamp ? new Date(response?.timestamp) : null,
             from: response?.from,

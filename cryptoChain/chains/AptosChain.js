@@ -1,9 +1,10 @@
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 const {
   Account,
   Ed25519PrivateKey,
@@ -205,9 +206,7 @@ export const AptosChain = () => {
           finalData.push({
             amount: amount?.toString(),
             link: txHash,
-            url: `${config.APTOS_SCAN_URL}/txn/${txHash}${
-              IS_SANDBOX ? '?network=testnet' : ''
-            }`,
+            url: getExplorerTxUrl('aptos', txHash),
             status: item?.success ? 'SUCCESS' : 'Failed',
             date: Math.floor(Number(item?.timestamp) / 1000),
             from: item?.sender,
@@ -259,9 +258,7 @@ export const AptosChain = () => {
           data: {
             amount: amount?.toString(),
             link: txHash,
-            url: `${config.APTOS_SCAN_URL}/txn/${txHash}${
-              IS_SANDBOX ? '?network=testnet' : ''
-            }`,
+            url: getExplorerTxUrl('aptos', txHash),
             status: item?.success ? 'SUCCESS' : 'Failed',
             date: Math.floor(Number(item?.timestamp) / 1000),
             from: item?.sender,

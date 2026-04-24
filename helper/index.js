@@ -9,12 +9,7 @@ import {
   IS_SANDBOX,
 } from 'dok-wallet-blockchain-networks/config/config';
 import bs58 from 'bs58';
-import {useSelector} from 'react-redux';
-import {
-  getCurrentWalletIndex,
-  selectAllWallets,
-  selectCurrentWallet,
-} from '../redux/wallets/walletsSelector';
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 dayjs.extend(duration);
 
 export function getCustomizePublicAddress(str) {
@@ -1511,4 +1506,25 @@ export const formatBalance = value => {
     return num.toLocaleString('en-US', {maximumFractionDigits: 2});
   }
   return num.toFixed(2);
+};
+
+const getScanUrlName = chain_name => {
+  if (chain_name === 'polygon') {
+    return getRPCUrl('polygon_blockscout')
+      ? 'polygon_blockscout'
+      : 'polygon_scan';
+  }
+  return chain_name;
+};
+
+export const getExplorerTxUrl = (chain_name, txHash) => {
+  const scanConfig = SCAN_URL[getScanUrlName(chain_name)];
+  if (!scanConfig) {
+    return '';
+  }
+  const {baseUrl, txPath, sandboxQueryParam} = scanConfig;
+  const url = txPath
+    ? `${baseUrl}/${txPath}/${txHash}`
+    : `${baseUrl}/${txHash}`;
+  return sandboxQueryParam && IS_SANDBOX ? `${url}?${sandboxQueryParam}` : url;
 };

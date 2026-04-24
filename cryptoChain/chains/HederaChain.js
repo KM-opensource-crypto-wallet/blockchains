@@ -1,4 +1,4 @@
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {ethers} from 'ethers';
 import {createWallet} from 'myWallet/wallet.service';
 import {HEDERA} from 'dok-wallet-blockchain-networks/service/Hedera';
@@ -12,6 +12,7 @@ import {
   TransferTransaction,
   Status,
 } from '@hashgraph/sdk';
+import {getExplorerTxUrl} from 'dok-wallet-blockchain-networks/helper';
 
 const operatorId = IS_SANDBOX ? '0.0.4461973' : '0.0.6247426';
 const operatorKey =
@@ -192,7 +193,7 @@ export const HederaChain = () => {
             return {
               amount: amount,
               link: txHash,
-              url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
+              url: getExplorerTxUrl('hedera', txHash),
               status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
               date: date * 1000, //new Date(transaction.raw_data.timestamp),
               from: from,
@@ -220,7 +221,7 @@ export const HederaChain = () => {
             data: {
               amount: finalTransaction?.transfers[2].amount,
               link: txHash,
-              url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
+              url: getExplorerTxUrl('hedera', txHash),
               status:
                 finalTransaction?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
               date: date * 1000,

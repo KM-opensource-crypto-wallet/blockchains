@@ -7,6 +7,7 @@ import {
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {CardanoChainService} from 'dok-wallet-blockchain-networks/service/cardanoChain';
@@ -76,7 +77,7 @@ export const CardanoChain = () => {
             return {
               amount: item?.amount?.toString(),
               link: txHash,
-              url: `${config.CARDANO_SCAN_URL}/transaction/${txHash}`,
+              url: getExplorerTxUrl('cardano', txHash),
               status: 'SUCCESS',
               date: new Date(item.timestamp),
               from: item?.from,
@@ -101,7 +102,7 @@ export const CardanoChain = () => {
             data: {
               amount: transaction?.amount?.toString(),
               link: txHash,
-              url: `${config.CARDANO_SCAN_URL}/transaction/${txHash}`,
+              url: getExplorerTxUrl('cardano', txHash),
               status: 'SUCCESS',
               date: new Date(transaction.timestamp),
               from: transaction?.from,

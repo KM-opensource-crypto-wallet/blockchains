@@ -1,9 +1,9 @@
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   TonClient,
   WalletContractV4,
@@ -254,7 +254,7 @@ export const TonChain = () => {
             return {
               amount: amount,
               link: txHash,
-              url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+              url: getExplorerTxUrl('ton', txHash),
               status: from && to ? 'SUCCESS' : 'FAILED',
               date: date,
               from: from,
@@ -333,7 +333,7 @@ export const TonChain = () => {
           data: {
             amount: amount || '0',
             link: resolvedTxHash,
-            url: `${config.TON_SCAN_URL}/tx/${resolvedTxHash}`,
+            url: getExplorerTxUrl('ton', resolvedTxHash),
             status: from && to ? 'SUCCESS' : 'FAILED',
             date: date,
             from: from,
@@ -360,7 +360,7 @@ export const TonChain = () => {
           return {
             amount: transaction?.amount,
             link: txHash.substring(0, 13) + '...',
-            url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+            url: getExplorerTxUrl('ton', txHash),
             status: 'Unknown',
             date: new Date(transaction?.transaction_now * 1000), //new Date(transaction.raw_data.timestamp),
             from: Address.parse(transaction?.source_wallet)?.toString(),

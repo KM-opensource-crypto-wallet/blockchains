@@ -2,6 +2,7 @@ import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
   getCosmosRequiredFeeAmount,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -14,7 +15,6 @@ import {
 import {DirectSecp256k1Wallet} from '@cosmjs/proto-signing';
 import {fromBech32} from '@cosmjs/encoding';
 import {CosmosScan} from 'dok-wallet-blockchain-networks/service/mintscan';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
 export const CosmosChain = () => {
@@ -154,7 +154,7 @@ export const CosmosChain = () => {
             return {
               amount: finalAmount.toString(),
               link: txHash,
-              url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
+              url: getExplorerTxUrl('cosmos', txHash),
               status: !item?.code ? 'SUCCESS' : 'Failed',
               date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
               from: sender,
@@ -177,7 +177,7 @@ export const CosmosChain = () => {
             data: {
               amount: transaction?.data?.amount ?? '0',
               link: txHash,
-              url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
+              url: getExplorerTxUrl('cosmos', txHash),
               status: transaction.data.success ? 'SUCCESS' : 'FAILED',
               date: new Date(transaction?.data?.timestamp),
               from: transaction?.data?.from ?? null,

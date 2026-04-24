@@ -1,9 +1,9 @@
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
 import {decodeAddress} from '@polkadot/util-crypto';
@@ -105,7 +105,7 @@ export const PolkadotChain = () => {
             return {
               amount: item?.amount_v2 || '',
               link: txHash,
-              url: `${config.POLKADOT_SCAN_URL}/extrinsic/${item?.extrinsic_index}`,
+              url: getExplorerTxUrl('polkadot', item?.extrinsic_index),
               status: item?.success ? 'SUCCESS' : 'Failed',
               date: new Date(item?.block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -145,7 +145,7 @@ export const PolkadotChain = () => {
             data: {
               amount: finalTransaction?.amount || '',
               link: txHash,
-              url: `${config.POLKADOT_SCAN_URL}/extrinsic/${extrinsic_index}`,
+              url: getExplorerTxUrl('polkadot', extrinsic_index),
               status: finalTransaction?.success ? 'SUCCESS' : 'Failed',
               date: new Date(block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
               from: finalTransaction?.from,

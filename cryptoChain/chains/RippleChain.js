@@ -1,4 +1,3 @@
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {Client} from 'xrpl';
 import {sign} from 'ripple-keypairs';
@@ -6,6 +5,7 @@ import {encodeForSigning} from 'ripple-binary-codec';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 
@@ -87,7 +87,7 @@ export const RippleChain = () => {
             return {
               amount: bnValue?.toString(),
               link: txHash,
-              url: `${config.RIPPLE_SCAN_URL}/transactions/${txHash}`,
+              url: getExplorerTxUrl('ripple', txHash),
               status: item?.validated ? 'SUCCESS' : 'FAIL',
               date: new Date(tx?.close_time_iso), //new Date(transaction.raw_data.timestamp),
               from: tx?.tx_json?.Account,
@@ -125,7 +125,7 @@ export const RippleChain = () => {
           data: {
             amount: bnValue?.toString(),
             link: txHash,
-            url: `${config.RIPPLE_SCAN_URL}/transactions/${txHash}`,
+            url: getExplorerTxUrl('ripple', txHash),
             status: tx?.validated ? 'SUCCESS' : 'FAIL',
             date: new Date(tx?.close_time_iso),
             from: tx?.tx_json?.Account,

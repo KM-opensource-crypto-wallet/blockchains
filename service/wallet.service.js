@@ -31,10 +31,10 @@ export const getCoinSnapshot = async (
   priceObj,
   skipData,
   fetchTransactions,
-  txHash,
   isFetchStaking,
   fetchUTXOs,
   isFetchUnclaimDeposit,
+  txHash,
 ) => {
   try {
     const coinDef = _coinDef ?? selectCurrentCoin(state);
@@ -51,7 +51,6 @@ export const getCoinSnapshot = async (
       customRpcUrl,
     );
     let trxs = [];
-    let trx = null;
     let utxos = [];
     let balance = 0;
     let deriveAddresses = Array.isArray(nativeCoin?.deriveAddresses)
@@ -111,22 +110,6 @@ export const getCoinSnapshot = async (
           key,
           deriveAddresses: coinDef?.deriveAddresses,
         });
-        trx = await nativeCoin.getTransaction?.({txHash});
-        if (trx) {
-          const amount = trx?.data?.amount;
-          trx = {
-            ...trx,
-            data: {
-              ...trx.data,
-              totalCourse: calculatePrice(
-                amount,
-                coinDef?.decimal,
-                currentPrice,
-              ),
-              amount: parseBalance(amount, coinDef?.decimal),
-            },
-          };
-        }
       }
       if (fetchUTXOs) {
         utxos = await nativeCoin.getUTXOs?.();
@@ -191,7 +174,6 @@ export const getCoinSnapshot = async (
       stakingInfo,
       energyBalance: parseBalance(energyBalance, coinDef?.decimal),
       bandwidthBalance: parseBalance(bandwidthBalance, coinDef?.decimal),
-      recentTransaction: trx,
     };
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;
@@ -209,11 +191,50 @@ export const getCoinSnapshot = async (
         coinDef?.decimal,
       );
     }
+    if (txHash) {
+      const recentTransaction = await getSingleTransaction(
+        state,
+        coinDef,
+        wallet,
+        txHash,
+      );
+      if (recentTransaction) {
+        newCoin.recentTransaction = recentTransaction;
+      }
+    }
     return newCoin;
   } catch (err) {
     console.error('Error in getCoinSnapshot', err);
     throw err;
   }
+};
+
+export const getSingleTransaction = async (state, coinDef, wallet, txHash) => {
+  const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+    coinDef?.chain_name,
+    wallet?.clientId,
+  )(state);
+  const nativeCoin = await getCoin(
+    wallet.phrase,
+    coinDef,
+    null,
+    wallet,
+    customRpcUrl,
+  );
+  const currentPrice = coinDef?.currencyRate || 0;
+  let trx = await nativeCoin.getTransaction?.({txHash});
+  if (trx) {
+    const amount = trx?.data?.amount;
+    trx = {
+      ...trx,
+      data: {
+        ...trx.data,
+        totalCourse: calculatePrice(amount, coinDef?.decimal, currentPrice),
+        amount: parseBalance(amount, coinDef?.decimal),
+      },
+    };
+  }
+  return trx;
 };
 
 export const getNativeCoin = async (state, coinSnapshot, walletSnapshot) => {

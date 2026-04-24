@@ -7,7 +7,10 @@ import StellarHDWallet from 'stellar-hd-wallet';
 import axios from 'axios';
 import qs from 'qs';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {isValidStringWithValue} from 'dok-wallet-blockchain-networks/helper';
+import {
+  getExplorerTxUrl,
+  isValidStringWithValue,
+} from 'dok-wallet-blockchain-networks/helper';
 
 export const StellarChain = () => {
   let stellarProvider;
@@ -131,7 +134,7 @@ export const StellarChain = () => {
                 .multipliedBy(new BigNumber(10000000))
                 .toString(),
               link: txHash,
-              url: `${config.STELLAR_SCAN_URL}/transactions/${txHash}`,
+              url: getExplorerTxUrl('stellar', txHash),
               status: item?.successful ? 'SUCCESS' : 'FAIL',
               date: item?.created_at, //new Date(transaction.raw_data.timestamp),
               from: sender,
@@ -181,7 +184,7 @@ export const StellarChain = () => {
               .multipliedBy(new BigNumber(10000000))
               .toString(),
             link: txHash,
-            url: `${config.STELLAR_SCAN_URL}/transactions/${txHash}`,
+            url: getExplorerTxUrl('stellar', txHash),
             status: item?.successful ? 'SUCCESS' : 'FAIL',
             date: item?.created_at,
             from: sender,

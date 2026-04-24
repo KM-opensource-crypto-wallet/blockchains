@@ -1,9 +1,10 @@
 import {validateAddressString} from '@glif/filecoin-address';
 import {keyPairFromPrivateKey} from '@nodefactory/filecoin-address';
 import BigNumber from 'bignumber.js';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
@@ -144,7 +145,7 @@ export const FilecoinChain = chain_name => {
           return {
             amount: item?.amount?.toString(),
             link: txHash ? txHash : '',
-            url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+            url: getExplorerTxUrl('filecoin', txHash),
             status: item?.status === true ? 'SUCCESS' : 'FAILED',
             date: item?.timestamp ? new Date(item.timestamp) : new Date(),
             from: item?.from,
@@ -165,7 +166,7 @@ export const FilecoinChain = chain_name => {
             data: {
               amount: finalTransaction?.amount?.toString(),
               link: txHash ? txHash : '',
-              url: `${config.FILECOIN_SCAN_URL}/message/${txHash}`,
+              url: getExplorerTxUrl('filecoin', txHash),
               status: finalTransaction?.status === true ? 'SUCCESS' : 'FAILED',
               date: finalTransaction?.timestamp
                 ? new Date(finalTransaction.timestamp)

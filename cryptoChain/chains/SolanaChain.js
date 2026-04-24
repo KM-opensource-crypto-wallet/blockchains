@@ -1,8 +1,4 @@
-import {
-  config,
-  IS_SANDBOX,
-  isWeb,
-} from 'dok-wallet-blockchain-networks/config/config';
+import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   Authorized,
@@ -29,6 +25,7 @@ import {
   convertToSmallAmount,
   customFetchWithTimeout,
   differentInCurrentTime,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -581,9 +578,7 @@ export const SolanaChain = () => {
                 finalData.push({
                   amount: bnValue?.toString(),
                   link: txHash,
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: transactionDetails?.source,
@@ -626,9 +621,7 @@ export const SolanaChain = () => {
             data: {
               amount: bnValue?.toString(),
               link: txHash,
-              url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                IS_SANDBOX ? '?cluster=devnet' : ''
-              }`,
+              url: getExplorerTxUrl('solana', txHash),
               status: 'SUCCESS',
               date: item?.blockTime * 1000,
               from: transactionDetails?.source,
@@ -691,9 +684,7 @@ export const SolanaChain = () => {
                 finalData.push({
                   amount: bnValue?.toString(),
                   link: txHash.substring(0, 13) + '...',
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: isSender ? address : transactionDetails?.source,

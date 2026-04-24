@@ -1,8 +1,10 @@
 import {assetAmount, assetToBase} from '@xchainjs/xchain-util';
 import {decode} from 'bech32-buffer';
 import {ThorChainService} from 'dok-wallet-blockchain-networks/service/thorChain';
-import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  getExplorerTxUrl,
+  parseBalance,
+} from 'dok-wallet-blockchain-networks/helper';
 import {WL_APP_NAME} from 'utils/wlData';
 
 export const ThorChain = () => {
@@ -68,7 +70,7 @@ export const ThorChain = () => {
           return {
             amount: bnValue.toString(),
             link: txHash,
-            url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
+            url: getExplorerTxUrl('thorchain', txHash),
             status: 'SUCCESS',
             date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
             from: item?.from,
@@ -89,7 +91,7 @@ export const ThorChain = () => {
             data: {
               amount: transaction.amount?.toString() || '0',
               link: txHash,
-              url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
+              url: getExplorerTxUrl('thorchain', txHash),
               status: transaction?.status || 'PENDING',
               date: transaction?.timestamp, //new Date(transaction.raw_data.timestamp),
               from: transaction?.from,

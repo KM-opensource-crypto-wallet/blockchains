@@ -7,6 +7,7 @@ import BigNumber from 'bignumber.js';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   getLastIndexOfDerivations,
   parseBalance,
   validateNumber,
@@ -307,7 +308,7 @@ export const BitcoinChain = () => {
             return {
               amount: item?.amount?.toString(),
               link: txHash,
-              url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
+              url: getExplorerTxUrl('bitcoin', txHash),
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -336,7 +337,7 @@ export const BitcoinChain = () => {
           data: {
             amount: response?.amount?.toString() || '0',
             link: response.hash,
-            url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
+            url: getExplorerTxUrl('bitcoin', txHash),
             status: response?.status ? 'SUCCESS' : 'Pending',
             date: response?.timestamp,
             from: response?.from,
