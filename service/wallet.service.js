@@ -106,11 +106,13 @@ export const getCoinSnapshot = async (
             key,
           );
         }
-        trxs = await nativeCoin.getTransactions?.({
-          pendingTransactions,
-          key,
-          deriveAddresses: coinDef?.deriveAddresses,
-        });
+        if (!txHash) {
+          trxs = await nativeCoin.getTransactions?.({
+            pendingTransactions,
+            key,
+            deriveAddresses: coinDef?.deriveAddresses,
+          });
+        }
         trx = await nativeCoin.getTransaction?.({txHash});
         if (trx) {
           const amount = trx?.data?.amount;
@@ -186,7 +188,7 @@ export const getCoinSnapshot = async (
       ),
       totalBalance: parseBalance(totalBalanceString, coinDef?.decimal),
       currencyRate: currentPrice,
-      transactions: finalTransactions,
+      transactions: txHash ? coinDef.transactions || [] : finalTransactions,
       staking: finalStaking,
       stakingInfo,
       energyBalance: parseBalance(energyBalance, coinDef?.decimal),
