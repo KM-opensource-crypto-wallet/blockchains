@@ -45,8 +45,8 @@ const initialState = {
   // Error
   error: null,
 
-  // Banner dismissed by user
-  isBannerDismissed: false,
+  // Banner dismissed per wallet clientId: { [clientId]: true }
+  dismissedBannerClientIds: {},
 };
 
 // Get unique chain keys from coins (EVM chains share 'ethereum' key)
@@ -325,8 +325,14 @@ export const coinSyncSlice = createSlice({
         coin.isSelected = false;
       });
     },
-    dismissBanner: state => {
-      state.isBannerDismissed = true;
+    dismissBanner: (state, action) => {
+      const clientId = action.payload;
+      if (clientId) {
+        state.dismissedBannerClientIds[clientId] = true;
+      }
+      if (state.status === 'completed' || state.status === 'error') {
+        state.status = 'idle';
+      }
     },
   },
   extraReducers: builder => {

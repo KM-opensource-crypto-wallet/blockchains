@@ -62,6 +62,9 @@ export const selectCurrentWallet = state => {
   return allWallets[currentWalletIndex] || null;
 };
 
+export const selectCurrentWalletClientId = state =>
+  selectCurrentWallet(state)?.clientId;
+
 export const isImportWalletWithPrivateKey = state => {
   const allWallets = state.wallets?.allWallets;
   const currentWalletIndex = state.wallets.currentWalletIndex;

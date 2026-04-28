@@ -357,7 +357,9 @@ export const config = {
     ? 'https://testnet.kavascan.io/'
     : 'https://kavascan.com/',
   DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
-  // DOK_WALLET_BASE_URL: 'http://localhost:3001/dev',
+  // DOK_WALLET_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app/dashboard',
+  ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
+  // ATTEST_WORKER_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app',
   BITCOIN_SCAN_URL: IS_SANDBOX
     ? 'https://mempool.space/testnet'
     : 'https://mempool.space',
