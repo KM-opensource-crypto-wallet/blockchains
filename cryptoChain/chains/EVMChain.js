@@ -1108,6 +1108,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             link: tx.hash,
             from: tx.from,
             to: tx.to,
+            url: getExplorerTxUrl(chain_name, txHash),
             amount: tx.value.toString(),
             blockNumber: tx.blockNumber
               ? parseInt(String(tx.blockNumber), 10)
