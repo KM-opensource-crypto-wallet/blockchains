@@ -328,7 +328,12 @@ const OPTIONS_GAS_FEES_CHAIN = [
   'linea',
 ];
 
-const EIP_1559_NOT_SUPPORTED = ['binance_smart_chain', 'kava'];
+const EIP_1559_NOT_SUPPORTED = [
+  'binance_smart_chain',
+  'kava',
+  'ethereum_classic',
+  'ethereum_pow',
+];
 
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
