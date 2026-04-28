@@ -1,4 +1,3 @@
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {Client} from 'xrpl';
 import {sign} from 'ripple-keypairs';
@@ -6,6 +5,7 @@ import {encodeForSigning} from 'ripple-binary-codec';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 
@@ -86,8 +86,8 @@ export const RippleChain = () => {
             const txHash = tx?.hash;
             return {
               amount: bnValue?.toString(),
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.RIPPLE_SCAN_URL}/transactions/${txHash}`,
+              link: txHash,
+              url: getExplorerTxUrl('ripple', txHash),
               status: item?.validated ? 'SUCCESS' : 'FAIL',
               date: new Date(tx?.close_time_iso), //new Date(transaction.raw_data.timestamp),
               from: tx?.tx_json?.Account,
@@ -100,6 +100,44 @@ export const RippleChain = () => {
       } catch (e) {
         console.error(`error getting transactions for ripple ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        await rippleProvider.connect();
+        const [data, ledgerData] = await Promise.all([
+          rippleProvider.request({
+            command: 'tx',
+            transaction: txHash,
+            binary: false,
+          }),
+          rippleProvider.request({command: 'ledger_current'}).catch(() => null),
+        ]);
+        const tx = data?.result;
+        const bnValue = BigInt(tx?.tx_json?.DeliverMax || 0);
+        const blockNumber = tx?.ledger_index ?? null;
+        const currentLedger = ledgerData?.result?.ledger_current_index ?? null;
+        const confirmations =
+          blockNumber !== null && currentLedger !== null
+            ? currentLedger - blockNumber
+            : null;
+        return {
+          data: {
+            amount: bnValue?.toString(),
+            link: txHash,
+            url: getExplorerTxUrl('ripple', txHash),
+            status: tx?.validated ? 'SUCCESS' : 'FAIL',
+            date: new Date(tx?.close_time_iso),
+            from: tx?.tx_json?.Account,
+            to: tx?.tx_json?.Destination,
+            totalCourse: '0$',
+            blockNumber,
+            confirmations,
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for ripple ${e}`);
+        return null;
       }
     },
     send: async ({to, from, amount, privateKey, publicKey, gasFee, memo}) => {

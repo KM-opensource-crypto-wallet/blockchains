@@ -1,8 +1,4 @@
-import {
-  config,
-  IS_SANDBOX,
-  isWeb,
-} from 'dok-wallet-blockchain-networks/config/config';
+import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   Authorized,
@@ -29,6 +25,7 @@ import {
   convertToSmallAmount,
   customFetchWithTimeout,
   differentInCurrentTime,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -580,10 +577,8 @@ export const SolanaChain = () => {
                 const txHash = item?.transaction?.signatures[0];
                 finalData.push({
                   amount: bnValue?.toString(),
-                  link: txHash.substring(0, 13) + '...',
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: transactionDetails?.source,
@@ -600,6 +595,47 @@ export const SolanaChain = () => {
           throw e;
         }
       }, []),
+    getTransaction: async ({txHash}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          if (!txHash) return null;
+          const [item, currentSlot] = await Promise.all([
+            solanaProvider.getParsedTransaction(txHash, {
+              maxSupportedTransactionVersion: 0,
+            }),
+            solanaProvider.getSlot().catch(() => null),
+          ]);
+          if (!item) return null;
+          const transactionDetails =
+            item?.transaction?.message?.instructions?.find(
+              ix => ix?.parsed?.info?.lamports != null,
+            )?.parsed?.info;
+          if (!transactionDetails?.lamports?.toString()) return null;
+          const bnValue = transactionDetails?.lamports?.toString() || 0;
+          const blockNumber = item?.slot ?? null;
+          const confirmations =
+            blockNumber !== null && currentSlot !== null
+              ? currentSlot - blockNumber
+              : null;
+          return {
+            data: {
+              amount: bnValue?.toString(),
+              link: txHash,
+              url: getExplorerTxUrl('solana', txHash),
+              status: 'SUCCESS',
+              date: item?.blockTime * 1000,
+              from: transactionDetails?.source,
+              to: transactionDetails?.destination,
+              totalCourse: '0',
+              blockNumber,
+              confirmations,
+            },
+          };
+        } catch (e) {
+          console.error(`error getting transaction for solana ${e}`);
+          throw e;
+        }
+      }, null),
 
     getTokenTransactions: ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {
@@ -648,9 +684,7 @@ export const SolanaChain = () => {
                 finalData.push({
                   amount: bnValue?.toString(),
                   link: txHash.substring(0, 13) + '...',
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: isSender ? address : transactionDetails?.source,

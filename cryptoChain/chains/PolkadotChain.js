@@ -1,9 +1,9 @@
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
 import {decodeAddress} from '@polkadot/util-crypto';
@@ -104,8 +104,8 @@ export const PolkadotChain = () => {
 
             return {
               amount: item?.amount_v2 || '',
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.POLKADOT_SCAN_URL}/extrinsic/${item?.extrinsic_index}`,
+              link: txHash,
+              url: getExplorerTxUrl('polkadot', item?.extrinsic_index),
               status: item?.success ? 'SUCCESS' : 'Failed',
               date: new Date(item?.block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -118,6 +118,47 @@ export const PolkadotChain = () => {
       } catch (e) {
         console.error(`error getting transactions for polkadot ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const [transaction, provider] = await Promise.all([
+          PolkadotScan.getTransaction(txHash),
+          createOrGetPolkadotProvider(),
+        ]);
+        if (transaction) {
+          const finalTransaction = transaction?.data?.transfer;
+          const extrinsic_index = transaction?.data?.extrinsic_index;
+          const block_timestamp = transaction?.data?.block_timestamp;
+          const blockNumber = transaction?.data?.block_num ?? null;
+          let confirmations = null;
+          if (blockNumber !== null && provider) {
+            try {
+              const lastHeader = await provider.rpc.chain.getHeader();
+              const latestBlockNumber = lastHeader.number.toNumber();
+              confirmations = latestBlockNumber - blockNumber;
+            } catch (e) {
+              console.warn('Could not fetch latest block for confirmations', e);
+            }
+          }
+          return {
+            data: {
+              amount: finalTransaction?.amount || '',
+              link: txHash,
+              url: getExplorerTxUrl('polkadot', extrinsic_index),
+              status: finalTransaction?.success ? 'SUCCESS' : 'Failed',
+              date: new Date(block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
+              from: finalTransaction?.from,
+              to: finalTransaction?.to,
+              totalCourse: '0$',
+              blockNumber,
+              confirmations,
+            },
+          };
+        }
+      } catch (e) {
+        console.error(`error getting transactions for polkadot ${e}`);
+        return null;
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee, gasFee}) => {

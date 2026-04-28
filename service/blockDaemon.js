@@ -193,15 +193,23 @@ export const BlockDaemon = {
       throw e;
     }
   },
-  getTransaction: async ({chain, transactionId}) => {
+  getTransaction: async ({chain, transactionId, address, derive_addresses}) => {
     try {
       const resp = await BlockDaemonAPI.get(
         `universal/v1/${chainName[chain]}/${network}/tx/${transactionId}`,
       );
-      return !!resp?.data?.confirmations;
+      const tx = resp?.data;
+      if (!tx) return null;
+      const finalAddresses = address
+        ? Array.isArray(derive_addresses)
+          ? derive_addresses
+          : [address]
+        : [];
+      const [parsed] = parseBlockdaemonTransactions([tx], finalAddresses);
+      return parsed;
     } catch (e) {
       console.error(
-        `Error in blockdaemon for get transactions in ${chain} `,
+        `Error in blockdaemon for get transaction in ${chain}`,
         e?.response?.data,
       );
       throw e;
