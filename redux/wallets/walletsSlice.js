@@ -1045,6 +1045,32 @@ export const sendFunds = createAsyncThunk(
           totalCourse: txData.totalCourse,
           url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
           currentCoin: currentCoin,
+          isNFT: txData?.isNFT || false,
+          isBatchTransaction: txData?.isBatchTransaction || false,
+          isCreateStaking: txData?.isCreateStaking || false,
+          isWithdrawStaking: txData?.isWithdrawStaking || false,
+          isDeactivateStaking: txData?.isDeactivateStaking || false,
+          isStakingRewards: txData?.isStakingRewards || false,
+          isCreateVote: txData?.isCreateVote || false,
+          ...(txData?.isNFT && {
+            nftName: txData?.nftName,
+            nftTokenId: txData?.nftTokenId,
+            nftImage: txData?.nftImage,
+          }),
+          ...(txData?.isBatchTransaction && {
+            transactionsData: txData?.transactionsData,
+          }),
+          ...((txData?.isCreateStaking ||
+            txData?.isWithdrawStaking ||
+            txData?.isDeactivateStaking ||
+            txData?.isStakingRewards) && {
+            validatorPubKey: txData?.validatorPubKey,
+            validatorName: txData?.validatorName,
+            resourceType: txData?.resourceType,
+          }),
+          ...(txData?.isCreateVote && {
+            displayValidators: txData?.displayValidators,
+          }),
         };
         toastId = showToast({
           type: 'progressToast',
@@ -1056,12 +1082,14 @@ export const sendFunds = createAsyncThunk(
           } transaction submitted successfully. Once the transaction completed you will be notified.`,
           autoHide: false,
           props: {
-            onViewTransaction: () => {
-              MainNavigation.navigate({
-                name: 'TransactionDetails',
-                params: {transaction: pendingTransaction},
-              });
-            },
+            ...(!txData?.isExchange && {
+              onViewTransaction: () => {
+                MainNavigation.navigate({
+                  name: 'TransactionDetails',
+                  params: {transaction: pendingTransaction},
+                });
+              },
+            }),
           },
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -1110,14 +1138,16 @@ export const sendFunds = createAsyncThunk(
             }`,
             toastId,
             props: {
-              onViewTransaction: () => {
-                MainNavigation.navigate({
-                  name: 'TransactionDetails',
-                  params: {
-                    transaction: {...pendingTransaction, status: 'SUCCESS'},
-                  },
-                });
-              },
+              ...(!txData?.isExchange && {
+                onViewTransaction: () => {
+                  MainNavigation.navigate({
+                    name: 'TransactionDetails',
+                    params: {
+                      transaction: {...pendingTransaction, status: 'SUCCESS'},
+                    },
+                  });
+                },
+              }),
             },
           });
         }
