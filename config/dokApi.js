@@ -6,6 +6,21 @@ const CAPTCHA_ACTION = 'web_wallet';
 export const captchaRef = {execute: null};
 let _appName = null;
 
+const waitForExecutor = (timeout = 5000) =>
+  new Promise((resolve, reject) => {
+    if (captchaRef.execute) return resolve(captchaRef.execute);
+    const deadline = Date.now() + timeout;
+    const id = setInterval(() => {
+      if (captchaRef.execute) {
+        clearInterval(id);
+        resolve(captchaRef.execute);
+      } else if (Date.now() >= deadline) {
+        clearInterval(id);
+        reject(new Error('captcha executor not ready'));
+      }
+    }, 50);
+  });
+
 export const setAppNameToDokApi = appName => {
   _appName = appName;
 };
@@ -33,13 +48,11 @@ DokApi.interceptors.request.use(
       requestConfig.headers['x-app-name'] = `${_appName}-web`;
     }
 
-    if (captchaRef.execute) {
-      try {
-        requestConfig.headers['x-captcha-token'] =
-          await captchaRef.execute(CAPTCHA_ACTION);
-      } catch (err) {
-        console.warn('[captcha] Failed to obtain token:', err.message);
-      }
+    try {
+      const executor = await waitForExecutor();
+      requestConfig.headers['x-captcha-token'] = await executor(CAPTCHA_ACTION);
+    } catch (err) {
+      console.warn('[captcha] Failed to obtain token:', err.message);
     }
 
     return requestConfig;
