@@ -1,4 +1,4 @@
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {ethers} from 'ethers';
 import {createWallet} from 'myWallet/wallet.service';
 import {HEDERA} from 'dok-wallet-blockchain-networks/service/Hedera';
@@ -12,6 +12,7 @@ import {
   TransferTransaction,
   Status,
 } from '@hashgraph/sdk';
+import {getExplorerTxUrl} from 'dok-wallet-blockchain-networks/helper';
 
 const operatorId = IS_SANDBOX ? '0.0.4461973' : '0.0.6247426';
 const operatorKey =
@@ -191,8 +192,8 @@ export const HederaChain = () => {
             const txHash = item?.transaction_id;
             return {
               amount: amount,
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.HEDERA_SCAN_URL}/transaction/${txHash}`,
+              link: txHash,
+              url: getExplorerTxUrl('hedera', txHash),
               status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
               date: date * 1000, //new Date(transaction.raw_data.timestamp),
               from: from,
@@ -205,6 +206,37 @@ export const HederaChain = () => {
       } catch (e) {
         console.error(`error getting transactions for hedera ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await HEDERA?.getTransaction(txHash);
+        let finalTransaction = transaction.data;
+        if (finalTransaction) {
+          const date = finalTransaction?.consensus_timestamp?.substring(
+            0,
+            finalTransaction?.consensus_timestamp?.indexOf('.'),
+          );
+          return {
+            data: {
+              amount: finalTransaction?.transfers[2].amount,
+              link: txHash,
+              url: getExplorerTxUrl('hedera', txHash),
+              status:
+                finalTransaction?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
+              date: date * 1000,
+              from: finalTransaction?.transfers[1].account,
+              to: finalTransaction?.transfers[2].account,
+              totalCourse: '0$',
+              blockNumber: finalTransaction?.blockNumber ?? null,
+              confirmations: finalTransaction?.confirmations ?? null,
+            },
+          };
+        }
+        return {data: null};
+      } catch (e) {
+        console.error(`error getting transactions for hedera ${e}`);
+        return {data: null};
       }
     },
 

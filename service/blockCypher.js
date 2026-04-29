@@ -158,16 +158,55 @@ export const BlockCypher = {
       throw e;
     }
   },
-  getTransaction: async ({chain, transactionId}) => {
+  getTransaction: async ({chain, transactionId, address, derive_addresses}) => {
     try {
       const resp = await BlockCypherAPI.get(
         `/v1/${chain}/main/txs/${transactionId}`,
       );
-      console.log('repsas', resp?.data);
-      return !!resp?.data?.confirmations;
+      const item = resp?.data;
+      if (!item) return null;
+      const finalAddresses = address
+        ? Array.isArray(derive_addresses)
+          ? derive_addresses
+          : [address]
+        : [];
+      const addrSet = new Set(finalAddresses.map(a => a?.toLowerCase()));
+      const fromAddress = item?.inputs?.[0]?.addresses?.[0];
+      const isSender =
+        addrSet.size > 0 && addrSet.has(fromAddress?.toLowerCase());
+      let totalAmount = new BigNumber(0);
+      const vOut = Array.isArray(item?.outputs) ? item?.outputs : [];
+      vOut.forEach(tr => {
+        const trAddr = tr?.addresses?.[0]?.toLowerCase();
+        if (
+          (isSender && trAddr !== fromAddress?.toLowerCase()) ||
+          (!isSender && addrSet.has(trAddr))
+        ) {
+          totalAmount = totalAmount.plus(new BigNumber(tr?.value || 0));
+        }
+      });
+      if (isSender) {
+        totalAmount = totalAmount.plus(new BigNumber(item?.fees || 0));
+      }
+      return {
+        hash: item?.hash,
+        timestamp: new Date(item?.received),
+        status: !!item?.confirmed,
+        amount: totalAmount.toString(),
+        fee: new BigNumber(item?.fees || 0).toString(),
+        from: fromAddress,
+        to: vOut.find(tr => {
+          const trAddr = tr?.addresses?.[0]?.toLowerCase();
+          return isSender
+            ? trAddr !== fromAddress?.toLowerCase()
+            : addrSet.has(trAddr);
+        })?.addresses?.[0],
+        blockNumber: item?.block_height ?? null,
+        confirmations: item?.confirmations ?? null,
+      };
     } catch (e) {
       console.error(
-        `Error in Blockcypher for get transactions in ${chain} `,
+        `Error in Blockcypher for get transaction in ${chain}`,
         e?.response?.data,
       );
       throw e;

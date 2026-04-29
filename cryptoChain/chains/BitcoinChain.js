@@ -7,6 +7,7 @@ import BigNumber from 'bignumber.js';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   getLastIndexOfDerivations,
   parseBalance,
   validateNumber,
@@ -306,8 +307,8 @@ export const BitcoinChain = () => {
             const txHash = item?.hash;
             return {
               amount: item?.amount?.toString(),
-              link: txHash?.substring(0, 13) + '...',
-              url: `${config.BITCOIN_SCAN_URL}/tx/${txHash}`,
+              link: txHash,
+              url: getExplorerTxUrl('bitcoin', txHash),
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -320,6 +321,36 @@ export const BitcoinChain = () => {
       } catch (e) {
         console.error(`error getting transactions for bitcoin ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash, address, deriveAddresses}) => {
+      try {
+        const allAddresses = deriveAddresses?.map?.(item => item?.address);
+        const response = await BitcoinFork.getTransaction({
+          transactionId: txHash,
+          chain: 'btc',
+          address,
+          derive_addresses: allAddresses,
+        });
+        if (!response) return null;
+        return {
+          data: {
+            amount: response?.amount?.toString() || '0',
+            link: response.hash,
+            url: getExplorerTxUrl('bitcoin', txHash),
+            status: response?.status ? 'SUCCESS' : 'Pending',
+            date: response?.timestamp,
+            from: response?.from,
+            to: response?.to,
+            fee: response?.fee,
+            totalCourse: '0',
+            blockNumber: response?.blockNumber || null,
+            confirmations: response?.confirmations ?? null,
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for bitcoin ${e}`);
+        return null;
       }
     },
     send: async ({
@@ -379,7 +410,7 @@ export const BitcoinChain = () => {
               transactionId: transaction,
               chain: 'btc',
             });
-            if (response?.data?.status?.confirmed) {
+            if (response?.status) {
               clearInterval(timer);
               resolve(response);
             } else if (numberOfRetries === 15) {

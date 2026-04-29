@@ -1,10 +1,10 @@
 import {TronWeb} from 'tronweb';
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
-  getPremiumRPCUrl,
-  getRPCUrl,
-} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {convertToSmallAmount} from 'dok-wallet-blockchain-networks/helper';
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+  convertToSmallAmount,
+  getExplorerTxUrl,
+} from 'dok-wallet-blockchain-networks/helper';
+import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 import dayjs from 'dayjs';
@@ -20,43 +20,15 @@ const removeSubstringFromPrivateKey = privateKey => {
 };
 
 export const TronChain = () => {
-  // Build ordered provider list: premium RPCs first, then trongrid with API keys as fallback.
-  // Each entry is a TronWeb options object.
-  const buildTronProviders = () => {
-    const providers = [];
-
-    // Premium providers (QuickNode, Alchemy, etc.) — each URL is a standalone fullHost
-    const premiumUrls = getPremiumRPCUrl('tron');
-    for (const url of premiumUrls) {
-      providers.push({fullHost: url});
-    }
-
-    // Trongrid fallback — retry with no key, then each API key in turn
-    const tronGridOptions = {
-      fullHost: getRPCUrl('tron_full_host'),
-      solidityNode: getRPCUrl('tron_solidity_node'),
-      eventServer: getRPCUrl('tron_event_server'),
-    };
-    providers.push({...tronGridOptions}); // no API key
-    const apiKey1 = getRPCUrl('tron_api_key');
-    const apiKey2 = getRPCUrl('tron_api_key_2');
-    if (apiKey1) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey1},
-      });
-    }
-    if (apiKey2) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey2},
-      });
-    }
-
-    return providers;
-  };
-
+  const TRON_API_KEYS = [null];
+  if (getRPCUrl('tron_api_key')) {
+    TRON_API_KEYS.push(getRPCUrl('tron_api_key'));
+  }
+  if (getRPCUrl('tron_api_key_2')) {
+    TRON_API_KEYS.push(getRPCUrl('tron_api_key_2'));
+  }
   let defaultTronWeb = null;
+
   try {
     const options = {
       fullHost: getRPCUrl('tron_full_host'),
@@ -70,20 +42,22 @@ export const TronChain = () => {
   }
 
   const retryFunc = async (cb, defaultResponse) => {
-    const providers = buildTronProviders();
-    for (let i = 0; i < providers.length; i++) {
+    for (let i = 0; i < TRON_API_KEYS.length; i++) {
       try {
-        const tronWeb = new TronWeb(providers[i]);
+        const options = {
+          fullHost: getRPCUrl('tron_full_host'),
+          solidityNode: getRPCUrl('tron_solidity_node'),
+          eventServer: getRPCUrl('tron_event_server'),
+        };
+        const apiKey = TRON_API_KEYS[i];
+        if (apiKey) {
+          options['TRON-PRO-API-KEY'] = apiKey;
+        }
+        const tronWeb = new TronWeb(options);
         return await cb(tronWeb);
       } catch (e) {
-        console.error(
-          'Error for tron provider',
-          i,
-          providers[i].fullHost,
-          'Errors:',
-          e,
-        );
-        if (i === providers.length - 1) {
+        console.error('Error for tron ', i, 'Errors:', e);
+        if (i === TRON_API_KEYS.length - 1) {
           if (defaultResponse) {
             return defaultResponse;
           } else {
@@ -747,12 +721,22 @@ export const TronChain = () => {
             'get',
           );
           return resp?.data?.map(transaction => {
-            const raw = transaction.raw_data.contract[0].parameter.value;
+            const contract = transaction.raw_data.contract[0];
+            const contractType = contract?.type;
+            const raw = contract.parameter.value;
             const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+            let amount;
+            if (contractType === 'FreezeBalanceV2Contract') {
+              amount = raw?.frozen_balance?.toString();
+            } else if (contractType === 'UnfreezeBalanceV2Contract') {
+              amount = raw?.unfreeze_balance?.toString();
+            } else {
+              amount = raw?.amount?.toString();
+            }
             return {
-              amount: raw?.amount?.toString(),
-              link: transaction.txID.substring(0, 13) + '...',
-              url: `${config.TRON_SCAN_URL}/transaction/${transaction.txID}`,
+              amount,
+              link: transaction.txID,
+              url: getExplorerTxUrl('tron', transaction.txID),
               date: transaction.raw_data.timestamp, //new Date(transaction.raw_data.timestamp),
               status: transaction.ret?.[0]?.contractRet,
               fee: transaction.ret?.[0]?.fee, // total fee
@@ -768,6 +752,54 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
+    getTransaction: async ({txHash}) =>
+      retryFunc(async tronWeb => {
+        try {
+          if (!txHash) return null;
+          const resp = await tronWeb.fullNode.request(
+            `wallet/gettransactionbyid`,
+            {
+              value: txHash,
+            },
+            'post',
+          );
+          const transaction = resp;
+          if (!transaction) return null;
+          const contract = transaction.raw_data.contract[0];
+          const contractType = contract?.type;
+          const raw = contract.parameter.value;
+          const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+          const toAddress = raw.to_address
+            ? tronWeb.address.fromHex(raw.to_address)
+            : undefined;
+          let amount;
+          if (contractType === 'FreezeBalanceV2Contract') {
+            amount = raw?.frozen_balance?.toString();
+          } else if (contractType === 'UnfreezeBalanceV2Contract') {
+            amount = raw?.unfreeze_balance?.toString();
+          } else {
+            amount = raw?.amount?.toString();
+          }
+          return {
+            data: {
+              amount,
+              link: txHash,
+              url: getExplorerTxUrl('tron', txHash),
+              date: transaction.raw_data.timestamp,
+              status: transaction.ret?.[0]?.contractRet,
+              fee: transaction.ret?.[0]?.fee,
+              net_fee: transaction.net_fee,
+              from: fromAddress,
+              to: toAddress,
+              blockNumber: transaction.blockNumber,
+              totalCourse: '0',
+            },
+          };
+        } catch (e) {
+          console.error(`error getting transaction ${e}`);
+          throw e;
+        }
+      }, null),
     getStakingInfo: async ({staking, stakingBalance, address}) =>
       retryFunc(async tronWeb => {
         try {
@@ -917,7 +949,7 @@ export const TronChain = () => {
             return {
               amount: raw?.toString(),
               link: transaction.transaction_id.substring(0, 13) + '...',
-              url: `${config.TRON_SCAN_URL}/transaction/${transaction.transaction_id}`,
+              url: getExplorerTxUrl('tron', transaction.transaction_id),
               status: 'SUCCESS',
               date: transaction?.block_timestamp, //new Date(transaction.raw_data.timestamp),
               from: fromAddress,
