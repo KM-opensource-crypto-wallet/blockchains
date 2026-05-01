@@ -222,6 +222,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[i]);
         fetchRequest.timeout = TIMEOUT;
+        fetchRequest.retryFunc = async () => null;
         const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
           staticNetwork: true,
         });
@@ -243,6 +244,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[i]);
         fetchRequest.timeout = TIMEOUT;
+        fetchRequest.retryFunc = async () => null;
         const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
           staticNetwork: true,
         });
@@ -374,6 +376,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       try {
         const fetchRequest = new FetchRequest(allRpcUrls[i]);
         fetchRequest.timeout = TIMEOUT;
+        fetchRequest.retryFunc = async () => null;
         const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
           staticNetwork: true,
         });
@@ -412,6 +415,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       try {
         const fetchRequest = new FetchRequest(rpcUrl);
         fetchRequest.timeout = TIMEOUT;
+        fetchRequest.retryFunc = async () => null;
         const tempProvider = new JsonRpcProvider(fetchRequest, chainId, {
           staticNetwork: true,
         });
