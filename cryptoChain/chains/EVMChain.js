@@ -216,16 +216,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }
   };
 
+  const createRpcProvider = url => {
+    const fetchRequest = new FetchRequest(url);
+    fetchRequest.timeout = TIMEOUT;
+    fetchRequest.retryFunc = async () => null;
+    return new JsonRpcProvider(fetchRequest, chainId, {staticNetwork: true});
+  };
+
   const safeGetTransactionData = async txHash => {
     const isLastIndex = allRpcUrls.length - 1;
     for (let i = 0; i < allRpcUrls.length; i++) {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[i]);
-        fetchRequest.timeout = TIMEOUT;
-        fetchRequest.retryFunc = async () => null;
-        const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const retryEvmProvider = createRpcProvider(allRpcUrls[i]);
         const resp = await retryEvmProvider.getTransaction(txHash);
         if (resp || i === isLastIndex) {
           return resp;
@@ -242,12 +244,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     const isLastIndex = allRpcUrls.length - 1;
     for (let i = 0; i < allRpcUrls.length; i++) {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[i]);
-        fetchRequest.timeout = TIMEOUT;
-        fetchRequest.retryFunc = async () => null;
-        const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const retryEvmProvider = createRpcProvider(allRpcUrls[i]);
         const resp = await retryEvmProvider.getTransactionReceipt(txHash);
         if (resp || i === isLastIndex) {
           return resp;
@@ -374,12 +371,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const retryFunc = async (cb, defaultResponse) => {
     for (let i = 0; i < allRpcUrls.length; i++) {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[i]);
-        fetchRequest.timeout = TIMEOUT;
-        fetchRequest.retryFunc = async () => null;
-        const retryEvmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const retryEvmProvider = createRpcProvider(allRpcUrls[i]);
         return await cb(retryEvmProvider);
       } catch (e) {
         console.error('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
@@ -413,12 +405,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const createSendTransactionsPromises = (finalWallet, tx, rpcUrls) => {
     return rpcUrls.map(async rpcUrl => {
       try {
-        const fetchRequest = new FetchRequest(rpcUrl);
-        fetchRequest.timeout = TIMEOUT;
-        fetchRequest.retryFunc = async () => null;
-        const tempProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const tempProvider = createRpcProvider(rpcUrl);
         const finalWal = finalWallet.connect(tempProvider);
         const tr = await finalWal.sendTransaction(tx);
         return {resp: tr, error: null};
@@ -1274,11 +1261,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       nonce,
     }) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         let finalEstimateGas = estimateGas;
@@ -1336,11 +1319,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     },
     cancelTransaction: async ({from, nonce, privateKey, feesType}) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         const finalEstimateGas = await evmProvider.estimateGas({
@@ -1383,11 +1362,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       data,
     }) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         const finalEstimateGas = await evmProvider.estimateGas({
@@ -1435,11 +1410,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       nonce,
     }) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         const delegatedContract = new ethers.Contract(
@@ -1518,11 +1489,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       nonce,
     }) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         const contract = new ethers.Contract(
@@ -1590,11 +1557,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       nonce,
     }) => {
       try {
-        const fetchRequest = new FetchRequest(allRpcUrls[0]);
-        fetchRequest.timeout = TIMEOUT;
-        const evmProvider = new JsonRpcProvider(fetchRequest, chainId, {
-          staticNetwork: true,
-        });
+        const evmProvider = createRpcProvider(allRpcUrls[0]);
         const wallet = new ethers.Wallet(privateKey);
         let walletSigner = wallet.connect(evmProvider);
         const contract = new ethers.Contract(
