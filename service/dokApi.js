@@ -223,12 +223,11 @@ export const fetchFeesInfo = async () => {
 
 export const getBuyCryptoQuote = async payload => {
   try {
-    const ipAddress = await getIPAddress();
     const resp = await DokApi.post('/get-buy-crypto-quote', {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: {...payload, ipAddress},
+      crypto_payload: {...payload},
     });
     return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
@@ -239,12 +238,11 @@ export const getBuyCryptoQuote = async payload => {
 
 export const getSellCryptoQuote = async payload => {
   try {
-    const ipAddress = await getIPAddress();
     const resp = await DokApi.post('/get-sell-crypto-quote', {
       country_code: payload?.currentCountry,
       from_device: payload?.fromDevice,
       is_sandbox: IS_SANDBOX,
-      crypto_payload: {...payload, ipAddress},
+      crypto_payload: {...payload},
     });
     return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
