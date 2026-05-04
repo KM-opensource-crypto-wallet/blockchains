@@ -140,6 +140,7 @@ export const StellarChain = () => {
               from: sender,
               to: receiver,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }

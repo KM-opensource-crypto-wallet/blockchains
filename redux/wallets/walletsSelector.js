@@ -369,6 +369,14 @@ export const getFailedTransaction = state => state.wallets?.failedTransaction;
 export const selectCurrentCoinRecentTransaction = state =>
   selectCurrentCoin(state)?.recentTransaction;
 
+// type: 'stake' | 'unstake' | 'withdraw' | 'regular' | 'all'
+export const selectTransactionsByType = (type = 'all') =>
+  createSelector(selectCurrentCoin, currentCoin => {
+    const transactions = currentCoin?.transactions ?? [];
+    if (type === 'all') return transactions;
+    return transactions.filter(tx => tx?.transactionType === type);
+  });
+
 export const getLastCoinsScanTimestamp = state => {
   const currentWallet = selectCurrentWallet(state);
   return currentWallet?.lastCoinsScanTimestamp;

@@ -37,6 +37,26 @@ import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 
 const errorDecoder = ErrorDecoder.create();
 
+const BATCH_EXECUTE_SELECTOR = '0x3f707e6b';
+
+const batchContractInterface = new ethers.Interface(contractABI);
+
+function decodeBatchTotalAmount(input) {
+  try {
+    const decoded = batchContractInterface.parseTransaction({data: input});
+    if (decoded?.args?.[0]) {
+      const total = decoded.args[0].reduce(
+        (sum, call) => sum + BigInt(call[1]),
+        0n,
+      );
+      return total.toString();
+    }
+  } catch (e) {
+    // ignore decode failures
+  }
+  return '0';
+}
+
 const FEES_BY_RPC_CHAINS = [
   'viction',
   'ethereum_classic',
@@ -1021,6 +1041,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         });
         const removePendingTransactions = [];
         if (Array.isArray(transactions?.data)) {
+          const batchContractAddress =
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
           const transactionsData = transactions?.data.map(item => {
             const bnValue = BigInt(item?.value);
             const txHash = item?.hash;
@@ -1043,8 +1065,20 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 tempPendingTransactions = updatedArray;
               }
             }
+            const toAddress = item?.to?.toLowerCase();
+            const fromAddress = item?.from?.toLowerCase();
+            const normalizedAddress = address?.toLowerCase();
+            const isBatch =
+              (batchContractAddress &&
+                toAddress === batchContractAddress.toLowerCase()) ||
+              (toAddress === normalizedAddress &&
+                fromAddress === normalizedAddress &&
+                item?.input?.startsWith(BATCH_EXECUTE_SELECTOR));
+            const amount = isBatch
+              ? decodeBatchTotalAmount(item?.input)
+              : bnValue.toString();
             return {
-              amount: bnValue.toString(),
+              amount,
               link: txHash,
               url: getExplorerTxUrl(chain_name, txHash),
               status: Number(item?.txreceipt_status) ? 'SUCCESS' : 'FAIL',
@@ -1052,6 +1086,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
+              transactionType: isBatch ? 'batch' : 'regular',
             };
           });
           if (removePendingTransactions.length) {
@@ -1103,13 +1138,24 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             console.warn('Could not fetch block info', e);
           }
         }
+        const batchContractAddress =
+          BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+        const toAddr = tx.to?.toLowerCase();
+        const fromAddr = tx.from?.toLowerCase();
+        const isBatchTx =
+          (batchContractAddress &&
+            toAddr === batchContractAddress.toLowerCase()) ||
+          (toAddr === fromAddr && tx.data?.startsWith(BATCH_EXECUTE_SELECTOR));
+        const txAmount = isBatchTx
+          ? decodeBatchTotalAmount(tx.data)
+          : tx.value.toString();
         return {
           data: {
             link: tx.hash,
             from: tx.from,
             to: tx.to,
             url: getExplorerTxUrl(chain_name, txHash),
-            amount: tx.value.toString(),
+            amount: txAmount,
             blockNumber: tx.blockNumber
               ? parseInt(String(tx.blockNumber), 10)
               : null,
@@ -1219,6 +1265,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         });
         const removePendingTransactions = [];
         if (Array.isArray(transactions?.data)) {
+          const batchContractAddress =
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
           const transactionsData = transactions?.data.map(item => {
             const bnValue = BigInt(item?.value);
             const txHash = item?.hash;
@@ -1241,6 +1289,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 tempPendingTransactions = updatedArray;
               }
             }
+            const toAddress = item?.to?.toLowerCase();
+            const fromAddress = item?.from?.toLowerCase();
+            const normalizedAddress = address?.toLowerCase();
+            const isBatch =
+              (batchContractAddress &&
+                toAddress === batchContractAddress.toLowerCase()) ||
+              (toAddress === normalizedAddress &&
+                fromAddress === normalizedAddress &&
+                item?.input?.startsWith(BATCH_EXECUTE_SELECTOR));
             return {
               amount: bnValue.toString(),
               link: txHash.substring(0, 13) + '...',
@@ -1251,6 +1308,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               to: item?.to,
               contractAddress: item?.contractAddress,
               totalCourse: '0$',
+              transactionType: isBatch ? 'batch' : 'regular',
             };
           });
           if (removePendingTransactions.length) {

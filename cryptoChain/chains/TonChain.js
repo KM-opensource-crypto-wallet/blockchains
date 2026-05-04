@@ -260,6 +260,7 @@ export const TonChain = () => {
               from: from,
               to: to,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }

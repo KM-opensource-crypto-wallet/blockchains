@@ -584,6 +584,7 @@ export const SolanaChain = () => {
                   from: transactionDetails?.source,
                   to: transactionDetails?.destination,
                   totalCourse: '0$',
+                  transactionType: 'regular',
                 });
               }
             });

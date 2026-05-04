@@ -150,6 +150,7 @@ export const FilecoinChain = chain_name => {
             date: item?.timestamp ? new Date(item.timestamp) : new Date(),
             from: item?.from,
             to: item?.to,
+            transactionType: 'regular',
           };
         });
       } catch (e) {

@@ -720,33 +720,50 @@ export const TronChain = () => {
             {limit: 20},
             'get',
           );
-          return resp?.data?.map(transaction => {
-            const contract = transaction.raw_data.contract[0];
-            const contractType = contract?.type;
-            const raw = contract.parameter.value;
-            const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-            let amount;
-            if (contractType === 'FreezeBalanceV2Contract') {
-              amount = raw?.frozen_balance?.toString();
-            } else if (contractType === 'UnfreezeBalanceV2Contract') {
-              amount = raw?.unfreeze_balance?.toString();
-            } else {
-              amount = raw?.amount?.toString();
-            }
-            return {
-              amount,
-              link: transaction.txID,
-              url: getExplorerTxUrl('tron', transaction.txID),
-              date: transaction.raw_data.timestamp, //new Date(transaction.raw_data.timestamp),
-              status: transaction.ret?.[0]?.contractRet,
-              fee: transaction.ret?.[0]?.fee, // total fee
-              net_fee: transaction.net_fee,
-              from: fromAddress,
-              to: tronWeb.address.fromHex(raw.to_address),
-              blockNumber: transaction.blockNumber,
-              totalCourse: '0$',
-            };
-          });
+          return await Promise.all(
+            resp?.data?.map(async transaction => {
+              const contract = transaction.raw_data.contract[0];
+              const contractType = contract?.type;
+              const raw = contract.parameter.value;
+              const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+              let amount;
+              let transactionType;
+              if (contractType === 'FreezeBalanceV2Contract') {
+                amount = raw?.frozen_balance?.toString();
+                transactionType = 'stake';
+              } else if (contractType === 'UnfreezeBalanceV2Contract') {
+                amount = raw?.unfreeze_balance?.toString();
+                transactionType = 'unstake';
+              } else if (contractType === 'WithdrawExpireUnfreezeContract') {
+                const txInfo = await tronWeb.fullNode.request(
+                  'wallet/gettransactioninfobyid',
+                  {value: transaction.txID},
+                  'post',
+                );
+                amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
+                transactionType = 'withdraw';
+              } else {
+                amount = raw?.amount?.toString();
+                transactionType = 'regular';
+              }
+              return {
+                amount,
+                link: transaction.txID,
+                url: getExplorerTxUrl('tron', transaction.txID),
+                date: transaction.raw_data.timestamp,
+                status: transaction.ret?.[0]?.contractRet,
+                fee: transaction.ret?.[0]?.fee,
+                net_fee: transaction.net_fee,
+                from: fromAddress,
+                to: raw.to_address
+                  ? tronWeb.address.fromHex(raw.to_address)
+                  : fromAddress,
+                blockNumber: transaction.blockNumber,
+                totalCourse: '0$',
+                transactionType,
+              };
+            }),
+          );
         } catch (e) {
           console.error(`error getting transactions ${e}`);
           throw e;
@@ -777,6 +794,13 @@ export const TronChain = () => {
             amount = raw?.frozen_balance?.toString();
           } else if (contractType === 'UnfreezeBalanceV2Contract') {
             amount = raw?.unfreeze_balance?.toString();
+          } else if (contractType === 'WithdrawExpireUnfreezeContract') {
+            const txInfo = await tronWeb.fullNode.request(
+              'wallet/gettransactioninfobyid',
+              {value: txHash},
+              'post',
+            );
+            amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
           } else {
             amount = raw?.amount?.toString();
           }

@@ -88,6 +88,7 @@ export const TezosChain = () => {
             from: item?.sender?.address,
             to: item?.target?.address,
             totalCourse: '0$',
+            transactionType: 'regular',
           };
         });
       } catch (e) {

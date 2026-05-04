@@ -199,6 +199,7 @@ export const HederaChain = () => {
               from: from,
               to: to,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }

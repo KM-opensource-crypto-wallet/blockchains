@@ -314,6 +314,7 @@ export const BitcoinChain = () => {
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }

@@ -212,6 +212,7 @@ export const AptosChain = () => {
             from: item?.sender,
             to: toAddress,
             totalCourse: '0$',
+            transactionType: 'regular',
           });
         });
         return finalData;

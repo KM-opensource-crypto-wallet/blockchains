@@ -160,6 +160,7 @@ export const CosmosChain = () => {
               from: sender,
               to: recipient,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }
