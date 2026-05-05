@@ -760,7 +760,7 @@ export const TronChain = () => {
                   : fromAddress,
                 blockNumber: transaction.blockNumber,
                 totalCourse: '0$',
-                transactionType,
+                transactionType, // NOTE: this will filter the transactions
               };
             }),
           );
