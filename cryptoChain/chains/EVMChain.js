@@ -39,6 +39,65 @@ const errorDecoder = ErrorDecoder.create();
 
 const BATCH_EXECUTE_SELECTOR = '0x3f707e6b';
 
+const UNSTAKE_FUNCTION_KEYWORDS = [
+  'unstake',
+  'undelegate',
+  'unfreeze',
+  'withdraw',
+  'exit',
+  'redeem',
+];
+const STAKE_FUNCTION_KEYWORDS = [
+  'stake',
+  'delegate',
+  'freeze',
+  'supply',
+  'authorizeanddeposit',
+  'deposit',
+  'approve',
+];
+
+const STAKING_CONTRACTS = {
+  ethereum: {
+    '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2': 'stake', // Aave V3 Pool
+    '0x3afdc9bca9213a35503b077a6072f3d0d5ab0840': 'stake', // Compound USDT
+    '0xc3d688b66703497daa19211eedff47f25384cdc3': 'stake', // Compound USDC
+    '0x1b0e765f6224c21223aea2af16c1c46e38885a40': 'stake', // Compound comet reward
+    '0x5c20b550819128074fd538edf79791733ccedd18': 'stake', // Fluid USDT
+    '0x9fb7b4477576fe5b32be4c1843afb1e55f251b33': 'stake', // Fluid USDC
+    '0xdad4e51d64c3b65a9d27ad9f3185b09449712065': 'stake', // Morpho USDT
+    '0xbeef01735c132ada46aa9aa4c54623caa92a64cb': 'stake', // Morpho USDC
+    '0xe2e7a17dff93280dec073c995595155283e3c372': 'stake', // Spark USDT
+    '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d': 'stake', // Spark USDC
+    '0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d': 'stake', // maple USDT
+    '0xf007476bb27430795138c511f18f821e8d1e5ee2': 'stake', //  maple USDC
+    '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'stake', // USDT contract approve
+  },
+};
+
+function getEVMTransactionType(item, isBatch, chainName) {
+  if (isBatch) {
+    return 'batch';
+  }
+
+  const toAddress = item?.to?.toLowerCase();
+  const functionName = (item?.functionName || '').toLowerCase();
+  const chainContracts = STAKING_CONTRACTS[chainName] || {};
+  const contractType = chainContracts[toAddress];
+
+  if (contractType) {
+    if (UNSTAKE_FUNCTION_KEYWORDS.some(kw => functionName.includes(kw))) {
+      return 'unstake';
+    }
+    if (STAKE_FUNCTION_KEYWORDS.some(kw => functionName.includes(kw))) {
+      return 'stake';
+    }
+    return 'smartContract';
+  }
+
+  return 'regular';
+}
+
 const batchContractInterface = new ethers.Interface(contractABI);
 
 function decodeBatchTotalAmount(input) {
@@ -1086,7 +1145,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
-              transactionType: isBatch ? 'batch' : 'regular',
+              transactionType: getEVMTransactionType(item, isBatch, chain_name),
             };
           });
           if (removePendingTransactions.length) {
@@ -1308,7 +1367,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               to: item?.to,
               contractAddress: item?.contractAddress,
               totalCourse: '0$',
-              transactionType: isBatch ? 'batch' : 'regular',
+              transactionType: getEVMTransactionType(item, isBatch, chain_name),
             };
           });
           if (removePendingTransactions.length) {
