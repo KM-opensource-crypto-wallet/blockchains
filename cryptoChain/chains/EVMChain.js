@@ -81,6 +81,7 @@ function getEVMTransactionType(item, isBatch, chainName) {
   }
 
   const toAddress = item?.to?.toLowerCase();
+  const fromAddress = item?.from?.toLowerCase();
   const functionName = (item?.functionName || '').toLowerCase();
   const chainContracts = STAKING_CONTRACTS[chainName] || {};
   const contractType = chainContracts[toAddress];
@@ -93,6 +94,12 @@ function getEVMTransactionType(item, isBatch, chainName) {
       return 'stake';
     }
     return 'smartContract';
+  }
+
+  // For ERC20 token transfers: when a staking contract sends tokens back to
+  // the user (item.from = DeFi contract), it's an unstake operation.
+  if (chainContracts[fromAddress]) {
+    return 'unstake';
   }
 
   return 'regular';
