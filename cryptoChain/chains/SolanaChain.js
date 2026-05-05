@@ -570,17 +570,69 @@ export const SolanaChain = () => {
           if (Array.isArray(transactionData)) {
             let finalData = [];
             transactionData.forEach(item => {
-              const transactionDetails =
-                item?.transaction?.message?.instructions[0]?.parsed?.info;
+              const instructions =
+                item?.transaction?.message?.instructions || [];
+              const txHash = item?.transaction?.signatures[0];
+
+              const stakeInstruction = instructions.find(
+                ix =>
+                  ix?.program === 'stake' ||
+                  ix?.programId?.toString() ===
+                    'Stake11111111111111111111111111111111111111112',
+              );
+
+              if (stakeInstruction) {
+                const stakeType = stakeInstruction?.parsed?.type;
+                const info = stakeInstruction?.parsed?.info || {};
+                let transactionType = 'stake';
+                let amount = '0';
+                let from = address;
+                let to = address;
+
+                if (stakeType === 'delegate' || stakeType === 'initialize') {
+                  transactionType = 'stake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.voteAccount || info?.stakeAccount || address;
+                  const fundIx = instructions.find(
+                    ix =>
+                      ix?.parsed?.info?.lamports != null &&
+                      ix?.program !== 'stake',
+                  );
+                  amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
+                } else if (stakeType === 'deactivate') {
+                  transactionType = 'unstake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.stakeAccount || address;
+                } else if (stakeType === 'withdraw') {
+                  transactionType = 'withdraw';
+                  from = info?.stakeAccount || address;
+                  to = info?.destination || address;
+                  amount = info?.lamports?.toString() || '0';
+                }
+
+                finalData.push({
+                  amount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: 'SUCCESS',
+                  date: item?.blockTime * 1000,
+                  from,
+                  to,
+                  totalCourse: '0$',
+                  transactionType,
+                });
+                return;
+              }
+
+              const transactionDetails = instructions[0]?.parsed?.info;
               if (transactionDetails?.lamports?.toString()) {
                 const bnValue = transactionDetails?.lamports?.toString() || 0;
-                const txHash = item?.transaction?.signatures[0];
                 finalData.push({
                   amount: bnValue?.toString(),
                   link: txHash,
                   url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
-                  date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
+                  date: item?.blockTime * 1000,
                   from: transactionDetails?.source,
                   to: transactionDetails?.destination,
                   totalCourse: '0$',
