@@ -1,8 +1,4 @@
-import {
-  config,
-  IS_SANDBOX,
-  isWeb,
-} from 'dok-wallet-blockchain-networks/config/config';
+import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   Authorized,
@@ -29,6 +25,7 @@ import {
   convertToSmallAmount,
   customFetchWithTimeout,
   differentInCurrentTime,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -573,22 +570,73 @@ export const SolanaChain = () => {
           if (Array.isArray(transactionData)) {
             let finalData = [];
             transactionData.forEach(item => {
-              const transactionDetails =
-                item?.transaction?.message?.instructions[0]?.parsed?.info;
+              const instructions =
+                item?.transaction?.message?.instructions || [];
+              const txHash = item?.transaction?.signatures[0];
+
+              const stakeInstruction = instructions.find(
+                ix =>
+                  ix?.program === 'stake' ||
+                  ix?.programId?.toString() ===
+                    'Stake11111111111111111111111111111111111111112',
+              );
+
+              if (stakeInstruction) {
+                const stakeType = stakeInstruction?.parsed?.type;
+                const info = stakeInstruction?.parsed?.info || {};
+                let transactionType = 'stake';
+                let amount = '0';
+                let from = address;
+                let to = address;
+
+                if (stakeType === 'delegate' || stakeType === 'initialize') {
+                  transactionType = 'stake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.voteAccount || info?.stakeAccount || address;
+                  const fundIx = instructions.find(
+                    ix =>
+                      ix?.parsed?.info?.lamports != null &&
+                      ix?.program !== 'stake',
+                  );
+                  amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
+                } else if (stakeType === 'deactivate') {
+                  transactionType = 'unstake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.stakeAccount || address;
+                } else if (stakeType === 'withdraw') {
+                  transactionType = 'withdraw';
+                  from = info?.stakeAccount || address;
+                  to = info?.destination || address;
+                  amount = info?.lamports?.toString() || '0';
+                }
+
+                finalData.push({
+                  amount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: 'SUCCESS',
+                  date: item?.blockTime * 1000,
+                  from,
+                  to,
+                  totalCourse: '0$',
+                  transactionType,
+                });
+                return;
+              }
+
+              const transactionDetails = instructions[0]?.parsed?.info;
               if (transactionDetails?.lamports?.toString()) {
                 const bnValue = transactionDetails?.lamports?.toString() || 0;
-                const txHash = item?.transaction?.signatures[0];
                 finalData.push({
                   amount: bnValue?.toString(),
-                  link: txHash.substring(0, 13) + '...',
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
-                  date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
+                  date: item?.blockTime * 1000,
                   from: transactionDetails?.source,
                   to: transactionDetails?.destination,
                   totalCourse: '0$',
+                  transactionType: 'regular',
                 });
               }
             });
@@ -600,6 +648,47 @@ export const SolanaChain = () => {
           throw e;
         }
       }, []),
+    getTransaction: async ({txHash}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          if (!txHash) return null;
+          const [item, currentSlot] = await Promise.all([
+            solanaProvider.getParsedTransaction(txHash, {
+              maxSupportedTransactionVersion: 0,
+            }),
+            solanaProvider.getSlot().catch(() => null),
+          ]);
+          if (!item) return null;
+          const transactionDetails =
+            item?.transaction?.message?.instructions?.find(
+              ix => ix?.parsed?.info?.lamports != null,
+            )?.parsed?.info;
+          if (!transactionDetails?.lamports?.toString()) return null;
+          const bnValue = transactionDetails?.lamports?.toString() || 0;
+          const blockNumber = item?.slot ?? null;
+          const confirmations =
+            blockNumber !== null && currentSlot !== null
+              ? currentSlot - blockNumber
+              : null;
+          return {
+            data: {
+              amount: bnValue?.toString(),
+              link: txHash,
+              url: getExplorerTxUrl('solana', txHash),
+              status: 'SUCCESS',
+              date: item?.blockTime * 1000,
+              from: transactionDetails?.source,
+              to: transactionDetails?.destination,
+              totalCourse: '0',
+              blockNumber,
+              confirmations,
+            },
+          };
+        } catch (e) {
+          console.error(`error getting transaction for solana ${e}`);
+          throw e;
+        }
+      }, null),
 
     getTokenTransactions: ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {
@@ -648,9 +737,7 @@ export const SolanaChain = () => {
                 finalData.push({
                   amount: bnValue?.toString(),
                   link: txHash.substring(0, 13) + '...',
-                  url: `${config.SOLANA_SCAN_URL}/tx/${txHash}${
-                    IS_SANDBOX ? '?cluster=devnet' : ''
-                  }`,
+                  url: getExplorerTxUrl('solana', txHash),
                   status: 'SUCCESS',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: isSender ? address : transactionDetails?.source,

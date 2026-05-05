@@ -1,9 +1,9 @@
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   TonClient,
   WalletContractV4,
@@ -19,6 +19,24 @@ import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import BigNumber from 'bignumber.js';
 import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
 import {WL_APP_NAME} from 'utils/wlData';
+
+const findTxHashBySeqno = async (tonClient, address, seqno) => {
+  const txs = await tonClient.getTransactions(address, {limit: 20});
+  for (const tx of txs) {
+    if (!tx.inMessage?.body) {
+      continue;
+    }
+    const slice = tx.inMessage.body.beginParse();
+    slice.loadBits(512); // skip ed25519 signature
+    slice.loadUint(32); // subwallet_id
+    slice.loadUint(32); // valid_until
+    const txSeqno = slice.loadUint(32);
+    if (txSeqno === seqno) {
+      return tx.hash().toString('hex');
+    }
+  }
+  return null;
+};
 
 export const TonChain = () => {
   const tonClient = new TonClient({
@@ -235,13 +253,14 @@ export const TonChain = () => {
             }
             return {
               amount: amount,
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+              link: txHash,
+              url: getExplorerTxUrl('ton', txHash),
               status: from && to ? 'SUCCESS' : 'FAILED',
               date: date,
               from: from,
               to: to,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }
@@ -249,6 +268,85 @@ export const TonChain = () => {
       } catch (e) {
         console.error('error getting transactions for tonchain', e);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        let resolvedTxHash = null;
+        if (typeof txHash === 'object' && txHash !== null) {
+          const {seqno, walletContract} = txHash;
+          for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const currentSeqno = await walletContract.getSeqno();
+            if (currentSeqno >= seqno) {
+              resolvedTxHash = await findTxHashBySeqno(
+                tonClient,
+                walletContract.address,
+                seqno,
+              );
+              if (resolvedTxHash) {
+                break;
+              }
+            }
+          }
+        } else if (typeof txHash === 'string') {
+          resolvedTxHash = txHash;
+        }
+
+        if (!resolvedTxHash) return null;
+
+        const [res, latestSeqno] = await Promise.all([
+          TonScan.getTransactionByHash({txHash: resolvedTxHash}),
+          TonScan.getMasterchainInfo(),
+        ]);
+        const transactions = res?.data;
+        if (!Array.isArray(transactions) || transactions.length === 0) {
+          return null;
+        }
+        const item = transactions[0];
+        let date, to, from, amount;
+        from = item?.in_msg?.source
+          ? Address.parse(item?.in_msg?.source)?.toString()
+          : undefined;
+        if (from) {
+          date = new Date(item?.now * 1000);
+          to = item?.in_msg?.destination
+            ? Address.parse(item?.in_msg?.destination)?.toString()
+            : undefined;
+          amount = item?.in_msg?.value || '0';
+        } else {
+          const outMsg = item?.out_msgs?.[0];
+          date = new Date(item?.now * 1000);
+          to = outMsg?.destination
+            ? Address.parse(outMsg?.destination).toString()
+            : undefined;
+          from = outMsg?.source
+            ? Address.parse(outMsg?.source).toString()
+            : undefined;
+          amount = outMsg?.value || '0';
+        }
+        const blockNumber = item?.block_ref?.seqno ?? null;
+        const confirmations =
+          blockNumber !== null && latestSeqno !== null
+            ? latestSeqno - blockNumber
+            : null;
+        return {
+          data: {
+            amount: amount || '0',
+            link: resolvedTxHash,
+            url: getExplorerTxUrl('ton', resolvedTxHash),
+            status: from && to ? 'SUCCESS' : 'FAILED',
+            date: date,
+            from: from,
+            to: to,
+            totalCourse: '0$',
+            blockNumber,
+            confirmations,
+          },
+        };
+      } catch (e) {
+        console.error('error getting transaction for tonchain', e);
+        return null;
       }
     },
     getTokenTransactions: async ({address, contractAddress}) => {
@@ -263,7 +361,7 @@ export const TonChain = () => {
           return {
             amount: transaction?.amount,
             link: txHash.substring(0, 13) + '...',
-            url: `${config.TON_SCAN_URL}/tx/${txHash}`,
+            url: getExplorerTxUrl('ton', txHash),
             status: 'Unknown',
             date: new Date(transaction?.transaction_now * 1000), //new Date(transaction.raw_data.timestamp),
             from: Address.parse(transaction?.source_wallet)?.toString(),
@@ -310,6 +408,7 @@ export const TonChain = () => {
             }),
           ],
         });
+
         await walletContract.send(transfer);
         return {seqno, walletContract};
       } catch (e) {

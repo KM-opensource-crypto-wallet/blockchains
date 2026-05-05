@@ -1,9 +1,10 @@
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 const {
   Account,
   Ed25519PrivateKey,
@@ -171,8 +172,107 @@ export const AptosChain = () => {
         throw e;
       }
     },
-    getTransactions: async () => {
-      return [];
+    getTransactions: async ({address}) => {
+      try {
+        const transactions = await aptosProvider.getAccountTransactions({
+          accountAddress: address,
+          options: {limit: 10},
+        });
+        if (!Array.isArray(transactions)) {
+          return [];
+        }
+        const finalData = [];
+        transactions.forEach(item => {
+          if (item?.type !== 'user_transaction') {
+            return;
+          }
+          const payload = item?.payload;
+          const coinType = payload?.type_arguments?.[0];
+          const isTransfer =
+            payload?.function === '0x1::aptos_account::transfer' ||
+            ((payload?.function === '0x1::coin::transfer' ||
+              payload?.function === '0x1::aptos_account::transfer_coins') &&
+              coinType === APT_COIN);
+          if (!isTransfer) {
+            return;
+          }
+          const txHash = item?.hash;
+          const args = payload?.arguments || [];
+          const toAddress = args[0];
+          const amount = args[1];
+          if (!amount) {
+            return;
+          }
+          finalData.push({
+            amount: amount?.toString(),
+            link: txHash,
+            url: getExplorerTxUrl('aptos', txHash),
+            status: item?.success ? 'SUCCESS' : 'Failed',
+            date: Math.floor(Number(item?.timestamp) / 1000),
+            from: item?.sender,
+            to: toAddress,
+            totalCourse: '0$',
+            transactionType: 'regular',
+          });
+        });
+        return finalData;
+      } catch (e) {
+        console.error(`error getting transactions for aptos ${e}`);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        if (!txHash) {
+          return null;
+        }
+        const item = await aptosProvider.getTransactionByHash({
+          transactionHash: txHash,
+        });
+        if (!item || item?.type !== 'user_transaction') {
+          return null;
+        }
+        const payload = item?.payload;
+        const args = payload?.arguments || [];
+        const toAddress = args[0];
+        const amount = args[1];
+        if (!amount) {
+          return null;
+        }
+        let confirmations = null;
+        const txVersion = item?.version
+          ? parseInt(String(item.version), 10)
+          : null;
+        if (txVersion !== null) {
+          try {
+            const ledgerInfo = await aptosProvider.getLedgerInfo();
+            const currentVersion = parseInt(
+              String(ledgerInfo?.ledger_version),
+              10,
+            );
+            confirmations = currentVersion - txVersion;
+          } catch (e) {
+            console.warn('Could not fetch ledger info for confirmations', e);
+          }
+        }
+        return {
+          data: {
+            amount: amount?.toString(),
+            link: txHash,
+            url: getExplorerTxUrl('aptos', txHash),
+            status: item?.success ? 'SUCCESS' : 'Failed',
+            date: Math.floor(Number(item?.timestamp) / 1000),
+            from: item?.sender,
+            to: toAddress,
+            totalCourse: '0$',
+            blockNumber: txVersion,
+            confirmations,
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for aptos ${e}`);
+        return null;
+      }
     },
     getTokenTransactions: async () => {
       return [];

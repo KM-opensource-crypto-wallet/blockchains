@@ -5,6 +5,7 @@ import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -17,12 +18,6 @@ const chainDetails = {
   bitcoin_cash: 'bch',
 };
 
-const ALL_SCAN_URL = {
-  bitcoin_cash: config.BITCOIN_CASH_SCAN_URL,
-  dogecoin: config.DOGECOIN_SCAN_URL,
-  litecoin: config.LITECOIN_SCAN_URL,
-};
-
 const ALL_NETWORKS = {
   bitcoin_cash: config.BITCOIN_CASH_NETWORK,
   dogecoin: config.DOGECOIN_NETWORK_STRING,
@@ -32,7 +27,6 @@ const ALL_NETWORKS = {
 export const DogecoinOrLitecoinChain = chain_name => {
   const isBitcoinCash = chain_name === 'bitcoin_cash';
   const network = ALL_NETWORKS[chain_name];
-  const scanUrl = ALL_SCAN_URL[chain_name];
 
   return {
     isValidAddress: ({address}) => {
@@ -120,13 +114,14 @@ export const DogecoinOrLitecoinChain = chain_name => {
             const txHash = item?.hash;
             return {
               amount: item?.amount.toString(),
-              link: txHash.substring(0, 13) + '...',
-              url: `${scanUrl}/transaction/${txHash}`,
+              link: txHash,
+              url: getExplorerTxUrl(chain_name, txHash),
               status: item?.status ? 'SUCCESS' : 'Pending',
               date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
+              transactionType: 'regular',
             };
           });
         }
@@ -134,6 +129,35 @@ export const DogecoinOrLitecoinChain = chain_name => {
       } catch (e) {
         console.error(`error getting transactions for ${chain_name} ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash, address, deriveAddresses}) => {
+      try {
+        const allAddresses = deriveAddresses?.map?.(item => item?.address);
+        const response = await BitcoinFork.getTransaction({
+          transactionId: txHash,
+          chain: chainDetails[chain_name],
+          address,
+          derive_addresses: allAddresses,
+        });
+        if (!response) return null;
+        return {
+          data: {
+            amount: response?.amount?.toString(),
+            link: txHash,
+            url: getExplorerTxUrl(chain_name, txHash),
+            status: response?.status ? 'SUCCESS' : 'Pending',
+            date: response?.timestamp ? new Date(response?.timestamp) : null,
+            from: response?.from,
+            to: response?.to,
+            totalCourse: '0$',
+            blockNumber: response?.blockNumber ?? null,
+            confirmations: response?.confirmations ?? null,
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for ${chain_name} ${e}`);
+        return null;
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee}) => {
@@ -179,7 +203,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
               chain: chainDetails[chain_name],
               transactionId: transactionID,
             });
-            if (isConfirmed) {
+            if (isConfirmed?.status) {
               clearInterval(timer);
               resolve(isConfirmed);
             } else if (numberOfRetries === 15) {
