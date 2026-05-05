@@ -1,4 +1,10 @@
-import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
+import {
+  ethers,
+  FetchRequest,
+  JsonRpcProvider,
+  parseUnits,
+  Transaction,
+} from 'ethers';
 import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
@@ -39,6 +45,11 @@ import {
   getMaxPriorityFee,
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
+import {
+  aavePoolContractAddress,
+  EvmStakingProvider,
+} from 'dok-wallet-blockchain-networks/service/stakingProvider';
+import aavePoolABI from '../../abis/aave_pool.json';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -1682,6 +1693,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             }
             throw new Error(reason);
           }
+        } else if (
+          typeof transaction === 'string' &&
+          isValidEVMTransactionHash(transaction)
+        ) {
+          // Hash string — transaction was already confirmed internally (e.g. AAVE staking)
+          // Just fetch the receipt to confirm it exists on-chain
+          console.log('wait for transaction by hash', transaction);
+          const receipt = await evmProvider.getTransactionReceipt(transaction);
+          if (receipt) {
+            return receipt;
+          }
+          // Receipt not yet indexed, treat as pending
+          return 'pending';
         } else if (Array.isArray(transaction)) {
           console.log('wait multiples transaction', transaction);
           // Handle transactions that were already in the mempool
@@ -1716,5 +1740,189 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           }
         }
       }, 'pending'),
+    createStaking: async ({
+      from,
+      amount,
+      privateKey,
+      contractAddress,
+      decimals,
+      stakingProviderName,
+    }) =>
+      retryFunc(
+        async evmProvider =>
+          EvmStakingProvider.createStaking({
+            from,
+            amount,
+            privateKey,
+            contractAddress,
+            decimals,
+            stakingProviderName,
+            evmProvider,
+          }),
+        null,
+      ),
+    deactivateStaking: async ({
+      from,
+      privateKey,
+      contractAddress,
+      stakingProviderName,
+    }) =>
+      retryFunc(
+        async evmProvider =>
+          await EvmStakingProvider.unStaking({
+            from,
+            privateKey,
+            contractAddress,
+            stakingProviderName,
+            evmProvider,
+          }),
+        null,
+      ),
+    getStakingValidators: async ({address, contractAddress}) => {
+      try {
+        const providerList = await EvmStakingProvider.getlistOfProviders({
+          contractAddress,
+          walletAddress: address,
+        });
+        const validators = providerList.map(provider => ({
+          name: provider.name,
+          validatorAddress: provider.poolContractAddress,
+          image: provider.icon,
+          apy_estimate: parseFloat(provider.apy) || 0,
+          activated_stake: parseFloat(provider.stakedAmount) || 0,
+          totalStaked: provider.totalStaked ?? null,
+        }));
+        return {validators, selectedVotes: null};
+      } catch (e) {
+        console.error('Error in EVMChain getStakingValidators', e);
+        return {validators: [], selectedVotes: null};
+      }
+    },
+    getEstimateFeeForStaking: async ({
+      fromAddress,
+      amount,
+      contractAddress,
+      decimals,
+      privateKey,
+      feesType,
+    }) =>
+      retryFunc(async evmProvider => {
+        try {
+          const {estimateGas} =
+            await EvmStakingProvider.getEstimateFeeForStaking({
+              from: fromAddress,
+              amount,
+              privateKey,
+              contractAddress,
+              decimals,
+              evmProvider,
+            });
+
+          const {gasPrice: gasFee} = await getEtherGasPrice(
+            feesType,
+            evmProvider,
+          );
+          const fee = parseBalance(estimateGas * gasFee, 18);
+          return {fee, gasFee, estimateGas};
+        } catch (e) {
+          console.error('Error in EVMChain getEstimateFeeForStaking', e);
+          throw e;
+        }
+      }, null),
+    getEstimateFeeForDeactivateStaking: async ({
+      fromAddress,
+      contractAddress,
+      privateKey,
+      feesType,
+      stakingProviderName,
+    }) =>
+      retryFunc(async evmProvider => {
+        try {
+          const {estimateGas} =
+            await EvmStakingProvider.getEstimateFeeForDeactivateStaking({
+              from: fromAddress,
+              privateKey,
+              contractAddress,
+              stakingProviderName,
+              evmProvider,
+            });
+          const {gasPrice: gasFee} = await getEtherGasPrice(
+            feesType,
+            evmProvider,
+          );
+          const fee = parseBalance(estimateGas * gasFee, 18);
+          return {fee, gasFee, estimateGas};
+        } catch (e) {
+          console.error(
+            'Error in EVMChain getEstimateFeeForDeactivateStaking',
+            e,
+          );
+          throw e;
+        }
+      }, null),
+    getStaking: async ({address, contractAddress, tokenDecimals}) => {
+      try {
+        const providerList = await EvmStakingProvider.getlistOfProviders({
+          contractAddress,
+          walletAddress: address,
+          tokenDecimals,
+        });
+        return providerList
+          .filter(
+            provider =>
+              provider?.stakedAmountRaw && provider?.stakedAmountRaw !== '0',
+          )
+          .map(provider => ({
+            staking_address: provider.poolContractAddress,
+            amount: provider?.stakedAmountRaw,
+            validator_address: contractAddress,
+            owner_address: address,
+            validatorInfo: {
+              name: provider.name,
+              image: provider.icon,
+            },
+            apy: provider.apy,
+            stakedAmount: provider.stakedAmount,
+            totalStaked: provider.totalStaked ?? null,
+            reward: provider.reward ?? null,
+          }));
+      } catch (error) {
+        console.log('[getStaking] error:', error);
+        return [];
+      }
+    },
+    getStakingInfo: async ({staking, symbol}) => {
+      try {
+        const tempStaking = Array.isArray(staking) ? staking : [];
+        const totalStaked = tempStaking.reduce((acc, item) => {
+          return acc.plus(new BigNumber(item?.amount || 0));
+        }, new BigNumber(0));
+        const info = [
+          {
+            label: 'Stake',
+            value: `${totalStaked.toFixed(6)} ${symbol || ''}`.trim(),
+          },
+        ];
+        return info;
+      } catch (error) {
+        console.log(error);
+        return [];
+      }
+    },
+    getStakingBalance: async ({
+      address,
+      contractAddress,
+      stakingProviderName,
+    }) =>
+      retryFunc(
+        async evmProvider =>
+          await EvmStakingProvider.getStakingBalance({
+            address,
+            contractAddress,
+            stakingProviderName,
+            evmProvider,
+          }),
+        null,
+      ),
   };
 };

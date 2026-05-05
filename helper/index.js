@@ -1,5 +1,11 @@
 import BigNumber from 'bignumber.js';
-import {formatUnits, isHexString, parseUnits, toUtf8String} from 'ethers';
+import {
+  ethers,
+  formatUnits,
+  isHexString,
+  parseUnits,
+  toUtf8String,
+} from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import {APP_VERSION} from 'utils/common';
@@ -16,6 +22,15 @@ import {
   selectCurrentWallet,
 } from '../redux/wallets/walletsSelector';
 dayjs.extend(duration);
+
+export const getTokenLogoUrl = contractAddress => {
+  try {
+    const checksumAddress = ethers.getAddress(contractAddress);
+    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${checksumAddress}/logo.png`;
+  } catch {
+    return null;
+  }
+};
 
 export function getCustomizePublicAddress(str) {
   return `${str?.substring(0, 8) || ''}...${
@@ -370,11 +385,19 @@ const DERIVE_ADDRESS_SUPPORT_CHAIN = [
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
 
-const STAKING_CHAINS = ['solana', 'tron'];
+const STAKING_CHAINS = [
+  'solana_sol',
+  'tron_trx',
+  'ethereum_usdt',
+  'ethereum_usdc',
+];
 
 export const isStakingChain = chain_name => STAKING_CHAINS.includes(chain_name);
 
-const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = ['solana'];
+export const getStakignKey = (chain_name, symbol) =>
+  `${chain_name}_${symbol}`.toLowerCase();
+
+const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = ['solana', 'ethereum'];
 
 export const isValidatorSupportCreateStakingScreen = chain_name =>
   VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN.includes(chain_name);
@@ -427,7 +450,7 @@ const EPOCH_TIME_SUPPORT_CHAIN = ['solana'];
 export const isSupportEpochTime = chain_name =>
   EPOCH_TIME_SUPPORT_CHAIN.includes(chain_name);
 
-const UNSTAKING_BUTTON_CHAIN = ['tron'];
+const UNSTAKING_BUTTON_CHAIN = ['tron', 'ethereum'];
 
 export const isShowUnstakingButton = chain_name =>
   UNSTAKING_BUTTON_CHAIN.includes(chain_name);

@@ -1,0 +1,11 @@
+[
+  "function supply(address asset, uint256 amount)",
+  "function withdraw(address asset, uint256 amount)",
+  "function baseToken() view returns (address)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+  "function getUtilization() view returns (uint256)",
+  "function getSupplyRate(uint256 utilization) view returns (uint64)",
+  "function getRewardOwed(address comet, address account) view returns (address token, uint256 owed)",
+  "function claim(address comet, address src, bool shouldAccrue) external"
+]

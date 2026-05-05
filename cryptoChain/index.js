@@ -372,22 +372,29 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     getStakingBalance: async () =>
       await chain.getStakingBalance({
         address: wallet.address,
+        contractAddress: token.contractAddress,
+        symbol: token.symbol,
       }),
 
     getStaking: async () =>
       await chain?.getStaking({
         address: wallet.address,
+        contractAddress: token?.contractAddress,
+        tokenDecimals: token?.decimal,
       }),
     getStakingValidators: async payload =>
       await chain.getStakingValidators({address: wallet.address, ...payload}),
     getStakingInfo: async payload =>
       await chain?.getStakingInfo({
         address: wallet.address,
+        symbol: token?.symbol,
         ...payload,
       }),
     getEstimateFeeForStaking: async payload =>
       await chain?.getEstimateFeeForStaking({
         fromAddress: wallet.address,
+        contractAddress: token.contractAddress,
+        decimals: token.decimal,
         ...payload,
         privateKey: wallet.privateKey,
       }),
@@ -412,7 +419,9 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     getEstimateFeeForDeactivateStaking: async payload =>
       await chain?.getEstimateFeeForDeactivateStaking({
         fromAddress: wallet.address,
+        contractAddress: token.contractAddress,
         ...payload,
+        privateKey: wallet.privateKey,
       }),
     getEstimateFee: async payload =>
       await chain.getEstimateFeeForToken({
@@ -507,6 +516,8 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.createStaking({
         ...payload,
         privateKey: wallet.privateKey,
+        contractAddress: token.contractAddress,
+        decimals: token.decimal,
       }),
 
     createStakingWithValidator: async payload =>
@@ -528,6 +539,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.deactivateStaking({
         ...payload,
         privateKey: wallet.privateKey,
+        contractAddress: token.contractAddress,
       }),
     getEstimateFeeForBatchTransaction: async payload =>
       await chain.getEstimateFeeForBatchTransaction({
