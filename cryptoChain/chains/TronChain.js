@@ -742,6 +742,9 @@ export const TronChain = () => {
                 );
                 amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
                 transactionType = 'withdraw';
+              } else if (contractType === 'TriggerSmartContract') {
+                amount = raw?.call_value?.toString() ?? '0';
+                transactionType = 'smartContract';
               } else {
                 amount = raw?.amount?.toString();
                 transactionType = 'regular';
@@ -755,9 +758,14 @@ export const TronChain = () => {
                 fee: transaction.ret?.[0]?.fee,
                 net_fee: transaction.net_fee,
                 from: fromAddress,
-                to: raw.to_address
-                  ? tronWeb.address.fromHex(raw.to_address)
-                  : fromAddress,
+                to:
+                  transactionType === 'stake' ||
+                  transactionType === 'unstake' ||
+                  transactionType === 'withdraw'
+                    ? fromAddress
+                    : raw.to_address
+                    ? tronWeb.address.fromHex(raw.to_address)
+                    : fromAddress,
                 blockNumber: transaction.blockNumber,
                 totalCourse: '0$',
                 transactionType, // NOTE: this will filter the transactions

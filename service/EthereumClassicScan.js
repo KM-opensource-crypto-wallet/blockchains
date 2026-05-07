@@ -5,15 +5,8 @@ export const EthereumClassicScan = {
     try {
       const resp = await EthereumClassicScanAPI.get(
         `/api/v2/addresses/${address}/${
-          contractAddress ? 'token-transfer' : 'transactions'
+          contractAddress ? 'token-transfers' : 'transactions'
         }`,
-        {
-          params: {
-            sort: 'desc',
-            limit: 20,
-            token: contractAddress,
-          },
-        },
       );
       const items = Array.isArray(resp?.data?.items) ? resp?.data?.items : [];
       const mapItems = items.map(subItem => ({

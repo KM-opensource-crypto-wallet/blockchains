@@ -71,7 +71,8 @@ const STAKING_CONTRACTS = {
     '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d': 'stake', // Spark USDC
     '0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d': 'stake', // maple USDT
     '0xf007476bb27430795138c511f18f821e8d1e5ee2': 'stake', //  maple USDC
-    '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'stake', // USDT contract approve
+    '0xdac17f958d2ee523a2206206994597c13d831ec7': 'stake', // USDT contract approve
+    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'stake', // USDC contract approve
   },
 };
 
