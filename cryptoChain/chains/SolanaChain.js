@@ -603,6 +603,17 @@ export const SolanaChain = () => {
                   transactionType = 'unstake';
                   from = info?.stakeAuthority || address;
                   to = info?.stakeAccount || address;
+                  const accountKeys =
+                    item?.transaction?.message?.accountKeys || [];
+                  const stakeAccountIndex = accountKeys.findIndex(
+                    key => key?.pubkey?.toString() === info?.stakeAccount,
+                  );
+                  if (stakeAccountIndex !== -1) {
+                    amount =
+                      item?.meta?.preBalances?.[
+                        stakeAccountIndex
+                      ]?.toString() || '0';
+                  }
                 } else if (stakeType === 'withdraw') {
                   transactionType = 'withdraw';
                   from = info?.stakeAccount || address;
@@ -661,17 +672,74 @@ export const SolanaChain = () => {
             solanaProvider.getSlot().catch(() => null),
           ]);
           if (!item) return null;
-          const transactionDetails =
-            item?.transaction?.message?.instructions?.find(
-              ix => ix?.parsed?.info?.lamports != null,
-            )?.parsed?.info;
-          if (!transactionDetails?.lamports?.toString()) return null;
-          const bnValue = transactionDetails?.lamports?.toString() || 0;
+          const instructions = item?.transaction?.message?.instructions || [];
           const blockNumber = item?.slot ?? null;
           const confirmations =
             blockNumber !== null && currentSlot !== null
               ? currentSlot - blockNumber
               : null;
+
+          const stakeInstruction = instructions.find(
+            ix =>
+              ix?.program === 'stake' ||
+              ix?.programId?.toString() ===
+                'Stake11111111111111111111111111111111111111112',
+          );
+
+          if (stakeInstruction) {
+            const stakeType = stakeInstruction?.parsed?.type;
+            const info = stakeInstruction?.parsed?.info || {};
+            let amount = '0';
+            let from = null;
+            let to = null;
+
+            if (stakeType === 'delegate' || stakeType === 'initialize') {
+              from = info?.stakeAuthority || null;
+              to = info?.voteAccount || info?.stakeAccount || null;
+              const fundIx = instructions.find(
+                ix =>
+                  ix?.parsed?.info?.lamports != null && ix?.program !== 'stake',
+              );
+              amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
+            } else if (stakeType === 'deactivate') {
+              from = info?.stakeAuthority || null;
+              to = info?.stakeAccount || null;
+              const accountKeys = item?.transaction?.message?.accountKeys || [];
+              const stakeAccountIndex = accountKeys.findIndex(
+                key => key?.pubkey?.toString() === info?.stakeAccount,
+              );
+              if (stakeAccountIndex !== -1) {
+                amount =
+                  item?.meta?.preBalances?.[stakeAccountIndex]?.toString() ||
+                  '0';
+              }
+            } else if (stakeType === 'withdraw') {
+              from = info?.stakeAccount || null;
+              to = info?.destination || null;
+              amount = info?.lamports?.toString() || '0';
+            }
+
+            return {
+              data: {
+                amount,
+                link: txHash,
+                url: getExplorerTxUrl('solana', txHash),
+                status: 'SUCCESS',
+                date: item?.blockTime * 1000,
+                from,
+                to,
+                totalCourse: '0',
+                blockNumber,
+                confirmations,
+              },
+            };
+          }
+
+          const transactionDetails = instructions.find(
+            ix => ix?.parsed?.info?.lamports != null,
+          )?.parsed?.info;
+          if (!transactionDetails?.lamports?.toString()) return null;
+          const bnValue = transactionDetails?.lamports?.toString() || 0;
           return {
             data: {
               amount: bnValue?.toString(),
