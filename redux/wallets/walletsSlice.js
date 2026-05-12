@@ -1117,6 +1117,13 @@ export const sendFunds = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
+        } else if (confirmTransaction?.status === 'failed') {
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction Failed',
+            message: 'Your transaction failed on the network. Please try again.',
+            toastId,
+          });
         } else if (confirmTransaction) {
           showToast({
             type: 'successToast',
@@ -1152,7 +1159,15 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
-        return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
+        return {
+          tx_hash,
+          status:
+            confirmTransaction === 'pending'
+              ? 2
+              : confirmTransaction?.status === 'failed'
+              ? 1
+              : 3,
+        };
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -1325,6 +1340,13 @@ export const sendPendingTransactions = createAsyncThunk(
             type: 'warningToast',
             title: 'Transaction pending',
             message: 'Transaction take too long. Please check again later',
+            toastId,
+          });
+        } else if (confirmTransaction?.status === 'failed') {
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction Failed',
+            message: 'Your transaction failed on the network. Please try again.',
             toastId,
           });
         } else if (confirmTransaction) {

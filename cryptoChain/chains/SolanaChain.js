@@ -625,7 +625,7 @@ export const SolanaChain = () => {
                   amount,
                   link: txHash,
                   url: getExplorerTxUrl('solana', txHash),
-                  status: 'SUCCESS',
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                   date: item?.blockTime * 1000,
                   from,
                   to,
@@ -644,7 +644,7 @@ export const SolanaChain = () => {
                   amount: bnValue?.toString(),
                   link: txHash,
                   url: getExplorerTxUrl('solana', txHash),
-                  status: 'SUCCESS',
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                   date: item?.blockTime * 1000,
                   from: transactionDetails?.source,
                   to: transactionDetails?.destination,
@@ -724,7 +724,7 @@ export const SolanaChain = () => {
                 amount,
                 link: txHash,
                 url: getExplorerTxUrl('solana', txHash),
-                status: 'SUCCESS',
+                status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                 date: item?.blockTime * 1000,
                 from,
                 to,
@@ -745,7 +745,7 @@ export const SolanaChain = () => {
               amount: bnValue?.toString(),
               link: txHash,
               url: getExplorerTxUrl('solana', txHash),
-              status: 'SUCCESS',
+              status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
               date: item?.blockTime * 1000,
               from: transactionDetails?.source,
               to: transactionDetails?.destination,
@@ -808,7 +808,7 @@ export const SolanaChain = () => {
                   amount: bnValue?.toString(),
                   link: txHash.substring(0, 13) + '...',
                   url: getExplorerTxUrl('solana', txHash),
-                  status: 'SUCCESS',
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
                   from: isSender ? address : transactionDetails?.source,
                   to: isReceiver ? address : transactionDetails?.destination,
@@ -1020,7 +1020,10 @@ export const SolanaChain = () => {
                     'Error in get confirm tranaction',
                     response?.meta?.err,
                   );
-                  reject(response?.meta?.err);
+                  resolve({
+                    status: 'failed',
+                    err: response?.meta?.err,
+                  });
                 }
               } else if (numberOfRetries === retries) {
                 clearInterval(timer);
