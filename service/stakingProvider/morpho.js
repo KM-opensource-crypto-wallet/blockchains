@@ -6,7 +6,7 @@ import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 // Steakhouse MetaMorpho vaults on Ethereum mainnet
 const MORPHO_VAULT_BY_TOKEN = {
   '0xdAC17F958D2ee523a2206206994597C13D831ec7':
-    '0xdaD4e51d64c3B65A9d27aD9F3185B09449712065', // USDT → Steakhouse USDT
+    '0xbEef047a543E45807105E51A8BBEFCc5950fcfBa', // USDT → Steakhouse USDT
   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48':
     '0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB', // USDC → Steakhouse USDC
 };
