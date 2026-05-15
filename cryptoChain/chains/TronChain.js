@@ -1,5 +1,8 @@
 import {TronWeb} from 'tronweb';
-import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  getPremiumRPCUrl,
+  getRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
@@ -20,13 +23,42 @@ const removeSubstringFromPrivateKey = privateKey => {
 };
 
 export const TronChain = () => {
-  const TRON_API_KEYS = [null];
-  if (getRPCUrl('tron_api_key')) {
-    TRON_API_KEYS.push(getRPCUrl('tron_api_key'));
-  }
-  if (getRPCUrl('tron_api_key_2')) {
-    TRON_API_KEYS.push(getRPCUrl('tron_api_key_2'));
-  }
+  // Build ordered provider list: premium RPCs first, then trongrid with API keys as fallback.
+  // Each entry is a TronWeb options object.
+  const buildTronProviders = () => {
+    const providers = [];
+
+    // Premium providers (QuickNode, Alchemy, etc.) — each URL is a standalone fullHost
+    const premiumUrls = getPremiumRPCUrl('tron');
+    for (const url of premiumUrls) {
+      providers.push({fullHost: url});
+    }
+
+    // Trongrid fallback — retry with no key, then each API key in turn
+    const tronGridOptions = {
+      fullHost: getRPCUrl('tron_full_host'),
+      solidityNode: getRPCUrl('tron_solidity_node'),
+      eventServer: getRPCUrl('tron_event_server'),
+    };
+    providers.push({...tronGridOptions}); // no API key
+    const apiKey1 = getRPCUrl('tron_api_key');
+    const apiKey2 = getRPCUrl('tron_api_key_2');
+    if (apiKey1) {
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey1},
+      });
+    }
+    if (apiKey2) {
+      providers.push({
+        ...tronGridOptions,
+        headers: {'TRON-PRO-API-KEY': apiKey2},
+      });
+    }
+
+    return providers;
+  };
+
   let defaultTronWeb = null;
 
   try {
@@ -42,22 +74,20 @@ export const TronChain = () => {
   }
 
   const retryFunc = async (cb, defaultResponse) => {
-    for (let i = 0; i < TRON_API_KEYS.length; i++) {
+    const providers = buildTronProviders();
+    for (let i = 0; i < providers.length; i++) {
       try {
-        const options = {
-          fullHost: getRPCUrl('tron_full_host'),
-          solidityNode: getRPCUrl('tron_solidity_node'),
-          eventServer: getRPCUrl('tron_event_server'),
-        };
-        const apiKey = TRON_API_KEYS[i];
-        if (apiKey) {
-          options['TRON-PRO-API-KEY'] = apiKey;
-        }
-        const tronWeb = new TronWeb(options);
+        const tronWeb = new TronWeb(providers[i]);
         return await cb(tronWeb);
       } catch (e) {
-        console.error('Error for tron ', i, 'Errors:', e);
-        if (i === TRON_API_KEYS.length - 1) {
+        console.error(
+          'Error for tron provider',
+          i,
+          providers[i].fullHost,
+          'Errors:',
+          e,
+        );
+        if (i === providers.length - 1) {
           if (defaultResponse) {
             return defaultResponse;
           } else {
@@ -778,60 +808,62 @@ export const TronChain = () => {
         }
       }, []),
     getTransaction: async ({txHash}) =>
-      retryFunc(async tronWeb => {
-        try {
-          if (!txHash) return null;
-          const resp = await tronWeb.fullNode.request(
-            `wallet/gettransactionbyid`,
-            {
-              value: txHash,
-            },
-            'post',
-          );
-          const transaction = resp;
-          if (!transaction) return null;
-          const contract = transaction.raw_data.contract[0];
-          const contractType = contract?.type;
-          const raw = contract.parameter.value;
-          const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-          const toAddress = raw.to_address
-            ? tronWeb.address.fromHex(raw.to_address)
-            : undefined;
-          let amount;
-          if (contractType === 'FreezeBalanceV2Contract') {
-            amount = raw?.frozen_balance?.toString();
-          } else if (contractType === 'UnfreezeBalanceV2Contract') {
-            amount = raw?.unfreeze_balance?.toString();
-          } else if (contractType === 'WithdrawExpireUnfreezeContract') {
-            const txInfo = await tronWeb.fullNode.request(
-              'wallet/gettransactioninfobyid',
-              {value: txHash},
+      retryFunc(
+        async tronWeb => {
+          try {
+            if (!txHash) return {data: null};
+            const transaction = await tronWeb.fullNode.request(
+              `wallet/gettransactionbyid`,
+              {
+                value: txHash,
+              },
               'post',
             );
-            amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
-          } else {
-            amount = raw?.amount?.toString();
+            if (!transaction) return {data: null};
+            const contract = transaction.raw_data.contract[0];
+            const contractType = contract?.type;
+            const raw = contract.parameter.value;
+            const fromAddress = tronWeb.address.fromHex(raw.owner_address);
+            const toAddress = raw.to_address
+              ? tronWeb.address.fromHex(raw.to_address)
+              : undefined;
+            let amount;
+            if (contractType === 'FreezeBalanceV2Contract') {
+              amount = raw?.frozen_balance?.toString();
+            } else if (contractType === 'UnfreezeBalanceV2Contract') {
+              amount = raw?.unfreeze_balance?.toString();
+            } else if (contractType === 'WithdrawExpireUnfreezeContract') {
+              const txInfo = await tronWeb.fullNode.request(
+                'wallet/gettransactioninfobyid',
+                {value: txHash},
+                'post',
+              );
+              amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
+            } else {
+              amount = raw?.amount?.toString();
+            }
+            return {
+              data: {
+                amount,
+                link: txHash,
+                url: getExplorerTxUrl('tron', txHash),
+                date: transaction.raw_data.timestamp,
+                status: transaction.ret?.[0]?.contractRet,
+                fee: transaction.ret?.[0]?.fee,
+                net_fee: transaction.net_fee,
+                from: fromAddress,
+                to: toAddress,
+                blockNumber: transaction.blockNumber,
+                totalCourse: '0',
+              },
+            };
+          } catch (e) {
+            console.error(`error getting transaction ${e}`);
+            throw e;
           }
-          return {
-            data: {
-              amount,
-              link: txHash,
-              url: getExplorerTxUrl('tron', txHash),
-              date: transaction.raw_data.timestamp,
-              status: transaction.ret?.[0]?.contractRet,
-              fee: transaction.ret?.[0]?.fee,
-              net_fee: transaction.net_fee,
-              from: fromAddress,
-              to: toAddress,
-              blockNumber: transaction.blockNumber,
-              totalCourse: '0',
-            },
-          };
-        } catch (e) {
-          console.error(`error getting transaction ${e}`);
-          throw e;
-        }
-      }, null),
+        },
+        {data: null},
+      ),
     getStakingInfo: async ({staking, stakingBalance, address}) =>
       retryFunc(async tronWeb => {
         try {

@@ -140,7 +140,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
           address,
           derive_addresses: allAddresses,
         });
-        if (!response) return null;
+        if (!response) return {data: null};
         return {
           data: {
             amount: response?.amount?.toString(),
@@ -157,7 +157,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
         };
       } catch (e) {
         console.error(`error getting transaction for ${chain_name} ${e}`);
-        return null;
+        return {data: null};
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee}) => {

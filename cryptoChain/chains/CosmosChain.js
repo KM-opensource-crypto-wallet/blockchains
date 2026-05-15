@@ -190,10 +190,10 @@ export const CosmosChain = () => {
           };
         }
 
-        return [];
+        return {data: null};
       } catch (e) {
         console.error(`error getting transactions for cosmos ${e}`);
-        return [];
+        return {data: null};
       }
     },
     send: async ({

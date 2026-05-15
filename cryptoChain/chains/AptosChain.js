@@ -224,7 +224,7 @@ export const AptosChain = () => {
     getTransaction: async ({txHash}) => {
       try {
         if (!txHash) {
-          return null;
+          return {data: null};
         }
         const item = await aptosProvider.getTransactionByHash({
           transactionHash: txHash,
@@ -271,7 +271,7 @@ export const AptosChain = () => {
         };
       } catch (e) {
         console.error(`error getting transaction for aptos ${e}`);
-        return null;
+        return {data: null};
       }
     },
     getTokenTransactions: async () => {

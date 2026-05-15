@@ -20,6 +20,7 @@ export const PolkadotScan = {
       });
       return {status: resp?.status, data: resp?.data?.data};
     } catch (e) {
+      return {data: null};
       console.error('Error in getTransaction PolkadotScan', e);
     }
   },

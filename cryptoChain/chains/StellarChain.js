@@ -197,7 +197,7 @@ export const StellarChain = () => {
         };
       } catch (e) {
         console.error(`error getting transaction for stellar ${e}`);
-        return null;
+        return {data: null};
       }
     },
     send: async ({to, from, amount, privateKey, memo}) => {

@@ -26,13 +26,17 @@ const findTxHashBySeqno = async (tonClient, address, seqno) => {
     if (!tx.inMessage?.body) {
       continue;
     }
-    const slice = tx.inMessage.body.beginParse();
-    slice.loadBits(512); // skip ed25519 signature
-    slice.loadUint(32); // subwallet_id
-    slice.loadUint(32); // valid_until
-    const txSeqno = slice.loadUint(32);
-    if (txSeqno === seqno) {
-      return tx.hash().toString('hex');
+    try {
+      const slice = tx.inMessage.body.beginParse();
+      slice.loadBits(512); // skip ed25519 signature
+      slice.loadUint(32); // subwallet_id
+      slice.loadUint(32); // valid_untilconst txSeqno = slice.loadUint(32);
+      const txSeqno = slice.loadUint(32);
+      if (txSeqno === seqno) {
+        return tx.hash().toString('hex');
+      }
+    } catch {
+      console.error('errro in process ton transctions', seqno);
     }
   }
   return null;
@@ -346,7 +350,7 @@ export const TonChain = () => {
         };
       } catch (e) {
         console.error('error getting transaction for tonchain', e);
-        return null;
+        return {data: null};
       }
     },
     getTokenTransactions: async ({address, contractAddress}) => {

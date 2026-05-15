@@ -351,7 +351,7 @@ export const BitcoinChain = () => {
         };
       } catch (e) {
         console.error(`error getting transaction for bitcoin ${e}`);
-        return null;
+        return {data: null};
       }
     },
     send: async ({

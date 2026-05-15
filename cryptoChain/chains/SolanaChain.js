@@ -662,103 +662,108 @@ export const SolanaChain = () => {
         }
       }, []),
     getTransaction: async ({txHash}) =>
-      retryFunc(async solanaProvider => {
-        try {
-          if (!txHash) return null;
-          const [item, currentSlot] = await Promise.all([
-            solanaProvider.getParsedTransaction(txHash, {
-              maxSupportedTransactionVersion: 0,
-            }),
-            solanaProvider.getSlot().catch(() => null),
-          ]);
-          if (!item) return null;
-          const instructions = item?.transaction?.message?.instructions || [];
-          const blockNumber = item?.slot ?? null;
-          const confirmations =
-            blockNumber !== null && currentSlot !== null
-              ? currentSlot - blockNumber
-              : null;
+      retryFunc(
+        async solanaProvider => {
+          try {
+            if (!txHash) return null;
+            const [item, currentSlot] = await Promise.all([
+              solanaProvider.getParsedTransaction(txHash, {
+                maxSupportedTransactionVersion: 0,
+              }),
+              solanaProvider.getSlot().catch(() => null),
+            ]);
+            if (!item) return {data: null};
+            const instructions = item?.transaction?.message?.instructions || [];
+            const blockNumber = item?.slot ?? null;
+            const confirmations =
+              blockNumber !== null && currentSlot !== null
+                ? currentSlot - blockNumber
+                : null;
 
-          const stakeInstruction = instructions.find(
-            ix =>
-              ix?.program === 'stake' ||
-              ix?.programId?.toString() ===
-                'Stake11111111111111111111111111111111111111112',
-          );
+            const stakeInstruction = instructions.find(
+              ix =>
+                ix?.program === 'stake' ||
+                ix?.programId?.toString() ===
+                  'Stake11111111111111111111111111111111111111112',
+            );
 
-          if (stakeInstruction) {
-            const stakeType = stakeInstruction?.parsed?.type;
-            const info = stakeInstruction?.parsed?.info || {};
-            let amount = '0';
-            let from = null;
-            let to = null;
+            if (stakeInstruction) {
+              const stakeType = stakeInstruction?.parsed?.type;
+              const info = stakeInstruction?.parsed?.info || {};
+              let amount = '0';
+              let from = null;
+              let to = null;
 
-            if (stakeType === 'delegate' || stakeType === 'initialize') {
-              from = info?.stakeAuthority || null;
-              to = info?.voteAccount || info?.stakeAccount || null;
-              const fundIx = instructions.find(
-                ix =>
-                  ix?.parsed?.info?.lamports != null && ix?.program !== 'stake',
-              );
-              amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
-            } else if (stakeType === 'deactivate') {
-              from = info?.stakeAuthority || null;
-              to = info?.stakeAccount || null;
-              const accountKeys = item?.transaction?.message?.accountKeys || [];
-              const stakeAccountIndex = accountKeys.findIndex(
-                key => key?.pubkey?.toString() === info?.stakeAccount,
-              );
-              if (stakeAccountIndex !== -1) {
-                amount =
-                  item?.meta?.preBalances?.[stakeAccountIndex]?.toString() ||
-                  '0';
+              if (stakeType === 'delegate' || stakeType === 'initialize') {
+                from = info?.stakeAuthority || null;
+                to = info?.voteAccount || info?.stakeAccount || null;
+                const fundIx = instructions.find(
+                  ix =>
+                    ix?.parsed?.info?.lamports != null &&
+                    ix?.program !== 'stake',
+                );
+                amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
+              } else if (stakeType === 'deactivate') {
+                from = info?.stakeAuthority || null;
+                to = info?.stakeAccount || null;
+                const accountKeys =
+                  item?.transaction?.message?.accountKeys || [];
+                const stakeAccountIndex = accountKeys.findIndex(
+                  key => key?.pubkey?.toString() === info?.stakeAccount,
+                );
+                if (stakeAccountIndex !== -1) {
+                  amount =
+                    item?.meta?.preBalances?.[stakeAccountIndex]?.toString() ||
+                    '0';
+                }
+              } else if (stakeType === 'withdraw') {
+                from = info?.stakeAccount || null;
+                to = info?.destination || null;
+                amount = info?.lamports?.toString() || '0';
               }
-            } else if (stakeType === 'withdraw') {
-              from = info?.stakeAccount || null;
-              to = info?.destination || null;
-              amount = info?.lamports?.toString() || '0';
+
+              return {
+                data: {
+                  amount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from,
+                  to,
+                  totalCourse: '0',
+                  blockNumber,
+                  confirmations,
+                },
+              };
             }
 
+            const transactionDetails = instructions.find(
+              ix => ix?.parsed?.info?.lamports != null,
+            )?.parsed?.info;
+            if (!transactionDetails?.lamports?.toString()) return null;
+            const bnValue = transactionDetails?.lamports?.toString() || 0;
             return {
               data: {
-                amount,
+                amount: bnValue?.toString(),
                 link: txHash,
                 url: getExplorerTxUrl('solana', txHash),
                 status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                 date: item?.blockTime * 1000,
-                from,
-                to,
+                from: transactionDetails?.source,
+                to: transactionDetails?.destination,
                 totalCourse: '0',
                 blockNumber,
                 confirmations,
               },
             };
+          } catch (e) {
+            console.error(`error getting transaction for solana ${e}`);
+            throw e;
           }
-
-          const transactionDetails = instructions.find(
-            ix => ix?.parsed?.info?.lamports != null,
-          )?.parsed?.info;
-          if (!transactionDetails?.lamports?.toString()) return null;
-          const bnValue = transactionDetails?.lamports?.toString() || 0;
-          return {
-            data: {
-              amount: bnValue?.toString(),
-              link: txHash,
-              url: getExplorerTxUrl('solana', txHash),
-              status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-              date: item?.blockTime * 1000,
-              from: transactionDetails?.source,
-              to: transactionDetails?.destination,
-              totalCourse: '0',
-              blockNumber,
-              confirmations,
-            },
-          };
-        } catch (e) {
-          console.error(`error getting transaction for solana ${e}`);
-          throw e;
-        }
-      }, null),
+        },
+        {data: null},
+      ),
 
     getTokenTransactions: ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {

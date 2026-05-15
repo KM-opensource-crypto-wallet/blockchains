@@ -1220,7 +1220,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           safeGetTransactionStatus(txHash),
         ]);
         if (!tx) {
-          return null;
+          return {data: null};
         }
         let blockTimestamp = null;
         let confirmations = null;
@@ -1275,7 +1275,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         };
       } catch (e) {
         console.error(`error getting transaction for ether ${e}`);
-        return null;
+        return {data: null};
       }
     },
     getTransactionForUpdate: async ({from, txHash, decimals}) => {

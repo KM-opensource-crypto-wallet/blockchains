@@ -159,7 +159,7 @@ export const PolkadotChain = () => {
         }
       } catch (e) {
         console.error(`error getting transactions for polkadot ${e}`);
-        return null;
+        return {data: null};
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee, gasFee}) => {

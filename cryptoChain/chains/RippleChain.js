@@ -138,7 +138,7 @@ export const RippleChain = () => {
         };
       } catch (e) {
         console.error(`error getting transaction for ripple ${e}`);
-        return null;
+        return {data: null};
       }
     },
     send: async ({to, from, amount, privateKey, publicKey, gasFee, memo}) => {
