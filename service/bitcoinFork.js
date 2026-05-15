@@ -7,36 +7,36 @@ import {PremiumBlockChair} from './premiumBlockChair';
 
 const providerName = {
   ltc: [
+    'LitecoinPremiumBlockChair',
     'LitecoinSpace',
     'LitecoinBlockCypher',
     'LitecoinBlockChair',
     'LitecoinBlockDaemon',
-    'LitecoinPremiumBlockChair',
   ],
   btc: [
+    'BitcoinPremiumBlockChair',
     'BitcoinMempool',
     'BitcoinBlockChair',
     'BitcoinBlockDaemon',
-    'BitcoinPremiumBlockChair',
   ],
   doge: [
+    'DogePremiumBlockChair',
     'DogeBlockChair',
     'DogeBlockCypher',
     'DogeBlockDaemon',
-    'DogePremiumBlockChair',
   ],
   bch: [
+    'BCHPremiumBlockChair',
     'BCHBlockChair',
     'BCHBlockDaemon',
     'BCHMempool',
-    'BCHPremiumBlockChair',
   ],
 };
 const providers = {
-  ltc: [Mempool, BlockCypher, BlockChair, BlockDaemon, PremiumBlockChair],
-  btc: [Mempool, BlockChair, BlockDaemon, PremiumBlockChair],
-  doge: [BlockChair, BlockCypher, BlockDaemon, PremiumBlockChair],
-  bch: [BlockChair, BlockDaemon, Mempool, PremiumBlockChair],
+  ltc: [PremiumBlockChair, Mempool, BlockCypher, BlockChair, BlockDaemon],
+  btc: [PremiumBlockChair, Mempool, BlockChair, BlockDaemon],
+  doge: [PremiumBlockChair, BlockChair, BlockCypher, BlockDaemon],
+  bch: [PremiumBlockChair, BlockChair, BlockDaemon, Mempool],
 };
 
 export const BitcoinFork = {
