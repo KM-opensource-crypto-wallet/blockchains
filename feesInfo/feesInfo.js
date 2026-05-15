@@ -1,6 +1,7 @@
 import {fetchFeesInfo} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import dayjs from 'dayjs';
+import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 
 let lastCallTimeStamp;
 
@@ -23,6 +24,15 @@ let feesInfo = {
   },
 };
 
+function extractFeesInfo(feesObj, isSandbox) {
+  const finalFeesInfoObj = {};
+  const text = isSandbox ? 'testnet' : 'mainnet';
+  for (let key of Object.keys(feesObj)) {
+    finalFeesInfoObj[key] = feesObj[key]?.[text];
+  }
+  return finalFeesInfoObj;
+}
+
 export const getFeesInfo = async () => {
   try {
     if (
@@ -40,17 +50,37 @@ export const getFeesInfo = async () => {
     const tempMultiplier = isValidObject(data?.multiplier)
       ? data?.multiplier
       : {};
+    const localFeesInfoMultiplier = extractFeesInfo(
+      feesInfo.multiplier,
+      IS_SANDBOX,
+    );
+    const localFeesInfoMaxPriorityFee = extractFeesInfo(
+      feesInfo.maxPriorityFee,
+      IS_SANDBOX,
+    );
     feesInfo = {
       multiplier: {
-        ...feesInfo.multiplier,
+        ...localFeesInfoMultiplier,
         ...tempMultiplier,
       },
       maxPriorityFee: {
-        ...feesInfo.maxPriorityFee,
+        ...localFeesInfoMaxPriorityFee,
         ...tempMaxPriorityFee,
       },
     };
   } catch (e) {
+    const localFeesInfoMultiplier = extractFeesInfo(
+      feesInfo.multiplier,
+      IS_SANDBOX,
+    );
+    const localFeesInfoMaxPriorityFee = extractFeesInfo(
+      feesInfo.maxPriorityFee,
+      IS_SANDBOX,
+    );
+    feesInfo = {
+      multiplier: localFeesInfoMultiplier,
+      maxPriorityFee: localFeesInfoMaxPriorityFee,
+    };
     console.error('Error in fetchFeesInfo', e);
   }
 };
