@@ -213,7 +213,7 @@ export function isBalanceNotAvailable(balanceAmount, trAmount, otherTrAmount) {
 
 export function validateNumber(number) {
   const validNumber = Number(number);
-  return isNaN(validNumber) ? null : validNumber;
+  return isNaN(validNumber) || !Number.isFinite(validNumber) ? null : validNumber;
 }
 
 export function validateBigNumberStr(number) {
