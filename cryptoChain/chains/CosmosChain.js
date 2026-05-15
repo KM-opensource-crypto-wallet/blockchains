@@ -164,10 +164,10 @@ export const CosmosChain = () => {
             };
           });
         }
-        return {data: null};
+        return [];
       } catch (e) {
         console.error(`error getting transactions for cosmos ${e}`);
-        return {data: null};
+        return [];
       }
     },
     getTransaction: async ({txHash}) => {

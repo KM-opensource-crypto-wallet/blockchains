@@ -513,7 +513,7 @@ export const SCAN_URL = {
   },
   arbitrum: {
     baseUrl: IS_SANDBOX
-      ? 'https://sepolia-optimism.etherscan.io/'
+      ? 'https://sepolia.arbiscan.io/'
       : 'https://arbiscan.io',
     txPath: 'tx',
   },
@@ -550,7 +550,7 @@ export const SCAN_URL = {
       : 'https://lineascan.build',
     txPath: 'tx',
   },
-  zkSync: {
+  zksync: {
     baseUrl: IS_SANDBOX
       ? 'https://sepolia.explorer.zksync.io'
       : 'https://explorer.zksync.io',

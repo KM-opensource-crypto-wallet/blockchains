@@ -953,7 +953,7 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
         ? 'polygon_blockscout'
         : 'polygon_scan';
     }
-    return `${SCAN_URL[chain_name]}/address/${address}${
+    return `${SCAN_URL[chain_name].baseUrl}/address/${address}${
       type === 'token' ? '#tokentxns' : ''
     }`;
   } else if (chain_name === 'tron') {
