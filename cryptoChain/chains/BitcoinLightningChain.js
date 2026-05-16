@@ -5,6 +5,7 @@ import {
   generateLightningInvoiceViaBolt11,
   generateLightningSparkAddress,
   getLightningBalance,
+  getLightningTransaction,
   getLightningTransactions,
   isLightningAddressValid,
   prepareLightning,
@@ -29,6 +30,9 @@ export const BitcoinLightningChain = (_, phrase) => {
     },
     getTransactions: async () => {
       return await getLightningTransactions(phrase);
+    },
+    getTransaction: async ({txHash}) => {
+      return await getLightningTransaction(phrase, txHash);
     },
     generateInvoiceViaBitcoinAddress: async currentPhrase => {
       return await generateLightningInvoiceViaBitcoinAddress(

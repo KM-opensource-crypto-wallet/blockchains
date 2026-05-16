@@ -282,6 +282,11 @@ const getBaseCoin = async (chain, wallet, coin) => {
         address: wallet.address,
         ...payload,
       }),
+    getTransaction: async payload =>
+      await chain?.getTransaction({
+        address: wallet.address,
+        ...payload,
+      }),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
         from: wallet.address,
@@ -476,6 +481,8 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         decimal: token?.decimal,
         ...payload,
       }),
+    getTransaction: async payload =>
+      await chain?.getTransaction({txHash: payload.txHash}),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
         from: wallet.address,
@@ -575,7 +582,7 @@ const hashObject = {
   gnosis: 'hash',
   viction: 'hash',
   // ! polkadot: 'hash',
-  // ! ton: 'hash',
+  ton: 'hash',
   dogecoin: '',
   aptos: '',
   linea: 'hash',

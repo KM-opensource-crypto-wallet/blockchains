@@ -1,8 +1,10 @@
 import {assetAmount, assetToBase} from '@xchainjs/xchain-util';
 import {decode} from 'bech32-buffer';
 import {ThorChainService} from 'dok-wallet-blockchain-networks/service/thorChain';
-import {parseBalance} from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  getExplorerTxUrl,
+  parseBalance,
+} from 'dok-wallet-blockchain-networks/helper';
 import {WL_APP_NAME} from 'utils/wlData';
 
 export const ThorChain = () => {
@@ -40,71 +42,17 @@ export const ThorChain = () => {
               AssetRuneNative,
               Client,
             } = require('@xchainjs/xchain-thorchain');
-            const {
-              DirectSecp256k1HdWallet,
-              encodePubkey,
-              makeAuthInfoBytes,
-              makeSignDoc,
-            } = require('@cosmjs/proto-signing');
-            const {encodeSecp256k1Pubkey} = require('@cosmjs/amino');
-            const {TxRaw} = require('cosmjs-types/cosmos/tx/v1beta1/tx');
-            const {fromBase64, toBase64} = require('@cosmjs/encoding');
-            const {makeClientPath} = require('@xchainjs/xchain-cosmos-sdk');
-
             const thorClient = new Client({phrase});
-            const sender = thorClient.getAddress(0);
             const finalAmount = assetToBase(assetAmount(amount, 8));
-            const txMemo = memo || `transfer from ${WL_APP_NAME}`;
-
-            // Build tx body locally — no network needed
-            const {rawUnsignedTx} = await thorClient.prepareTx({
-              sender,
-              recipient: to,
-              asset: AssetRuneNative,
+            const txid = await thorClient.transfer({
               amount: finalAmount,
-              memo: txMemo,
+              recipient: to,
+              memo: memo || `transfer from ${WL_APP_NAME}`,
+              asset: AssetRuneNative,
             });
-            const decodedRaw = TxRaw.decode(fromBase64(rawUnsignedTx));
-
-            const {accountNumber, sequence} =
-              await ThorChainService.getAccountInfo(sender);
-
-            // Sign locally
-            const signer = await DirectSecp256k1HdWallet.fromMnemonic(phrase, {
-              prefix: 'thor',
-              hdPaths: [makeClientPath("m/44'/931'/0'/0/0")],
-            });
-            const [signerAccount] = await signer.getAccounts();
-
-            const pubkey = encodePubkey(
-              encodeSecp256k1Pubkey(signerAccount.pubkey),
-            );
-            const authInfoBytes = makeAuthInfoBytes(
-              [{pubkey, sequence}],
-              [],
-              6000000,
-            );
-            const signDoc = makeSignDoc(
-              decodedRaw.bodyBytes,
-              authInfoBytes,
-              'thorchain-1',
-              accountNumber,
-            );
-            const {signature} = await signer.signDirect(sender, signDoc);
-
-            const txRaw = TxRaw.fromPartial({
-              bodyBytes: decodedRaw.bodyBytes,
-              authInfoBytes,
-              signatures: [fromBase64(signature.signature)],
-            });
-
-            const txHash = await ThorChainService.broadcastTx(
-              TxRaw.encode(txRaw).finish(),
-            );
-
-            resolve(txHash);
+            resolve(txid);
           } catch (e) {
-            console.error('Error in send ThorChain transaction', e?.message);
+            console.error('Error in send ThorChain transaction', e);
             reject(e);
           }
         }, 600);
@@ -121,18 +69,44 @@ export const ThorChain = () => {
           const txHash = item?.txhash;
           return {
             amount: bnValue.toString(),
-            link: txHash.substring(0, 13) + '...',
-            url: `${config.THORCHAIN_SCAN_URL}/tx/${txHash}`,
+            link: txHash,
+            url: getExplorerTxUrl('thorchain', txHash),
             status: 'SUCCESS',
             date: item?.timestamp, //new Date(transaction.raw_data.timestamp),
             from: item?.from,
             to: item?.to,
             totalCourse: '0$',
+            transactionType: 'regular',
           };
         });
       } catch (e) {
         console.error('error getting transactions for ThorChain', e);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await ThorChainService.getThorTransaction(txHash);
+        if (transaction) {
+          return {
+            data: {
+              amount: transaction.amount?.toString() || '0',
+              link: txHash,
+              url: getExplorerTxUrl('thorchain', txHash),
+              status: transaction?.status || 'PENDING',
+              date: transaction?.timestamp, //new Date(transaction.raw_data.timestamp),
+              from: transaction?.from,
+              to: transaction?.to,
+              totalCourse: '0$',
+              blockNumber: transaction.blockNumber,
+              confirmations: transaction.confirmations,
+            },
+          };
+        }
+        return {data: null};
+      } catch (e) {
+        console.error('error getting transactions for ThorChain', e);
+        return {data: null};
       }
     },
 

@@ -23,3 +23,6 @@ export const getPaymentUrlCoin = state => state.settings.paymentUrlCoin;
 
 export const getWalletsSortOption = state =>
   state.settings.walletsSortOption || 'default';
+
+export const getHideSmallTransactions = state =>
+  state.settings.hideSmallTransactions ?? false;

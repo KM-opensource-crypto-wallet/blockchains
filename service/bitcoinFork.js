@@ -102,11 +102,16 @@ export const BitcoinFork = {
       null,
       providerName[chain],
     ),
-  getTransaction: ({chain, transactionId}) =>
+  getTransaction: ({chain, transactionId, address, derive_addresses}) =>
     commonRetryFunc(
       providers[chain],
       async provider => {
-        return await provider.getTransaction({chain, transactionId});
+        return await provider.getTransaction({
+          chain,
+          transactionId,
+          address,
+          derive_addresses,
+        });
       },
       null,
       providerName[chain],

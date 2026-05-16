@@ -31,6 +31,40 @@ export const FilScan = {
       return [];
     }
   },
+  getTransaction: async ({txHash}) => {
+    try {
+      const [res, tipRes] = await Promise.all([
+        FilScanApi.post('/MessageDetails', {message_cid: txHash}),
+        FilScanApi.post('/FinalHeight', {}).catch(() => null),
+      ]);
+      if (res?.data?.result?.MessageDetails) {
+        const {block_time, exit_code, from, to, value, height} =
+          res.data.result.MessageDetails.message_basic;
+        const blockNumber = height ?? null;
+        const tipHeight = tipRes?.data?.result?.final_height ?? null;
+        const confirmations =
+          tipHeight !== null && blockNumber !== null
+            ? tipHeight - blockNumber
+            : null;
+        return {
+          data: {
+            txHash: txHash,
+            to: to,
+            from: from,
+            amount: value,
+            status: exit_code === 'Ok',
+            timestamp: block_time * 1000,
+            blockNumber,
+            confirmations,
+          },
+        };
+      }
+      return {data: null};
+    } catch (e) {
+      console.error('Error in getTransactions for filScan', e);
+      return {data: null};
+    }
+  },
   getTransactionFees: async () => {
     let baseFee = '100';
     let gasUsed = '1000000';
