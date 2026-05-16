@@ -4,7 +4,7 @@ export const ThorChainService = {
   getThorBalance: async address => {
     try {
       const resp = await axios.get(
-        `https://midgard.ninerealms.com/v2/balance/${address}`,
+        `https://midgard.thorchain.network/v2/balance/${address}`,
       );
       const coins = resp?.data?.coins;
       const runeBalance =
@@ -17,7 +17,7 @@ export const ThorChainService = {
   getBaseThorFee: async () => {
     try {
       const resp = await axios.get(
-        'https://thornode.ninerealms.com/thorchain/constants',
+        'https://thornode.thorchain.network/thorchain/constants',
       );
       return resp?.data?.int_64_values?.NativeTransactionFee;
     } catch (e) {
@@ -48,8 +48,8 @@ export const ThorChainService = {
   getThorTransaction: async txHash => {
     try {
       const [resp, latestBlockResp] = await Promise.all([
-        axios.get(`https://midgard.ninerealms.com/v2/actions?txid=${txHash}`),
-        axios.get('https://thornode.ninerealms.com/thorchain/lastblock'),
+        axios.get(`https://midgard.thorchain.network/v2/actions?txid=${txHash}`),
+        axios.get('https://thornode.thorchain.network/thorchain/lastblock'),
       ]);
       const item = resp?.data?.actions?.[0];
       if (!item) {
@@ -81,7 +81,7 @@ export const ThorChainService = {
   getTransactionStatus: async txHash => {
     try {
       const resp = await axios.get(
-        `https://midgard.ninerealms.com/v2/actions?txid=${txHash}`,
+        `https://midgard.thorchain.network/v2/actions?txid=${txHash}`,
       );
       return !!resp?.data?.actions?.length;
     } catch (e) {
@@ -91,5 +91,5 @@ export const ThorChainService = {
   },
 };
 const getThorTransactionUrl = address => {
-  return `https://midgard.ninerealms.com/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
+  return `https://midgard.thorchain.network/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
 };

@@ -79,6 +79,8 @@ const parseBlockdaemonTransactions = (txs, walletAddresses) => {
         fee: fee.toString(),
         from: isOutgoing ? senderAddress : inputEvents[0]?.source,
         to: isOutgoing ? primaryRecipient : internalOutputs[0]?.destination,
+        blockNumber: tx?.block_number,
+        confirmations: tx?.confirmations,
       };
     })
     .sort(

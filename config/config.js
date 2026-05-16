@@ -420,7 +420,7 @@ export const config = {
   RIPPLE_SCAN_URL: IS_SANDBOX
     ? 'https://testnet.xrpl.org'
     : 'https://livenet.xrpl.org',
-  THORCHAIN_API_URL: 'https://midgard.ninerealms.com',
+  THORCHAIN_API_URL: 'https://midgard.thorchain.network',
   THORCHAIN_SCAN_URL: 'https://viewblock.io/thorchain',
   TZKT_API_BASE_URL: IS_SANDBOX
     ? 'https://api.ghostnet.tzkt.io'
