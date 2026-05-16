@@ -1121,7 +1121,8 @@ export const sendFunds = createAsyncThunk(
           showToast({
             type: 'errorToast',
             title: 'Transaction Failed',
-            message: 'Your transaction failed on the network. Please try again.',
+            message:
+              'Your transaction failed on the network. Please try again.',
             toastId,
           });
         } else if (confirmTransaction) {
@@ -1346,7 +1347,8 @@ export const sendPendingTransactions = createAsyncThunk(
           showToast({
             type: 'errorToast',
             title: 'Transaction Failed',
-            message: 'Your transaction failed on the network. Please try again.',
+            message:
+              'Your transaction failed on the network. Please try again.',
             toastId,
           });
         } else if (confirmTransaction) {

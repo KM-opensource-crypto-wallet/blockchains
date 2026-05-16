@@ -42,7 +42,7 @@ export const HEDERA = {
   getTransaction: async txHash => {
     try {
       const resp = await HEDERA_API.get(`/api/v1/transactions/${txHash}`);
-      const tx = resp?.data?.transactions[0];
+      const tx = resp?.data?.transactions?.[0];
       if (!tx) {
         return {status: resp?.status, data: tx};
       }
