@@ -398,17 +398,6 @@ export const createExchange = async payload => {
   }
 };
 
-export const getIPAddress = async () => {
-  try {
-    const resp = await DokApi.get('/get-ip-address', {
-      timeout: 30000,
-    });
-    return resp?.data?.ipAddress;
-  } catch (e) {
-    return '192.168.1.1';
-  }
-};
-
 export const createSubscription = async payload => {
   try {
     const resp = await DokApi.post('/notification-subscriptions', payload);
