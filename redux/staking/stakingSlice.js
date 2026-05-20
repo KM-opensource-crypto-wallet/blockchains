@@ -30,7 +30,11 @@ export const fetchValidatorByChain = createAsyncThunk(
       currentWallet?.clientId,
     )(currentState);
     const chain = getChain(chain_name, currentWallet?.phrase, customRPC);
-    const finalPayload = {chain_name, address: currentCoin?.address};
+    const finalPayload = {
+      chain_name,
+      address: currentCoin?.address,
+      contractAddress: currentCoin?.contractAddress,
+    };
     const {selectedVotes, validators} = await chain.getStakingValidators(
       finalPayload,
     );

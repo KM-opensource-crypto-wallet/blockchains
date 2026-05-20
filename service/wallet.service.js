@@ -13,6 +13,7 @@ import {
   calculatePrice,
   createBalanceKey,
   createPendingTransactionKey,
+  getStakignKey,
   isBitcoinChain,
   isEVMChain,
   isPendingTransactionSupportedChain,
@@ -56,7 +57,8 @@ export const getCoinSnapshot = async (
       ? nativeCoin?.deriveAddresses
       : [];
     const isBitcoin = isBitcoinChain(coinDef?.chain_name);
-    const isStaking = isStakingChain(coinDef?.chain_name);
+    const stakingKey = getStakignKey(coinDef?.chain_name, coinDef?.symbol);
+    const isStaking = isStakingChain(stakingKey);
     let staking = [];
     let finalStaking = [];
     let stakingBalance = 0;
@@ -70,8 +72,14 @@ export const getCoinSnapshot = async (
       stakingBalance = stakingBalanceInfo?.stakingBalance || 0;
       energyBalance = stakingBalanceInfo?.energyBalance || 0;
       bandwidthBalance = stakingBalanceInfo?.bandwidthBalance || 0;
+    } else if (
+      coinDef?.chain_name === 'ethereum' &&
+      (coinDef?.symbol === 'USDT' || coinDef?.symbol === 'USDC')
+    ) {
+      const stakingBalanceInfo = (await nativeCoin.getStakingBalance?.()) || {};
+      stakingBalance = stakingBalanceInfo?.stakingBalance || 0;
     }
-    if (isStaking && coinDef?.type === 'coin' && isFetchStaking) {
+    if (isStaking && isFetchStaking) {
       staking = (await nativeCoin.getStaking?.()) || [];
       finalStaking = staking.map(item => {
         const amount = item?.amount;
