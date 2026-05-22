@@ -1533,3 +1533,13 @@ export const getExplorerTxUrl = (chain_name, txHash) => {
     : `${baseUrl}/${txHash}`;
   return sandboxQueryParam && IS_SANDBOX ? `${url}?${sandboxQueryParam}` : url;
 };
+
+export const toDirection = (notifyOnReceive, notifyOnSend) => {
+  if (notifyOnReceive && notifyOnSend) {
+    return 'both';
+  }
+  if (notifyOnReceive) {
+    return 'in';
+  }
+  return 'out';
+};
