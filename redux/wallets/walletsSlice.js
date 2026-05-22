@@ -1031,13 +1031,18 @@ export const sendFunds = createAsyncThunk(
             transactionFee: transferData?.transactionFee,
           })
         : await nativeCoin.send({
+            swapData: txData?.isExchange
+              ? transferData?.swapData
+              : txData?.swapData,
             to: txData.to,
             amount: txData.amount,
             gasFee: transferData?.gasFee,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
             isMax: transferData?.isMax,
             estimateGas: transferData?.estimateGas,
-            nonce: txData?.nonce ?? transferData?.nonce,
+            nonce: txData?.isExchange
+              ? undefined
+              : txData?.nonce || transferData?.nonce,
             transactionFee: transferData?.transactionFee,
             phrase: txData?.phrase,
             memo: txData?.memo,
@@ -1207,6 +1212,13 @@ export const sendFunds = createAsyncThunk(
                 },
               }),
             },
+          });
+        } else if (confirmTransaction && txData?.isExchange) {
+          showToast({
+            type: 'successToast',
+            title: 'Exchange Transaction Successful',
+            message: `Your swap transaction submitted successfully. The exchange provider will complete the swap and send funds to your wallet.`,
+            toastId,
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);

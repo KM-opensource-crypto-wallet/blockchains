@@ -97,6 +97,7 @@ export const calculateExchange = createAsyncThunk(
         refundAddress: selectedFromAsset?.address,
         extraData,
         providerName: selectedExchangeChain?.providerName,
+        slippage: 0.5,
       };
       const resp = await createExchange(payload);
       if (resp?.status === 201 || resp?.status === 200) {
@@ -113,6 +114,7 @@ export const calculateExchange = createAsyncThunk(
           dispatch(
             setCurrentTransferData({
               toAddress: data?.depositAddress,
+              swapData: data?.swapData,
               memo: data?.memo || null,
               currentCoin: selectedFromAsset,
               amount: amountFrom,
