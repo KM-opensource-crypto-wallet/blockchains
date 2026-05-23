@@ -77,6 +77,8 @@ export const ThorChain = () => {
             to: item?.to,
             totalCourse: '0$',
             transactionType: 'regular',
+            blockNumber: item.blockNumber,
+            confirmations: item.confirmations,
           };
         });
       } catch (e) {

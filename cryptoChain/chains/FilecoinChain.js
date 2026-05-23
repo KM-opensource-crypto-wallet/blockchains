@@ -151,6 +151,7 @@ export const FilecoinChain = chain_name => {
             from: item?.from,
             to: item?.to,
             transactionType: 'regular',
+            blockNumber: item?.blockNumber,
           };
         });
       } catch (e) {

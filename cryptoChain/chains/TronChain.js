@@ -756,14 +756,16 @@ export const TronChain = () => {
               const contractType = contract?.type;
               const raw = contract.parameter.value;
               const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-              let amount;
-              let transactionType;
+              let amount, transactionType, to, contractAddress;
+
               if (contractType === 'FreezeBalanceV2Contract') {
                 amount = raw?.frozen_balance?.toString();
                 transactionType = 'stake';
+                to = fromAddress;
               } else if (contractType === 'UnfreezeBalanceV2Contract') {
                 amount = raw?.unfreeze_balance?.toString();
                 transactionType = 'unstake';
+                to = fromAddress;
               } else if (contractType === 'WithdrawExpireUnfreezeContract') {
                 const txInfo = await tronWeb.fullNode.request(
                   'wallet/gettransactioninfobyid',
@@ -772,33 +774,60 @@ export const TronChain = () => {
                 );
                 amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
                 transactionType = 'withdraw';
+                to = fromAddress;
+              } else if (contractType === 'WithdrawBalanceContract') {
+                const txInfo = await tronWeb.fullNode.request(
+                  'wallet/gettransactioninfobyid',
+                  {value: transaction.txID},
+                  'post',
+                );
+                amount = txInfo?.withdraw_amount?.toString() ?? '0';
+                transactionType = 'withdraw';
+                to = fromAddress;
               } else if (contractType === 'TriggerSmartContract') {
-                amount = raw?.call_value?.toString() ?? '0';
+                const callData = raw?.data ?? '';
+                contractAddress = raw?.contract_address
+                  ? tronWeb.address.fromHex(raw.contract_address)
+                  : null;
+                if (callData.startsWith('a9059cbb') && callData.length >= 136) {
+                  // TRC-20 transfer(address,uint256) — decode recipient only;
+                  // amount is blanked because token decimal/symbol is unknown here
+                  const recipientHex = '41' + callData.slice(32, 72);
+                  try {
+                    to = tronWeb.address.fromHex(recipientHex);
+                  } catch {
+                    to = fromAddress;
+                  }
+                  amount = '';
+                } else {
+                  amount = '';
+                  to = contractAddress ?? fromAddress;
+                }
                 transactionType = 'smartContract';
+              } else if (contractType === 'VoteWitnessContract') {
+                amount = '';
+                transactionType = 'smartContract';
+                to = fromAddress;
               } else {
                 amount = raw?.amount?.toString();
                 transactionType = 'regular';
+                to = raw.to_address
+                  ? tronWeb.address.fromHex(raw.to_address)
+                  : fromAddress;
               }
+
               return {
                 amount,
                 link: transaction.txID,
                 url: getExplorerTxUrl('tron', transaction.txID),
                 date: transaction.raw_data.timestamp,
                 status: transaction.ret?.[0]?.contractRet,
-                fee: transaction.ret?.[0]?.fee,
-                net_fee: transaction.net_fee,
                 from: fromAddress,
-                to:
-                  transactionType === 'stake' ||
-                  transactionType === 'unstake' ||
-                  transactionType === 'withdraw'
-                    ? fromAddress
-                    : raw.to_address
-                    ? tronWeb.address.fromHex(raw.to_address)
-                    : fromAddress,
+                to,
+                contractAddress,
                 blockNumber: transaction.blockNumber,
-                totalCourse: '0$',
-                transactionType, // NOTE: this will filter the transactions
+                totalCourse: '0',
+                transactionType,
               };
             }),
           );
@@ -812,36 +841,82 @@ export const TronChain = () => {
         async tronWeb => {
           try {
             if (!txHash) return {data: null};
-            const transaction = await tronWeb.fullNode.request(
-              `wallet/gettransactionbyid`,
-              {
-                value: txHash,
-              },
-              'post',
-            );
-            if (!transaction) return {data: null};
+            const [transaction, txInfo, nowBlock] = await Promise.all([
+              tronWeb.fullNode.request(
+                'wallet/gettransactionbyid',
+                {value: txHash},
+                'post',
+              ),
+              tronWeb.fullNode.request(
+                'wallet/gettransactioninfobyid',
+                {value: txHash},
+                'post',
+              ),
+              tronWeb.fullNode.request('wallet/getnowblock', {}, 'post'),
+            ]);
+            if (!transaction?.raw_data?.contract?.[0]) return {data: null};
             const contract = transaction.raw_data.contract[0];
             const contractType = contract?.type;
             const raw = contract.parameter.value;
             const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-            const toAddress = raw.to_address
-              ? tronWeb.address.fromHex(raw.to_address)
-              : undefined;
-            let amount;
+            let amount, toAddress, contractAddress, transactionType;
+
             if (contractType === 'FreezeBalanceV2Contract') {
               amount = raw?.frozen_balance?.toString();
+              toAddress = fromAddress;
+              transactionType = 'stake';
             } else if (contractType === 'UnfreezeBalanceV2Contract') {
               amount = raw?.unfreeze_balance?.toString();
+              toAddress = fromAddress;
+              transactionType = 'unstake';
             } else if (contractType === 'WithdrawExpireUnfreezeContract') {
-              const txInfo = await tronWeb.fullNode.request(
-                'wallet/gettransactioninfobyid',
-                {value: txHash},
-                'post',
-              );
               amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
+              toAddress = fromAddress;
+              transactionType = 'withdraw';
+            } else if (contractType === 'WithdrawBalanceContract') {
+              amount = txInfo?.withdraw_amount?.toString() ?? '0';
+              toAddress = fromAddress;
+              transactionType = 'withdraw';
+            } else if (contractType === 'TriggerSmartContract') {
+              const callData = raw?.data ?? '';
+              contractAddress = raw?.contract_address
+                ? tronWeb.address.fromHex(raw.contract_address)
+                : null;
+              if (callData.startsWith('a9059cbb') && callData.length >= 136) {
+                // TRC-20 transfer(address,uint256)
+                // Return raw amount — getSingleTransaction applies parseBalance
+                // with the correct token decimal from coinDef
+                const recipientHex = '41' + callData.slice(32, 72);
+                try {
+                  toAddress = tronWeb.address.fromHex(recipientHex);
+                } catch {
+                  toAddress = null;
+                }
+                amount = BigInt('0x' + callData.slice(72, 136)).toString();
+              } else {
+                amount = '';
+                toAddress = contractAddress ?? null;
+              }
+              transactionType = 'smartContract';
+            } else if (contractType === 'VoteWitnessContract') {
+              amount = '';
+              toAddress = fromAddress;
+              transactionType = 'smartContract';
             } else {
               amount = raw?.amount?.toString();
+              toAddress = raw.to_address
+                ? tronWeb.address.fromHex(raw.to_address)
+                : undefined;
+              transactionType = 'regular';
             }
+
+            const blockNumber = txInfo?.blockNumber ?? null;
+            const latestBlockNumber =
+              nowBlock?.block_header?.raw_data?.number ?? null;
+            const confirmations =
+              blockNumber !== null && latestBlockNumber !== null
+                ? Math.max(0, latestBlockNumber - blockNumber)
+                : null;
             return {
               data: {
                 amount,
@@ -849,11 +924,14 @@ export const TronChain = () => {
                 url: getExplorerTxUrl('tron', txHash),
                 date: transaction.raw_data.timestamp,
                 status: transaction.ret?.[0]?.contractRet,
-                fee: transaction.ret?.[0]?.fee,
-                net_fee: transaction.net_fee,
+                fee: txInfo?.fee?.toString() ?? transaction.ret?.[0]?.fee,
+                net_fee: txInfo?.receipt?.net_fee ?? transaction.net_fee,
                 from: fromAddress,
                 to: toAddress,
-                blockNumber: transaction.blockNumber,
+                contractAddress,
+                transactionType,
+                blockNumber,
+                confirmations,
                 totalCourse: '0',
               },
             };
@@ -1009,10 +1087,9 @@ export const TronChain = () => {
           return data.map(transaction => {
             const raw = transaction.value;
             const fromAddress = transaction?.from;
-
             return {
               amount: raw?.toString(),
-              link: transaction.transaction_id.substring(0, 13) + '...',
+              link: transaction.transaction_id,
               url: getExplorerTxUrl('tron', transaction.transaction_id),
               status: 'SUCCESS',
               date: transaction?.block_timestamp, //new Date(transaction.raw_data.timestamp),

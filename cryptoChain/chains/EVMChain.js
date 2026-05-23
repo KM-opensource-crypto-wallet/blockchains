@@ -24,6 +24,7 @@ import {
   extractTxHashFromEVMMissingError,
   getExplorerTxUrl,
   isEip1559NotSupported,
+  isEip7702SupportedChain,
   isLayer2Chain,
   isValidEVMTransactionHash,
   parseBalance,
@@ -60,6 +61,19 @@ const STAKE_FUNCTION_KEYWORDS = [
   'approve',
 ];
 
+const NFT_TRANSFER_SELECTORS = new Set([
+  '0x42842e0e', // ERC721 safeTransferFrom(address,address,uint256)
+  '0xb88d4fde', // ERC721 safeTransferFrom(address,address,uint256,bytes)
+  '0xf242432a', // ERC1155 safeTransferFrom(address,address,uint256,uint256,bytes)
+  '0x2eb2c2d6', // ERC1155 safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)
+]);
+
+const ERC20_SELECTORS = new Set([
+  '0xa9059cbb', // transfer(address,uint256)
+  '0x095ea7b3', // approve(address,uint256)
+  '0x23b872dd', // transferFrom(address,address,uint256) — ambiguous, treat as non-NFT
+]);
+
 const STAKING_CONTRACTS = {
   ethereum: {
     '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2': 'stake', // Aave V3 Pool
@@ -87,6 +101,8 @@ function getEVMTransactionType(item, isBatch, chainName) {
   const toAddress = item?.to?.toLowerCase();
   const fromAddress = item?.from?.toLowerCase();
   const functionName = (item?.functionName || '').toLowerCase();
+  const input = item?.input || '';
+  const selector = input?.length >= 10 ? input.slice(0, 10).toLowerCase() : '';
   const chainContracts = STAKING_CONTRACTS[chainName] || {};
   const contractType = chainContracts[toAddress];
 
@@ -104,6 +120,34 @@ function getEVMTransactionType(item, isBatch, chainName) {
   // the user (item.from = DeFi contract), it's an unstake operation.
   if (chainContracts[fromAddress]) {
     return 'unstake';
+  }
+
+  // NFT transfer detection — by unambiguous function selectors or safeTransferFrom name
+  if (
+    (selector && NFT_TRANSFER_SELECTORS.has(selector)) ||
+    functionName.includes('safetransferfrom') ||
+    functionName.includes('safebatchtransferfrom')
+  ) {
+    return 'nftTransfer';
+  }
+
+  // Non-trivial input data that isn't a plain ERC20 call → smart contract interaction
+  if (selector && !ERC20_SELECTORS.has(selector)) {
+    return 'smartContract';
+  }
+
+  // EIP-7702 delegation change — self-to-self, zero value, empty input on supported chains.
+  // Etherscan does not expose the tx type field, so this heuristic is the only way to identify
+  // type-4 (EIP-7702) delegation grant/revoke transactions in the explorer history.
+  if (
+    isEip7702SupportedChain(chainName) &&
+    fromAddress &&
+    toAddress &&
+    fromAddress === toAddress &&
+    (!input || input === '0x') &&
+    (!item?.value || item?.value === '0' || item?.value === '0x0')
+  ) {
+    return 'delegationChange';
   }
 
   return 'regular';
@@ -171,8 +215,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         address: ethers.ZeroAddress,
         nonce: currentNonce + 1,
       });
-      const feeData = await evmProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
+      const {
+        gasPrice: finalGasPrice,
+        maxPriorityFeePerGas,
+      } = await getEtherGasPrice('recommended', evmProvider);
       const revokeTx = {
         type: 4,
         from: walletSigner.address,
@@ -181,18 +227,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         data: '0x',
         nonce: currentNonce,
         authorizationList: [revokeAuth],
-        maxFeePerGas: gasPrice,
-        maxPriorityFeePerGas: gasPrice,
+        maxFeePerGas: finalGasPrice,
+        maxPriorityFeePerGas: maxPriorityFeePerGas || finalGasPrice,
         gasLimit: 50000n,
       };
       if (isEip1559NotSupported(chain_name)) {
         delete revokeTx.type;
         delete revokeTx.maxFeePerGas;
         delete revokeTx.maxPriorityFeePerGas;
-        revokeTx.gasPrice = gasPrice;
+        revokeTx.gasPrice = finalGasPrice;
       }
       const txResponse = await walletSigner.sendTransaction(revokeTx);
       console.log('Authorization revoked, tx hash:', txResponse.hash);
+      return txResponse;
     } catch (e) {
       console.error('Failed to revoke authorization:', e);
     }
@@ -1187,6 +1234,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               to: item?.to,
               totalCourse: '0$',
               transactionType: getEVMTransactionType(item, isBatch, chain_name),
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
           if (removePendingTransactions.length) {
@@ -1409,6 +1458,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               contractAddress: item?.contractAddress,
               totalCourse: '0$',
               transactionType: getEVMTransactionType(item, isBatch, chain_name),
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
           if (removePendingTransactions.length) {
@@ -1927,5 +1978,28 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           }
         }
       }, 'pending'),
+    checkDelegation: ({address}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const code = await evmProvider.getCode(address);
+          if (
+            code &&
+            code.toLowerCase().startsWith('0xef0100') &&
+            code.length === 48
+          ) {
+            return {isDelegated: true, contractAddress: '0x' + code.slice(8)};
+          }
+          return {isDelegated: false, contractAddress: null};
+        } catch (e) {
+          console.error('Error checking delegation', e);
+          return {isDelegated: false, contractAddress: null};
+        }
+      }, {isDelegated: false, contractAddress: null}),
+    revokeDelegation: ({privateKey}) =>
+      retryFunc(async evmProvider => {
+        const wallet = new ethers.Wallet(privateKey);
+        const walletSigner = wallet.connect(evmProvider);
+        return await revokeAuthorization(walletSigner, evmProvider);
+      }, null),
   };
 };

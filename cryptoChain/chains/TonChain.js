@@ -299,10 +299,7 @@ export const TonChain = () => {
 
         if (!resolvedTxHash) return null;
 
-        const [res, latestSeqno] = await Promise.all([
-          TonScan.getTransactionByHash({txHash: resolvedTxHash}),
-          TonScan.getMasterchainInfo(),
-        ]);
+        const res = TonScan.getTransactionByHash({txHash: resolvedTxHash});
         const transactions = res?.data;
         if (!Array.isArray(transactions) || transactions.length === 0) {
           return null;
@@ -329,11 +326,7 @@ export const TonChain = () => {
             : undefined;
           amount = outMsg?.value || '0';
         }
-        const blockNumber = item?.block_ref?.seqno ?? null;
-        const confirmations =
-          blockNumber !== null && latestSeqno !== null
-            ? latestSeqno - blockNumber
-            : null;
+
         return {
           data: {
             amount: amount || '0',
@@ -344,8 +337,6 @@ export const TonChain = () => {
             from: from,
             to: to,
             totalCourse: '0$',
-            blockNumber,
-            confirmations,
           },
         };
       } catch (e) {

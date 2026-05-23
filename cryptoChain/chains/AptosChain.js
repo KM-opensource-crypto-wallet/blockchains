@@ -213,6 +213,7 @@ export const AptosChain = () => {
             to: toAddress,
             totalCourse: '0$',
             transactionType: 'regular',
+            blockNumber: item?.version,
           });
         });
         return finalData;

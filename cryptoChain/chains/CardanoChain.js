@@ -83,7 +83,7 @@ export const CardanoChain = () => {
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
-              transactionType: 'regular',
+              transactionType: 'regular', // not easy to get blockNumber and confirmations
             };
           });
         }

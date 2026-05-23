@@ -124,7 +124,7 @@ export const HederaChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const resp = await HEDERA.getAccountInfo(address);
+        const resp = await HEDERA.getAccountInfo('0.0.10358775');
         return resp?.data?.balance?.balance?.toString() || '0';
       } catch (e) {
         console.error('error in get balance from hedera', e);
@@ -154,52 +154,51 @@ export const HederaChain = () => {
       try {
         const resp = await HEDERA?.getTransactions(address);
         if (Array.isArray(resp?.data)) {
-          return resp?.data.map(item => {
+          return resp.data.map(item => {
             const date = item?.consensus_timestamp?.substring(
               0,
               item?.consensus_timestamp?.indexOf('.'),
             );
-            const chargeTransactionFees = item?.charged_tx_fee;
+            const chargeTransactionFees = item?.charged_tx_fee || 0;
             let from = null;
             let amount = null;
             let to = null;
-            for (let i = 0; i < item?.transfers.length; i++) {
-              const transfer = item?.transfers[i];
-              if (transfer?.account === address && transfer?.amount < 0) {
-                from = transfer?.account;
-                amount = (
-                  Math.abs(transfer?.amount) - chargeTransactionFees
-                ).toString();
-              } else if (
-                transfer?.account === address &&
-                transfer?.amount > 0
-              ) {
-                to = transfer?.account;
-                amount = transfer?.amount?.toString();
+            for (const transfer of item?.transfers || []) {
+              if (transfer.account === address) {
+                if (transfer.amount < 0) {
+                  from = address;
+                  amount = Math.abs(transfer.amount) - chargeTransactionFees;
+                } else if (transfer.amount > 0) {
+                  to = address;
+                  amount = transfer.amount;
+                }
+                break;
               }
             }
             if (!from) {
-              from = item?.transfers?.find(
-                subItem =>
-                  subItem?.account !== to && subItem?.amount === amount,
-              )?.account;
+              from =
+                item?.transfers
+                  ?.filter(t => t.account !== address && t.amount < 0)
+                  ?.sort((a, b) => a.amount - b.amount)[0]?.account ?? null;
             } else if (!to) {
-              to = item?.transfers?.find(
-                subItem =>
-                  subItem?.account !== from && subItem?.amount === amount,
-              )?.account;
+              to =
+                item?.transfers?.find(
+                  t => t.account !== address && t.amount === amount,
+                )?.account ?? null;
             }
             const txHash = item?.transaction_id;
             return {
-              amount: amount,
+              amount: amount?.toString() ?? null,
               link: txHash,
               url: getExplorerTxUrl('hedera', txHash),
               status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
-              date: date * 1000, //new Date(transaction.raw_data.timestamp),
-              from: from,
-              to: to,
+              date: date * 1000,
+              from,
+              to,
               totalCourse: '0$',
               transactionType: 'regular',
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
         }

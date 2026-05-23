@@ -141,6 +141,7 @@ export const StellarChain = () => {
               to: receiver,
               totalCourse: '0$',
               transactionType: 'regular',
+              blockNumber: item?.ledger_attr,
             };
           });
         }

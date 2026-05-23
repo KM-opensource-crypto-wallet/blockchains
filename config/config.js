@@ -105,7 +105,7 @@ export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
 
 const MORALIS_CHAIN_SANDBOX = {
   Ethereum: EvmChain.SEPOLIA,
-  Polygon: EvmChain.MUMBAI,
+  Polygon: EvmChain.POLYGON_AMOY,
   BSC: EvmChain.BSC_TESTNET,
   Solana: SolNetwork.DEVNET,
   Arbitrum: EvmChain.ARBITRUM_TESTNET,
@@ -431,6 +431,7 @@ export const config = {
   COSMOS_SCAN_URL: 'https://www.mintscan.io',
   COSMOS_SCAN_BASE_URL: 'https://apis.mintscan.io',
   COSMOS_API_KEY: process.env.COSMOS_API_KEY,
+  COSMOS_REST_BASE_URL: 'https://cosmos-rest.publicnode.com',
   AVAX_SCAN_API_URL:
     'https://api-beta.avascan.info/v2/network/mainnet/evm/43114',
   VICTION_SCAN_API_URL: IS_SANDBOX

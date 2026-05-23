@@ -14,6 +14,7 @@ import {
   createBalanceKey,
   createPendingTransactionKey,
   isBitcoinChain,
+  isEip7702SupportedChain,
   isEVMChain,
   isPendingTransactionSupportedChain,
   isStakingChain,
@@ -35,6 +36,7 @@ export const getCoinSnapshot = async (
   fetchUTXOs,
   isFetchUnclaimDeposit,
   txHash,
+  isFetchDelegation,
 ) => {
   try {
     const coinDef = _coinDef ?? selectCurrentCoin(state);
@@ -143,6 +145,12 @@ export const getCoinSnapshot = async (
       };
     });
 
+    let isDelegationAvailable = false;
+    if (isFetchDelegation && isEip7702SupportedChain(coinDef?.chain_name)) {
+      const result = await nativeCoin.checkDelegation?.();
+      isDelegationAvailable = result?.isDelegated ?? false;
+    }
+
     const totalBalanceString = new BigNumber(stakingBalance)
       .plus(new BigNumber(balance))
       .toString();
@@ -174,6 +182,7 @@ export const getCoinSnapshot = async (
       stakingInfo,
       energyBalance: parseBalance(energyBalance, coinDef?.decimal),
       bandwidthBalance: parseBalance(bandwidthBalance, coinDef?.decimal),
+      isDelegationAvailable,
     };
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;

@@ -135,34 +135,17 @@ export const CosmosChain = () => {
       try {
         const transactions = await CosmosScan.getTransactions(address);
         if (Array.isArray(transactions?.data)) {
-          return transactions?.data?.map(item => {
-            const txHash = item?.txhash;
-            const events = item?.logs[0]?.events || [];
-            const transferObj = events?.find(
-              subItem => subItem.type === 'transfer',
-            );
-            const sender = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'sender',
-            )?.value;
-            const recipient = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'recipient',
-            )?.value;
-            const amount = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'amount',
-            )?.value;
-            const finalAmount = parseInt(amount || 0, 10);
-            return {
-              amount: finalAmount.toString(),
-              link: txHash,
-              url: getExplorerTxUrl('cosmos', txHash),
-              status: !item?.code ? 'SUCCESS' : 'Failed',
-              date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
-              from: sender,
-              to: recipient,
-              totalCourse: '0$',
-              transactionType: 'regular',
-            };
-          });
+          return transactions.data.map(item => ({
+            amount: item.amount,
+            link: item.txHash,
+            url: getExplorerTxUrl('cosmos', item.txHash),
+            status: item.success ? 'SUCCESS' : 'FAILED',
+            date: new Date(item.timestamp),
+            from: item.from,
+            to: item.to,
+            totalCourse: '0$',
+            transactionType: 'regular',
+          }));
         }
         return [];
       } catch (e) {

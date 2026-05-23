@@ -535,6 +535,7 @@ export const refreshCurrentCoin = createAsyncThunk(
     const isFetchStaking = refreshData?.isFetchStaking || false;
     const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
     const txHash = refreshData?.txHash || null;
+    const isFetchDelegation = refreshData?.isFetchDelegation || false;
     const allCoins = selectUserCoins(currentState);
     const parentCoin = getNativeCoinByTokenCoin(allCoins, currentCoin);
     const validatedChainName = validateSupportedChain(currentCoin?.chain_name);
@@ -556,6 +557,7 @@ export const refreshCurrentCoin = createAsyncThunk(
       isFetchUTXOs,
       isFetchUnclaimDeposit,
       txHash,
+      isFetchDelegation,
     );
     let updatedNativeCoin;
     if (parentCoin) {
@@ -571,6 +573,35 @@ export const refreshCurrentCoin = createAsyncThunk(
       );
     }
     return {updatedCurrentCoin, updatedNativeCoin};
+  },
+);
+
+export const revokeDelegation = createAsyncThunk(
+  'wallets/revokeDelegation',
+  async (_, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const currentWallet = selectCurrentWallet(currentState);
+    const currentCoin = selectCurrentCoin(currentState);
+    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+      currentCoin?.chain_name,
+      currentWallet?.clientId,
+    )(currentState);
+    const nativeCoin = await getCoin(
+      currentWallet.phrase,
+      currentCoin,
+      null,
+      currentWallet,
+      customRpcUrl,
+    );
+    const txResponse = await nativeCoin.revokeDelegation();
+    if (txResponse) {
+      await nativeCoin.waitForConfirmation({
+        transaction: txResponse,
+        retries: 10,
+        interval: 3000,
+      });
+    }
+    return true;
   },
 );
 

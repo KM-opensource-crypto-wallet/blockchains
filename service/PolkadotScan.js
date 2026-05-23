@@ -20,8 +20,17 @@ export const PolkadotScan = {
       });
       return {status: resp?.status, data: resp?.data?.data};
     } catch (e) {
-      return {data: null};
       console.error('Error in getTransaction PolkadotScan', e);
+      return {data: null};
+    }
+  },
+  getLatestBlockNumber: async () => {
+    try {
+      const resp = await PolkadotScanApi.post('/api/scan/metadata', {});
+      return resp?.data?.data?.blockNum ?? null;
+    } catch (e) {
+      console.error('Error in getLatestBlockNumber PolkadotScan', e);
+      return null;
     }
   },
 };

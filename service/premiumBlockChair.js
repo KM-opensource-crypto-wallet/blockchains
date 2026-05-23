@@ -46,6 +46,7 @@ export const PremiumBlockChair = {
       transactionId,
       address,
       derive_addresses,
+      isNew: true,
     });
   },
   getTransactionFees: async ({chain}) => {

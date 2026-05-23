@@ -21,6 +21,7 @@ export const FilScan = {
             amount: item?.value,
             status: item?.exit_code === 'Ok',
             timestamp: item?.block_time * 1000,
+            blockNumber: item?.height * 1000,
           };
         });
         return list;

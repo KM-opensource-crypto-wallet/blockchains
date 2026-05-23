@@ -631,6 +631,7 @@ export const SolanaChain = () => {
                   to,
                   totalCourse: '0$',
                   transactionType,
+                  blockNumber: item?.slot,
                 });
                 return;
               }
@@ -666,19 +667,12 @@ export const SolanaChain = () => {
         async solanaProvider => {
           try {
             if (!txHash) return null;
-            const [item, currentSlot] = await Promise.all([
-              solanaProvider.getParsedTransaction(txHash, {
-                maxSupportedTransactionVersion: 0,
-              }),
-              solanaProvider.getSlot().catch(() => null),
-            ]);
+            const item = solanaProvider.getParsedTransaction(txHash, {
+              maxSupportedTransactionVersion: 0,
+            });
             if (!item) return {data: null};
             const instructions = item?.transaction?.message?.instructions || [];
             const blockNumber = item?.slot ?? null;
-            const confirmations =
-              blockNumber !== null && currentSlot !== null
-                ? currentSlot - blockNumber
-                : null;
 
             const stakeInstruction = instructions.find(
               ix =>
@@ -733,7 +727,6 @@ export const SolanaChain = () => {
                   to,
                   totalCourse: '0',
                   blockNumber,
-                  confirmations,
                 },
               };
             }
@@ -754,7 +747,6 @@ export const SolanaChain = () => {
                 to: transactionDetails?.destination,
                 totalCourse: '0',
                 blockNumber,
-                confirmations,
               },
             };
           } catch (e) {

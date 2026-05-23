@@ -94,6 +94,7 @@ export const RippleChain = () => {
               to: tx?.tx_json?.Destination,
               totalCourse: '0$',
               transactionType: 'regular',
+              blockNumber: item?.ledger_index,
             };
           });
         }

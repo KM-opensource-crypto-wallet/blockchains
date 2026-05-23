@@ -122,6 +122,8 @@ export const DogecoinOrLitecoinChain = chain_name => {
               to: item?.to,
               totalCourse: '0$',
               transactionType: 'regular',
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
         }

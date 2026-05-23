@@ -89,6 +89,8 @@ export const TezosChain = () => {
             to: item?.target?.address,
             totalCourse: '0$',
             transactionType: 'regular',
+            blockNumber: item.level,
+            confirmations: item.counter,
           };
         });
       } catch (e) {
@@ -113,6 +115,8 @@ export const TezosChain = () => {
               from: finalTransaction?.sender?.address,
               to: finalTransaction?.target?.address,
               totalCourse: '0$',
+              blockNumber: finalTransaction.level,
+              confirmations: finalTransaction.counter,
             },
           };
         }

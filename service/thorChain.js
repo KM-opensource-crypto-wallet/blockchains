@@ -26,20 +26,14 @@ export const ThorChainService = {
   },
   getThorTransactions: async address => {
     try {
-      const resp = await axios.get(getThorTransactionUrl(address));
-      const allTransactions = resp.data.actions;
-      return allTransactions.map(item => {
-        return {
-          txhash: item?.in?.[0]?.txID,
-          from: item?.in?.[0]?.address,
-          to: item?.out?.[0]?.address,
-          amount: item?.in?.[0]?.coins?.find?.(
-            subItem => subItem.asset === 'THOR.RUNE',
-          )?.amount,
-          timestamp: item?.date?.slice(0, -6),
-          status: item?.status?.toUpperCase(),
-        };
-      });
+      const [resp, latestBlockResp] = await Promise.all([
+        axios.get(getThorTransactionUrl(address)),
+        axios.get('https://thornode.thorchain.network/thorchain/lastblock'),
+      ]);
+      const latestBlock = latestBlockResp?.data?.[0]?.thorchain ?? null;
+      return resp.data.actions.map(item =>
+        parseThorTransaction(item, latestBlock),
+      );
     } catch (e) {
       console.error('Error in getThortransaction', e);
       return [];
@@ -48,31 +42,17 @@ export const ThorChainService = {
   getThorTransaction: async txHash => {
     try {
       const [resp, latestBlockResp] = await Promise.all([
-        axios.get(`https://midgard.thorchain.network/v2/actions?txid=${txHash}`),
+        axios.get(
+          `https://midgard.thorchain.network/v2/actions?txid=${txHash}`,
+        ),
         axios.get('https://thornode.thorchain.network/thorchain/lastblock'),
       ]);
       const item = resp?.data?.actions?.[0];
       if (!item) {
         return null;
       }
-      const blockNumber = item?.height ?? null;
       const latestBlock = latestBlockResp?.data?.[0]?.thorchain ?? null;
-      const confirmations =
-        blockNumber !== null && latestBlock !== null
-          ? latestBlock - blockNumber
-          : null;
-      return {
-        txhash: item?.in?.[0]?.txID,
-        from: item?.in?.[0]?.address,
-        to: item?.out?.[0]?.address,
-        amount: item?.in?.[0]?.coins?.find?.(
-          subItem => subItem.asset === 'THOR.RUNE',
-        )?.amount,
-        timestamp: item?.date?.slice(0, -6),
-        status: item?.status?.toUpperCase(),
-        blockNumber,
-        confirmations,
-      };
+      return parseThorTransaction(item, latestBlock);
     } catch (e) {
       console.error('Error in getThortransaction', e);
       return null;
@@ -92,4 +72,24 @@ export const ThorChainService = {
 };
 const getThorTransactionUrl = address => {
   return `https://midgard.thorchain.network/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
+};
+
+const parseThorTransaction = (item, latestBlock) => {
+  const blockNumber = item?.height ?? null;
+  const confirmations =
+    blockNumber !== null && latestBlock !== null
+      ? latestBlock - blockNumber
+      : null;
+  return {
+    txhash: item?.in?.[0]?.txID,
+    from: item?.in?.[0]?.address,
+    to: item?.out?.[0]?.address,
+    amount: item?.in?.[0]?.coins?.find?.(
+      subItem => subItem.asset === 'THOR.RUNE',
+    )?.amount,
+    timestamp: item?.date?.slice(0, -6),
+    status: item?.status?.toUpperCase(),
+    blockNumber,
+    confirmations,
+  };
 };
