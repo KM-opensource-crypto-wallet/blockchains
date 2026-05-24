@@ -234,7 +234,6 @@ export const syncAllCoins = createAsyncThunk(
           false,
           false,
           false,
-          false,
         );
 
         if (

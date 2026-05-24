@@ -71,6 +71,7 @@ const parseReadableTransactions = (txs, walletAddresses) => {
         to: isOutgoing
           ? primaryRecipient
           : internalOutputs[0]?.scriptpubkey_address,
+        blockNumber: tx.status?.block_height || null,
       };
     })
     .sort(
@@ -196,15 +197,33 @@ export const Mempool = {
       throw e;
     }
   },
-  getTransaction: async ({transactionId, chain}) => {
+  getTransaction: async ({transactionId, chain, address, derive_addresses}) => {
     try {
-      const resp = await APIProvider[chain].get(`/tx/${transactionId}`);
-      return !!resp?.data?.status?.confirmed;
+      const [resp, tipResp] = await Promise.all([
+        APIProvider[chain].get(`/tx/${transactionId}`),
+        APIProvider[chain].get('/blocks/tip/height').catch(() => null),
+      ]);
+      const tx = resp?.data;
+      if (!tx) return null;
+      const finalAddresses = address
+        ? Array.isArray(derive_addresses)
+          ? derive_addresses
+          : [address]
+        : [];
+      const [parsed] = parseReadableTransactions([tx], finalAddresses);
+      const parsedTipHeight = tipResp?.data
+        ? parseInt(String(tipResp.data), 10)
+        : null;
+      const tipHeight = Number.isFinite(parsedTipHeight)
+        ? parsedTipHeight
+        : null;
+      const confirmations =
+        tipHeight !== null && parsed.blockNumber !== null
+          ? tipHeight - parsed.blockNumber
+          : null;
+      return {...parsed, confirmations};
     } catch (e) {
-      console.error(
-        `Error in ${chain} for get transactions`,
-        e?.response?.data,
-      );
+      console.error(`Error in ${chain} for get transaction`, e?.response?.data);
       throw e;
     }
   },

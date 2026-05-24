@@ -1,12 +1,12 @@
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
-import {decodeAddress} from '@polkadot/util-crypto';
+import {decodeAddress, encodeAddress} from '@polkadot/util-crypto';
 import {PolkadotScan} from 'dok-wallet-blockchain-networks/service/PolkadotScan';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
@@ -104,13 +104,15 @@ export const PolkadotChain = () => {
 
             return {
               amount: item?.amount_v2 || '',
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.POLKADOT_SCAN_URL}/extrinsic/${item?.extrinsic_index}`,
+              link: txHash,
+              url: getExplorerTxUrl('polkadot', item?.extrinsic_index),
               status: item?.success ? 'SUCCESS' : 'Failed',
               date: new Date(item?.block_timestamp * 1000), //new Date(transaction.raw_data.timestamp),
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
+              transactionType: 'regular',
+              blockNumber: item.block_num,
             };
           });
         }
@@ -118,6 +120,101 @@ export const PolkadotChain = () => {
       } catch (e) {
         console.error(`error getting transactions for polkadot ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash, address}) => {
+      try {
+        const [transaction, latestBlockNumber] = await Promise.all([
+          PolkadotScan.getTransaction(txHash),
+          PolkadotScan.getLatestBlockNumber(),
+        ]);
+        if (transaction) {
+          const txData = transaction?.data;
+          const extrinsic_index = txData?.extrinsic_index;
+          const block_timestamp = txData?.block_timestamp;
+          const blockNumber = txData?.block_num ?? null;
+          const confirmations =
+            blockNumber !== null && latestBlockNumber !== null
+              ? Math.max(0, latestBlockNumber - parseInt(blockNumber, 10))
+              : null;
+          const legacyTransfer = txData?.transfer;
+          let from, to, amount, success;
+          if (legacyTransfer) {
+            from = legacyTransfer.from;
+            to = legacyTransfer.to;
+            amount = legacyTransfer.amount || '';
+            success = legacyTransfer.success;
+          } else {
+            from = txData?.account_id ?? null;
+            success = txData?.success ?? false;
+
+            const callsParam = txData?.params?.find(p => p.name === 'calls');
+            if (callsParam && Array.isArray(callsParam.value)) {
+              const transferCalls = callsParam.value.filter(
+                call =>
+                  call.call_module === 'Balances' && Array.isArray(call.params),
+              );
+              const decodeDestAddress = call => {
+                const destHex = call.params.find(p => p.name === 'dest')?.value
+                  ?.Id;
+                if (!destHex) {
+                  return null;
+                }
+                try {
+                  return encodeAddress(destHex, 0);
+                } catch {
+                  return destHex;
+                }
+              };
+              // If we have the user's address, find the transfer matching them
+              let matchedCall = null;
+              if (address) {
+                matchedCall = transferCalls.find(
+                  call => decodeDestAddress(call) === address,
+                );
+              }
+              const relevantCall = matchedCall ?? transferCalls[0];
+              if (relevantCall) {
+                to = decodeDestAddress(relevantCall);
+                const valueParam = relevantCall.params.find(
+                  p => p.name === 'value',
+                );
+                amount = valueParam?.value ?? '';
+              }
+            } else {
+              const destParam = txData?.params?.find(p => p.name === 'dest');
+              const destHex = destParam?.value?.Id ?? null;
+              if (destHex) {
+                try {
+                  to = encodeAddress(destHex, 0);
+                } catch {
+                  to = destHex;
+                }
+              } else {
+                to = null;
+              }
+              const valueParam = txData?.params?.find(p => p.name === 'value');
+              amount = valueParam?.value ?? '';
+            }
+          }
+          return {
+            data: {
+              amount,
+              link: txHash,
+              url: getExplorerTxUrl('polkadot', extrinsic_index),
+              status: success ? 'SUCCESS' : 'Failed',
+              date: new Date(block_timestamp * 1000),
+              from,
+              to,
+              totalCourse: '0$',
+              blockNumber,
+              confirmations,
+            },
+          };
+        }
+      } catch (e) {
+        console.error(`error getting transactions for polkadot ${e}`);
+        return {data: null};
       }
     },
     send: async ({to, from, amount, privateKey, transactionFee, gasFee}) => {

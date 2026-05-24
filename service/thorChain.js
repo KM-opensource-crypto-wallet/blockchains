@@ -4,7 +4,7 @@ export const ThorChainService = {
   getThorBalance: async address => {
     try {
       const resp = await axios.get(
-        `https://midgard.ninerealms.com/v2/balance/${address}`,
+        `https://midgard.thorchain.network/v2/balance/${address}`,
       );
       const coins = resp?.data?.coins;
       const runeBalance =
@@ -17,7 +17,7 @@ export const ThorChainService = {
   getBaseThorFee: async () => {
     try {
       const resp = await axios.get(
-        'https://thornode.ninerealms.com/thorchain/constants',
+        'https://thornode.thorchain.network/thorchain/constants',
       );
       return resp?.data?.int_64_values?.NativeTransactionFee;
     } catch (e) {
@@ -26,65 +26,42 @@ export const ThorChainService = {
   },
   getThorTransactions: async address => {
     try {
-      const resp = await axios.get(getThorTransactionUrl(address));
-      const allTransactions = resp.data.actions;
-      return allTransactions.map(item => {
-        return {
-          txhash: item?.in?.[0]?.txID,
-          from: item?.in?.[0]?.address,
-          to: item?.out?.[0]?.address,
-          amount: item?.in?.[0]?.coins?.find?.(
-            subItem => subItem.asset === 'THOR.RUNE',
-          )?.amount,
-          timestamp: item?.date?.slice(0, -6),
-          status: item?.status?.toUpperCase(),
-        };
-      });
+      const [resp, latestBlockResp] = await Promise.all([
+        axios.get(getThorTransactionUrl(address)),
+        axios.get('https://thornode.thorchain.network/thorchain/lastblock'),
+      ]);
+      const latestBlock = latestBlockResp?.data?.[0]?.thorchain ?? null;
+      return resp.data.actions.map(item =>
+        parseThorTransaction(item, latestBlock),
+      );
     } catch (e) {
       console.error('Error in getThortransaction', e);
       return [];
     }
   },
-  getAccountInfo: async address => {
+  getThorTransaction: async txHash => {
     try {
-      // Legacy Cosmos LCD path — gRPC-gateway (/cosmos/auth/v1beta1) is not enabled on thornode
-      const resp = await axios.get(
-        `https://thornode.ninerealms.com/auth/accounts/${address}`,
-      );
-      const account = resp?.data?.result?.value ?? resp?.data?.account;
-      return {
-        accountNumber: parseInt(account?.account_number ?? '0', 10),
-        sequence: parseInt(account?.sequence ?? '0', 10),
-      };
-    } catch (e) {
-      // 404 = new account that has never transacted, safe to use defaults
-      if (e?.response?.status === 404) {
-        return {accountNumber: 0, sequence: 0};
+      const [resp, latestBlockResp] = await Promise.all([
+        axios.get(
+          `https://midgard.thorchain.network/v2/actions?txid=${txHash}`,
+        ),
+        axios.get('https://thornode.thorchain.network/thorchain/lastblock'),
+      ]);
+      const item = resp?.data?.actions?.[0];
+      if (!item) {
+        return null;
       }
-      console.error('Error in getAccountInfo', e);
-      throw e;
+      const latestBlock = latestBlockResp?.data?.[0]?.thorchain ?? null;
+      return parseThorTransaction(item, latestBlock);
+    } catch (e) {
+      console.error('Error in getThortransaction', e);
+      return null;
     }
-  },
-  broadcastTx: async txBytes => {
-    // Tendermint RPC GET endpoint — avoids the JSON-RPC POST that rpc.ninerealms.com serves as HTML
-    const txHex = Array.from(txBytes)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    const resp = await axios.get(
-      `https://rpc.ninerealms.com/broadcast_tx_sync?tx=0x${txHex}`,
-    );
-    const result = resp?.data?.result;
-    if (result?.code !== 0) {
-      throw new Error(
-        result?.log || result?.raw_log || 'Transaction broadcast failed',
-      );
-    }
-    return result?.hash;
   },
   getTransactionStatus: async txHash => {
     try {
       const resp = await axios.get(
-        `https://midgard.ninerealms.com/v2/actions?txid=${txHash}`,
+        `https://midgard.thorchain.network/v2/actions?txid=${txHash}`,
       );
       return !!resp?.data?.actions?.length;
     } catch (e) {
@@ -94,5 +71,25 @@ export const ThorChainService = {
   },
 };
 const getThorTransactionUrl = address => {
-  return `https://midgard.ninerealms.com/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
+  return `https://midgard.thorchain.network/v2/actions?address=${address}&asset=THOR.RUNE&limit=20`;
+};
+
+const parseThorTransaction = (item, latestBlock) => {
+  const blockNumber = item?.height ?? null;
+  const confirmations =
+    blockNumber !== null && latestBlock !== null
+      ? latestBlock - blockNumber
+      : null;
+  return {
+    txhash: item?.in?.[0]?.txID,
+    from: item?.in?.[0]?.address,
+    to: item?.out?.[0]?.address,
+    amount: item?.in?.[0]?.coins?.find?.(
+      subItem => subItem.asset === 'THOR.RUNE',
+    )?.amount,
+    timestamp: item?.date?.slice(0, -6),
+    status: item?.status?.toUpperCase(),
+    blockNumber,
+    confirmations,
+  };
 };

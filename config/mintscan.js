@@ -9,3 +9,9 @@ export const COSMOS_API = axios.create({
   },
   timeout: 30000,
 });
+
+export const COSMOS_REST_API = axios.create({
+  baseURL: config.COSMOS_REST_BASE_URL,
+  headers: {'Content-Type': 'application/json'},
+  timeout: 30000,
+});

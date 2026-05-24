@@ -5,7 +5,6 @@ import {
   CHAIN_ID,
   GAS_ORACLE_CONTRACT_ADDRESS,
   IS_SANDBOX,
-  SCAN_URL,
 } from 'dok-wallet-blockchain-networks/config/config';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import bep20Abi from 'dok-wallet-blockchain-networks/abis/bep20.json';
@@ -17,18 +16,18 @@ import {EvmServices} from 'dok-wallet-blockchain-networks/service/evmServices';
 import {
   getFreeRPCUrl,
   getPremiumRPCUrl,
-  getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
   extractHashFromEVMError,
   extractTxHashFromEVMMissingError,
+  getExplorerTxUrl,
   isEip1559NotSupported,
+  isEip7702SupportedChain,
   isLayer2Chain,
   isValidEVMTransactionHash,
   parseBalance,
-  safelyJsonParse,
   sleep,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -41,6 +40,136 @@ import {
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 
 const errorDecoder = ErrorDecoder.create();
+
+const BATCH_EXECUTE_SELECTOR = '0x3f707e6b';
+
+const UNSTAKE_FUNCTION_KEYWORDS = [
+  'unstake',
+  'undelegate',
+  'unfreeze',
+  'withdraw',
+  'exit',
+  'redeem',
+];
+const STAKE_FUNCTION_KEYWORDS = [
+  'stake',
+  'delegate',
+  'freeze',
+  'supply',
+  'authorizeanddeposit',
+  'deposit',
+  'approve',
+];
+
+const NFT_TRANSFER_SELECTORS = new Set([
+  '0x42842e0e', // ERC721 safeTransferFrom(address,address,uint256)
+  '0xb88d4fde', // ERC721 safeTransferFrom(address,address,uint256,bytes)
+  '0xf242432a', // ERC1155 safeTransferFrom(address,address,uint256,uint256,bytes)
+  '0x2eb2c2d6', // ERC1155 safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)
+]);
+
+const ERC20_SELECTORS = new Set([
+  '0xa9059cbb', // transfer(address,uint256)
+  '0x095ea7b3', // approve(address,uint256)
+  '0x23b872dd', // transferFrom(address,address,uint256) — ambiguous, treat as non-NFT
+]);
+
+const STAKING_CONTRACTS = {
+  ethereum: {
+    '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2': 'stake', // Aave V3 Pool
+    '0x3afdc9bca9213a35503b077a6072f3d0d5ab0840': 'stake', // Compound USDT
+    '0xc3d688b66703497daa19211eedff47f25384cdc3': 'stake', // Compound USDC
+    '0x1b0e765f6224c21223aea2af16c1c46e38885a40': 'stake', // Compound comet reward
+    '0x5c20b550819128074fd538edf79791733ccedd18': 'stake', // Fluid USDT
+    '0x9fb7b4477576fe5b32be4c1843afb1e55f251b33': 'stake', // Fluid USDC
+    '0xdad4e51d64c3b65a9d27ad9f3185b09449712065': 'stake', // Morpho USDT
+    '0xbeef01735c132ada46aa9aa4c54623caa92a64cb': 'stake', // Morpho USDC
+    '0xe2e7a17dff93280dec073c995595155283e3c372': 'stake', // Spark USDT
+    '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d': 'stake', // Spark USDC
+    '0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d': 'stake', // maple USDT
+    '0xf007476bb27430795138c511f18f821e8d1e5ee2': 'stake', //  maple USDC
+    '0xdac17f958d2ee523a2206206994597c13d831ec7': 'stake', // USDT contract approve
+    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'stake', // USDC contract approve
+  },
+};
+
+function getEVMTransactionType(item, isBatch, chainName) {
+  if (isBatch) {
+    return 'batch';
+  }
+
+  const toAddress = item?.to?.toLowerCase();
+  const fromAddress = item?.from?.toLowerCase();
+  const functionName = (item?.functionName || '').toLowerCase();
+  const input = item?.input || '';
+  const selector = input?.length >= 10 ? input.slice(0, 10).toLowerCase() : '';
+  const chainContracts = STAKING_CONTRACTS[chainName] || {};
+  const contractType = chainContracts[toAddress];
+
+  if (contractType) {
+    if (UNSTAKE_FUNCTION_KEYWORDS.some(kw => functionName.includes(kw))) {
+      return 'unstake';
+    }
+    if (STAKE_FUNCTION_KEYWORDS.some(kw => functionName.includes(kw))) {
+      return 'stake';
+    }
+    return 'smartContract';
+  }
+
+  // For ERC20 token transfers: when a staking contract sends tokens back to
+  // the user (item.from = DeFi contract), it's an unstake operation.
+  if (chainContracts[fromAddress]) {
+    return 'unstake';
+  }
+
+  // NFT transfer detection — by unambiguous function selectors or safeTransferFrom name
+  if (
+    (selector && NFT_TRANSFER_SELECTORS.has(selector)) ||
+    functionName.includes('safetransferfrom') ||
+    functionName.includes('safebatchtransferfrom')
+  ) {
+    return 'nftTransfer';
+  }
+
+  // Non-trivial input data that isn't a plain ERC20 call → smart contract interaction
+  if (selector && !ERC20_SELECTORS.has(selector)) {
+    return 'smartContract';
+  }
+
+  // EIP-7702 delegation change — self-to-self, zero value, empty input on supported chains.
+  // Etherscan does not expose the tx type field, so this heuristic is the only way to identify
+  // type-4 (EIP-7702) delegation grant/revoke transactions in the explorer history.
+  if (
+    isEip7702SupportedChain(chainName) &&
+    fromAddress &&
+    toAddress &&
+    fromAddress === toAddress &&
+    (!input || input === '0x') &&
+    (!item?.value || item?.value === '0' || item?.value === '0x0')
+  ) {
+    return 'delegationChange';
+  }
+
+  return 'regular';
+}
+
+const batchContractInterface = new ethers.Interface(contractABI);
+
+function decodeBatchTotalAmount(input) {
+  try {
+    const decoded = batchContractInterface.parseTransaction({data: input});
+    if (decoded?.args?.[0]) {
+      const total = decoded.args[0].reduce(
+        (sum, call) => sum + BigInt(call[1]),
+        0n,
+      );
+      return total.toString();
+    }
+  } catch (e) {
+    // ignore decode failures
+  }
+  return '0';
+}
 
 const FEES_BY_RPC_CHAINS = [
   'viction',
@@ -63,6 +192,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     : [...premiumRpcUrls, ...freeRpcUrls];
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
+  console.log('All rpcs', allRpcUrls);
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
@@ -85,8 +215,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         address: ethers.ZeroAddress,
         nonce: currentNonce + 1,
       });
-      const feeData = await evmProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
+      const {
+        gasPrice: finalGasPrice,
+        maxPriorityFeePerGas,
+      } = await getEtherGasPrice('recommended', evmProvider);
       const revokeTx = {
         type: 4,
         from: walletSigner.address,
@@ -95,18 +227,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         data: '0x',
         nonce: currentNonce,
         authorizationList: [revokeAuth],
-        maxFeePerGas: gasPrice,
-        maxPriorityFeePerGas: gasPrice,
+        maxFeePerGas: finalGasPrice,
+        maxPriorityFeePerGas: maxPriorityFeePerGas || finalGasPrice,
         gasLimit: 50000n,
       };
       if (isEip1559NotSupported(chain_name)) {
         delete revokeTx.type;
         delete revokeTx.maxFeePerGas;
         delete revokeTx.maxPriorityFeePerGas;
-        revokeTx.gasPrice = gasPrice;
+        revokeTx.gasPrice = finalGasPrice;
       }
       const txResponse = await walletSigner.sendTransaction(revokeTx);
       console.log('Authorization revoked, tx hash:', txResponse.hash);
+      return txResponse;
     } catch (e) {
       console.error('Failed to revoke authorization:', e);
     }
@@ -128,15 +261,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       return maxPriorityFeePerGas;
     }
   }
-
-  const getScanUrlName = () => {
-    if (chain_name === 'polygon') {
-      return getRPCUrl('polygon_blockscout')
-        ? 'polygon_blockscout'
-        : 'polygon_scan';
-    }
-    return chain_name;
-  };
   const getEtherGasPrice = async (feesType, evmProvider) => {
     let resp;
     if (!IS_SANDBOX && !FEES_BY_RPC_CHAINS.includes(chain_name)) {
@@ -312,7 +436,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             const tempItem = {
               amount: amount,
               link: txHash.substring(0, 13) + '...',
-              url: `${SCAN_URL[getScanUrlName()]}/tx/${txHash}`,
+              url: getExplorerTxUrl(chain_name, txHash),
               status: i === 0 ? 'PENDING' : 'QUEUE',
               date: transactionData.date, //new Date(transaction.raw_data.timestamp),
               from: item?.from,
@@ -853,20 +977,38 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             contract_type === 'ERC1155' ? erc1155Abi : erc721Abi,
             walletSigner,
           );
-          const estimateGas =
-            contract_type === 'ERC1155'
-              ? await contract[
-                  'safeTransferFrom(address,address,uint256,uint256,bytes)'
-                ].estimateGas(
-                  fromAddress,
-                  toAddress,
-                  Number(tokenId),
-                  Number(tokenAmount),
-                  '0x',
-                )
-              : await contract[
-                  'safeTransferFrom(address,address,uint256)'
-                ].estimateGas(fromAddress, toAddress, Number(tokenId));
+          let estimateGas;
+          try {
+            estimateGas =
+              contract_type === 'ERC1155'
+                ? await contract[
+                    'safeTransferFrom(address,address,uint256,uint256,bytes)'
+                  ].estimateGas(
+                    fromAddress,
+                    toAddress,
+                    BigInt(tokenId),
+                    BigInt(tokenAmount),
+                    '0x',
+                  )
+                : await contract[
+                    'safeTransferFrom(address,address,uint256)'
+                  ].estimateGas(fromAddress, toAddress, BigInt(tokenId));
+          } catch (_safeErr) {
+            if (contract_type === 'ERC1155') {
+              estimateGas = 200000n;
+            } else {
+              // safeTransferFrom fails when recipient is a smart account
+              // (e.g. EIP-7702) that doesn't implement IERC721Receiver.
+              // Fall back to transferFrom which skips the receiver check.
+              try {
+                estimateGas = await contract[
+                  'transferFrom(address,address,uint256)'
+                ].estimateGas(fromAddress, toAddress, BigInt(tokenId));
+              } catch (_) {
+                estimateGas = 150000n;
+              }
+            }
+          }
 
           return await calculateTotalFees({
             estimateGas,
@@ -1046,6 +1188,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         });
         const removePendingTransactions = [];
         if (Array.isArray(transactions?.data)) {
+          const batchContractAddress =
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
           const transactionsData = transactions?.data.map(item => {
             const bnValue = BigInt(item?.value);
             const txHash = item?.hash;
@@ -1068,15 +1212,30 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 tempPendingTransactions = updatedArray;
               }
             }
+            const toAddress = item?.to?.toLowerCase();
+            const fromAddress = item?.from?.toLowerCase();
+            const normalizedAddress = address?.toLowerCase();
+            const isBatch =
+              (batchContractAddress &&
+                toAddress === batchContractAddress.toLowerCase()) ||
+              (toAddress === normalizedAddress &&
+                fromAddress === normalizedAddress &&
+                item?.input?.startsWith(BATCH_EXECUTE_SELECTOR));
+            const amount = isBatch
+              ? decodeBatchTotalAmount(item?.input)
+              : bnValue.toString();
             return {
-              amount: bnValue.toString(),
-              link: txHash.substring(0, 13) + '...',
-              url: `${SCAN_URL[getScanUrlName()]}/tx/${txHash}`,
+              amount,
+              link: txHash,
+              url: getExplorerTxUrl(chain_name, txHash),
               status: Number(item?.txreceipt_status) ? 'SUCCESS' : 'FAIL',
               date: item?.timeStamp * 1000, //new Date(transaction.raw_data.timestamp),
               from: item?.from,
               to: item?.to,
               totalCourse: '0$',
+              transactionType: getEVMTransactionType(item, isBatch, chain_name),
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
           if (removePendingTransactions.length) {
@@ -1101,6 +1260,71 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error(`error getting transactions for ether ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const [tx, receipt] = await Promise.all([
+          safeGetTransactionData(txHash),
+          safeGetTransactionStatus(txHash),
+        ]);
+        if (!tx) {
+          return {data: null};
+        }
+        let blockTimestamp = null;
+        let confirmations = null;
+        if (receipt?.blockNumber) {
+          try {
+            const [block, conf] = await Promise.all([
+              receipt.getBlock(),
+              receipt.confirmations(),
+            ]);
+            blockTimestamp = block?.timestamp
+              ? `0x${block.timestamp.toString(16)}`
+              : null;
+            confirmations = parseInt(conf, 16);
+          } catch (e) {
+            console.warn('Could not fetch block info', e);
+          }
+        }
+        const batchContractAddress =
+          BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+        const toAddr = tx.to?.toLowerCase();
+        const fromAddr = tx.from?.toLowerCase();
+        const isBatchTx =
+          (batchContractAddress &&
+            toAddr === batchContractAddress.toLowerCase()) ||
+          (toAddr === fromAddr && tx.data?.startsWith(BATCH_EXECUTE_SELECTOR));
+        const txAmount = isBatchTx
+          ? decodeBatchTotalAmount(tx.data)
+          : tx.value.toString();
+        return {
+          data: {
+            link: tx.hash,
+            from: tx.from,
+            to: tx.to,
+            url: getExplorerTxUrl(chain_name, txHash),
+            amount: txAmount,
+            blockNumber: tx.blockNumber
+              ? parseInt(String(tx.blockNumber), 10)
+              : null,
+            blockTimestamp,
+            confirmations,
+            gasPrice: tx.gasPrice ? `0x${tx.gasPrice.toString(16)}` : null,
+            gasUsed: receipt?.gasUsed
+              ? `0x${receipt.gasUsed.toString(16)}`
+              : null,
+            status:
+              receipt === null
+                ? 'PENDING'
+                : receipt.status === 1
+                ? 'SUCCESS'
+                : 'FAILED',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction for ether ${e}`);
+        return {data: null};
       }
     },
     getTransactionForUpdate: async ({from, txHash, decimals}) => {
@@ -1151,7 +1375,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       return {
         amount: formatAmount,
         link: hash.substring(0, 13) + '...',
-        url: `${SCAN_URL[getScanUrlName()]}/tx/${hash}`,
+        url: getExplorerTxUrl(chain_name, txHash),
         status: 'PENDING',
         from: tr?.from,
         to: toAddress,
@@ -1190,6 +1414,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         });
         const removePendingTransactions = [];
         if (Array.isArray(transactions?.data)) {
+          const batchContractAddress =
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
           const transactionsData = transactions?.data.map(item => {
             const bnValue = BigInt(item?.value);
             const txHash = item?.hash;
@@ -1212,16 +1438,28 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 tempPendingTransactions = updatedArray;
               }
             }
+            const toAddress = item?.to?.toLowerCase();
+            const fromAddress = item?.from?.toLowerCase();
+            const normalizedAddress = address?.toLowerCase();
+            const isBatch =
+              (batchContractAddress &&
+                toAddress === batchContractAddress.toLowerCase()) ||
+              (toAddress === normalizedAddress &&
+                fromAddress === normalizedAddress &&
+                item?.input?.startsWith(BATCH_EXECUTE_SELECTOR));
             return {
               amount: bnValue.toString(),
               link: txHash.substring(0, 13) + '...',
-              url: `${SCAN_URL[getScanUrlName()]}/tx/${txHash}`,
-              status: Number(item?.confirmations) > 14 ? 'SUCCESS' : 'FAIL',
+              url: getExplorerTxUrl(chain_name, txHash),
+              status: Number(item?.confirmations) >= 1 ? 'SUCCESS' : 'FAIL',
               date: item?.timeStamp * 1000, //new Date(transaction.raw_data.timestamp),
               from: item?.from,
               to: item?.to,
               contractAddress: item?.contractAddress,
               totalCourse: '0$',
+              transactionType: getEVMTransactionType(item, isBatch, chain_name),
+              blockNumber: item?.blockNumber ?? null,
+              confirmations: item?.confirmations ?? null,
             };
           });
           if (removePendingTransactions.length) {
@@ -1566,21 +1804,41 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           walletSigner,
         );
         let finalEstimateGas = estimateGas;
-        if (typeof finalEstimateGas !== 'bigint') {
-          finalEstimateGas =
-            contract_type === 'ERC1155'
-              ? await contract[
-                  'safeTransferFrom(address,address,uint256,uint256,bytes)'
-                ].estimateGas(
-                  from,
-                  to,
-                  Number(tokenId),
-                  Number(tokenAmount),
-                  '0x',
-                )
-              : await contract[
-                  'safeTransferFrom(address,address,uint256)'
-                ].estimateGas(from, to, Number(tokenId));
+        // For ERC721 determine at send-time which transfer function to use so
+        // that smart-account recipients (EIP-7702, etc.) that don't implement
+        // IERC721Receiver are handled correctly.
+        let useTransferFrom = false;
+        if (contract_type === 'ERC1155') {
+          if (typeof finalEstimateGas !== 'bigint') {
+            finalEstimateGas = await contract[
+              'safeTransferFrom(address,address,uint256,uint256,bytes)'
+            ].estimateGas(from, to, BigInt(tokenId), BigInt(tokenAmount), '0x');
+          }
+        } else {
+          try {
+            if (typeof finalEstimateGas !== 'bigint') {
+              finalEstimateGas = await contract[
+                'safeTransferFrom(address,address,uint256)'
+              ].estimateGas(from, to, BigInt(tokenId));
+            } else {
+              // Probe even when we already have a gas amount to confirm the
+              // function will succeed on-chain.
+              await contract[
+                'safeTransferFrom(address,address,uint256)'
+              ].estimateGas(from, to, BigInt(tokenId));
+            }
+          } catch (_) {
+            useTransferFrom = true;
+            if (typeof finalEstimateGas !== 'bigint') {
+              try {
+                finalEstimateGas = await contract[
+                  'transferFrom(address,address,uint256)'
+                ].estimateGas(from, to, BigInt(tokenId));
+              } catch (_e2) {
+                finalEstimateGas = 150000n;
+              }
+            }
+          }
         }
         let finalGasPrice = gasFee;
         let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -1592,7 +1850,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
         const options = {
           type: 2,
-          gasLimit: finalEstimateGas, // 100000
+          gasLimit: finalEstimateGas,
           maxFeePerGas: finalGasPrice,
           maxPriorityFeePerGas: validatePriorityFee(
             finalMaxPriorityFeePerGas,
@@ -1613,14 +1871,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               ].populateTransaction(
                 from,
                 to,
-                Number(tokenId),
-                Number(tokenAmount),
+                BigInt(tokenId),
+                BigInt(tokenAmount),
                 '0x',
                 options,
               )
+            : useTransferFrom
+            ? await contract[
+                'transferFrom(address,address,uint256)'
+              ].populateTransaction(from, to, BigInt(tokenId), options)
             : await contract[
                 'safeTransferFrom(address,address,uint256)'
-              ].populateTransaction(from, to, Number(tokenId), options);
+              ].populateTransaction(from, to, BigInt(tokenId), options);
         return await createSendTransaction(walletSigner, tx);
       } catch (e) {
         console.error('Error in send ether nft token transaction', e);
@@ -1716,5 +1978,28 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           }
         }
       }, 'pending'),
+    checkDelegation: ({address}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const code = await evmProvider.getCode(address);
+          if (
+            code &&
+            code.toLowerCase().startsWith('0xef0100') &&
+            code.length === 48
+          ) {
+            return {isDelegated: true, contractAddress: '0x' + code.slice(8)};
+          }
+          return {isDelegated: false, contractAddress: null};
+        } catch (e) {
+          console.error('Error checking delegation', e);
+          return {isDelegated: false, contractAddress: null};
+        }
+      }, {isDelegated: false, contractAddress: null}),
+    revokeDelegation: ({privateKey}) =>
+      retryFunc(async evmProvider => {
+        const wallet = new ethers.Wallet(privateKey);
+        const walletSigner = wallet.connect(evmProvider);
+        return await revokeAuthorization(walletSigner, evmProvider);
+      }, null),
   };
 };

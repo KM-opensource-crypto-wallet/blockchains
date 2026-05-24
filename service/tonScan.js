@@ -14,4 +14,26 @@ export const TonScan = {
       console.error('Error in getAllValidators for tron', e);
     }
   },
+  getTransactionByHash: async ({txHash}) => {
+    try {
+      // TON API v3 expects base64url-encoded hash; convert from hex if needed
+      // eslint-disable-next-line no-undef
+      const hashBase64 = Buffer.from(txHash, 'hex').toString('base64');
+      const resp = await TonScanAPI.get('/api/v3/transactions', {
+        params: {hash: hashBase64},
+      });
+      return {status: resp?.status, data: resp?.data?.transactions};
+    } catch (e) {
+      console.error('Error in getTransactionByHash for ton', e);
+    }
+  },
+  getMasterchainInfo: async () => {
+    try {
+      const resp = await TonScanAPI.get('/api/v3/masterchainInfo');
+      return resp?.data?.last?.seqno ?? null;
+    } catch (e) {
+      console.error('Error in getMasterchainInfo for ton', e);
+      return null;
+    }
+  },
 };
