@@ -102,7 +102,7 @@ function getEVMTransactionType(item, isBatch, chainName) {
   const fromAddress = item?.from?.toLowerCase();
   const functionName = (item?.functionName || '').toLowerCase();
   const input = item?.input || '';
-  const selector = input?.length >= 10 ? input.slice(0, 10).toLowerCase() : '';
+  const selector = (input?.startsWith('0x') && input?.length >= 10) ? input.slice(0, 10).toLowerCase() : '';
   const chainContracts = STAKING_CONTRACTS[chainName] || {};
   const contractType = chainContracts[toAddress];
 
