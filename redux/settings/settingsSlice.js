@@ -16,7 +16,7 @@ const state = {
   isWalletReset: false,
   isCustomDerivedChecked: false,
   walletsSortOption: 'default',
-  hideSmallTransactions: false,
+  hideSmallTransactions: true,
 };
 
 export const settingsSlice = createSlice({
