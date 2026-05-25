@@ -62,11 +62,8 @@ import {
   getLargestNumber,
   getWalletTotalBalance,
   delay,
-<<<<<<< HEAD
   getExplorerTxUrl,
-=======
   getStakignKey,
->>>>>>> 7e4eb9f (aaded aave staking in ethereum usdc and usdt)
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
