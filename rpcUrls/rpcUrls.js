@@ -71,6 +71,10 @@ const allRPCUrl = {
     mainnet: true,
     testnet: true,
   },
+  hyperliquid: {
+    mainnet: 'https://rpc.hyperliquid.xyz/evm',
+    testnet: 'https://rpc.hyperliquid-testnet.xyz/evm',
+  },
 };
 
 const allFreeRpcUrl = {
@@ -237,6 +241,10 @@ const allFreeRpcUrl = {
       'https://filecoin-calibration.chainup.net/rpc/v1',
     ],
   },
+  hyperliquid: {
+    mainnet: ['https://rpc.hyperliquid.xyz/evm'],
+    testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
+  },
 };
 
 let rpcUrls = {
@@ -271,8 +279,14 @@ export const fetchRPCUrl = async () => {
     const freeUrl = isValidObject(data?.free_url) ? data?.free_url : {};
     const url = isValidObject(data?.url) ? data?.url : {};
     rpcUrls = {
-      url: Object.keys(url).length > 0 ? url : rpcUrls.url,
-      free_url: Object.keys(freeUrl).length > 0 ? freeUrl : rpcUrls.free_url,
+      url: {
+        ...rpcUrls.url,
+        ...(Object.keys(url).length > 0 ? url : {}),
+      },
+      free_url: {
+        ...rpcUrls.free_url,
+        ...(Object.keys(freeUrl).length > 0 ? freeUrl : {}),
+      },
     };
   } catch (e) {
     console.error('Error in fetchRPCUrl', e);

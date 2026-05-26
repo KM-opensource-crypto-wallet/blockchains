@@ -96,6 +96,7 @@ const ethereumChains = {
   kava: 'ethereum',
   ink: 'ethereum',
   sei: 'ethereum',
+  hyperliquid: 'ethereum',
 };
 
 const supportedChain = [
@@ -310,6 +311,7 @@ const EVM_CHAINS = [
   'kava',
   'ink',
   'sei',
+  'hyperliquid',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
