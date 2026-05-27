@@ -240,9 +240,11 @@ const allFreeRpcUrl = {
   hyperliquid: {
     mainnet: [
       'https://rpc.hyperliquid.xyz/evm',
-      'https://drpc.org/chainlist/hyperliquid-mainnet-rpc',
-      'https://www.quicknode.com/chains/hyperliquid',
       'https://hyperliquid-json-rpc.stakely.io',
+      'https://hyperliquid.api.onfinality.io/evm/public',
+      'https://hyperliquid.drpc.org',
+      'https://rpc.hypurrscan.io',
+      'https://rpc.hyperlend.finance',
     ],
     testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
   },

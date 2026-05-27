@@ -588,9 +588,7 @@ export const SCAN_URL = {
     txPath: 'tx',
   },
   hyperliquid: {
-    baseUrl: IS_SANDBOX
-      ? 'https://hyperevmscan.io/'
-      : 'https://hyperevmscan.io/',
+    baseUrl: 'https://hyperevmscan.io/',
     txPath: 'tx',
   },
   // Non-EVM chains
