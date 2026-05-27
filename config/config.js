@@ -78,6 +78,7 @@ const SANDBOX_CHAIN_ID = {
   kava: 2221,
   ink: 763373,
   sei: 1328,
+  hyperliquid: 998,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -99,6 +100,7 @@ const PRODUCTION_CHAIN_ID = {
   kava: 2222,
   ink: 57073,
   sei: 1329,
+  hyperliquid: 999,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
@@ -214,6 +216,11 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'sei',
     symbol: 'SEI',
   },
+  'eip155:998': {
+    chain_display_name: 'Hyperliquid',
+    chain_name: 'hyperliquid',
+    symbol: 'HYPE',
+  },
   'tron:0xcd8690dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -316,6 +323,11 @@ const WalletConnectSupportedChainProduction = {
     chain_display_name: 'Sei',
     chain_name: 'sei',
     symbol: 'SEI',
+  },
+  'eip155:999': {
+    chain_display_name: 'Hyperliquid',
+    chain_name: 'hyperliquid',
+    symbol: 'HYPE',
   },
   'tron:0x2b6653dc': {
     chain_display_name: 'Tron',
@@ -573,6 +585,10 @@ export const SCAN_URL = {
   },
   sei: {
     baseUrl: IS_SANDBOX ? 'https://testnet.seiscan.io' : 'https://seiscan.io',
+    txPath: 'tx',
+  },
+  hyperliquid: {
+    baseUrl: 'https://hyperevmscan.io/',
     txPath: 'tx',
   },
   // Non-EVM chains

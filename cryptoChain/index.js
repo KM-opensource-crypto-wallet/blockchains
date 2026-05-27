@@ -28,6 +28,7 @@ import {APP_VERSION} from 'utils/common';
 const chains = {
   tron: TronChain,
   ethereum: EVMChain,
+  hyperliquid: EVMChain,
   binance_smart_chain: EVMChain,
   bitcoin: BitcoinChain, // this is native segwit
   bitcoin_legacy: BitcoinChain,

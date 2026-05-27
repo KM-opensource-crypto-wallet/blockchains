@@ -23,4 +23,5 @@ export const EvmServices = {
   ethereum_pow: EthereumPowScan,
   ink: InkBlockExplorer,
   sei: EtherScan,
+  hyperliquid: EtherScan,
 };
