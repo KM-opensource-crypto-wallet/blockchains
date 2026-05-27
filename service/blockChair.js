@@ -112,7 +112,9 @@ export const BlockChair = {
         },
       },
     );
-    const txIds = resp?.data?.data?.transactions;
+    const txIds = Array.isArray(resp?.data?.data?.transactions)
+      ? resp.data.data.transactions
+      : [];
     const chunks = [];
     for (let i = 0; i < txIds.length; i += 10) {
       chunks.push(txIds.slice(i, i + 10).join(','));
