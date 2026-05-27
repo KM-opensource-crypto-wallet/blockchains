@@ -96,6 +96,7 @@ const ethereumChains = {
   kava: 'ethereum',
   ink: 'ethereum',
   sei: 'ethereum',
+  hyperliquid: 'ethereum',
 };
 
 const supportedChain = [
@@ -310,6 +311,7 @@ const EVM_CHAINS = [
   'kava',
   'ink',
   'sei',
+  'hyperliquid',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
@@ -731,6 +733,14 @@ export const ModalAddTokenList = [
     token_type: 'ERC20',
     isEVM: true,
   },
+  {
+    label: 'Hyperliquid',
+    value: 'hyperliquid',
+    chain_symbol: 'HYPE',
+    type: 'token',
+    token_type: 'ERC20',
+    isEVM: true,
+  },
 ];
 
 export const PrivateKeyList = [
@@ -801,6 +811,10 @@ export const PrivateKeyList = [
   {
     label: 'Hedera',
     value: 'hedera',
+  },
+  {
+    label: 'Hyperliquid',
+    value: 'hyperliquid',
   },
   {
     label: 'Ink',
@@ -894,6 +908,7 @@ export const CustomRPCList = [
   {label: 'Kava', value: 'kava'},
   {label: 'Ink', value: 'ink'},
   {label: 'Sei', value: 'sei'},
+  {label: 'Hyperliquid', value: 'hyperliquid'},
 ];
 export const AUTO_LOCK = [
   {

@@ -19,6 +19,7 @@ const FREE_NOT_SUPPORTED_CHAINS = [
   'polygon',
   'base',
   'gnosis',
+  'hyperliquid',
 ];
 export const EtherScan = {
   getTransactions: async ({address, contractAddress = null, chain_name}) =>
