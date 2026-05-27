@@ -241,10 +241,8 @@ const allFreeRpcUrl = {
     mainnet: [
       'https://rpc.hyperliquid.xyz/evm',
       'https://hyperliquid-json-rpc.stakely.io',
-      'https://hyperliquid.api.onfinality.io/evm/public',
       'https://hyperliquid.drpc.org',
       'https://rpc.hypurrscan.io',
-      'https://rpc.hyperlend.finance',
     ],
     testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
   },
