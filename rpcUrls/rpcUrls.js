@@ -71,10 +71,6 @@ const allRPCUrl = {
     mainnet: true,
     testnet: true,
   },
-  hyperliquid: {
-    mainnet: 'https://rpc.hyperliquid.xyz/evm',
-    testnet: 'https://rpc.hyperliquid-testnet.xyz/evm',
-  },
 };
 
 const allFreeRpcUrl = {
@@ -242,7 +238,12 @@ const allFreeRpcUrl = {
     ],
   },
   hyperliquid: {
-    mainnet: ['https://rpc.hyperliquid.xyz/evm'],
+    mainnet: [
+      'https://rpc.hyperliquid.xyz/evm',
+      'https://drpc.org/chainlist/hyperliquid-mainnet-rpc',
+      'https://www.quicknode.com/chains/hyperliquid',
+      'https://hyperliquid-json-rpc.stakely.io',
+    ],
     testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
   },
 };
