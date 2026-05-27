@@ -99,23 +99,34 @@ export const BlockChair = {
   },
 
   getTransactions: async ({chain, address, derive_addresses}) => {
+    const finalAddresses =
+      Array.isArray(derive_addresses) && derive_addresses?.length > 1
+        ? derive_addresses
+        : [address];
+    const addressStr = finalAddresses.join(',');
     const resp = await BlockChairAPI.get(
-      `${chainName[chain]}/dashboards/address/${address}`,
+      `${chainName[chain]}/dashboards/addresses/${addressStr}`,
       {
         params: {
-          limit: '10,0',
+          limit: '20,0',
         },
       },
     );
-    const txIds = resp?.data?.data?.[address]?.transactions;
-    const transactionResp = await BlockChairAPI.get(
-      `${chainName[chain]}/dashboards/transactions/${txIds.join(',')}`,
+    const txIds = resp?.data?.data?.transactions;
+    const chunks = [];
+    for (let i = 0; i < txIds.length; i += 10) {
+      chunks.push(txIds.slice(i, i + 10).join(','));
+    }
+    const transactionResps = await Promise.all(
+      chunks.map(chunk =>
+        BlockChairAPI.get(
+          `${chainName[chain]}/dashboards/transactions/${chunk}`,
+        ),
+      ),
     );
-    const transactionsData = transactionResp?.data?.data || {};
-    const txs = Object.values(transactionsData);
-    const finalAddresses = Array.isArray(derive_addresses)
-      ? derive_addresses
-      : [address];
+    const txs = transactionResps.flatMap(r =>
+      Object.values(r?.data?.data || {}),
+    );
     return parseBlockchainTransactions(txs, finalAddresses);
   },
 

@@ -417,6 +417,26 @@ const feesOptionsChains = [
 export const isFeesOptionChain = chain_name =>
   feesOptionsChains.includes(chain_name);
 
+const TRANSACTION_LIST_LIMIT_100 = [
+  'ethereum',
+  'polygon',
+  'binance_smart_chain',
+  'base',
+  'arbitrum',
+  'optimism',
+  'optimism_binance_smart_chain',
+  'avalanche',
+  'fantom',
+  'gnosis',
+  'viction',
+  'linea',
+  'zksync',
+  'sei',
+];
+
+export const isTransactionListLimit100 = chain_name =>
+  TRANSACTION_LIST_LIMIT_100.includes(chain_name);
+
 const EPOCH_TIME_SUPPORT_CHAIN = ['solana'];
 
 export const isSupportEpochTime = chain_name =>

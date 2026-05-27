@@ -285,6 +285,7 @@ const getBaseCoin = async (chain, wallet, coin) => {
     getTransaction: async payload =>
       await chain?.getTransaction({
         address: wallet.address,
+        deriveAddresses: effectiveDeriveAddresses,
         ...payload,
       }),
     getTransactionForUpdate: async payload =>
