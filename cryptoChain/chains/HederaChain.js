@@ -124,7 +124,7 @@ export const HederaChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const resp = await HEDERA.getAccountInfo('0.0.10358775');
+        const resp = await HEDERA.getAccountInfo(address);
         return resp?.data?.balance?.balance?.toString() || '0';
       } catch (e) {
         console.error('error in get balance from hedera', e);
