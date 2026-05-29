@@ -64,17 +64,14 @@ export const aaveProvider = {
   poolABI: aavePoolABI,
   dataProviderContractAddress: aaveDataProviderContractAddress,
   dataProviderABI: aaveDataProviderABI,
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
-    const tokenContract = new ethers.Contract(
-      contractAddress,
-      erc20,
-      walletSigner,
-    );
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const amountInWei = parseUnits(amount.toString(), decimals);
 
     const balance = await tokenContract.balanceOf(from);
@@ -106,28 +103,24 @@ export const aaveProvider = {
       0,
     );
 
-    await pool.supply.staticCall(contractAddress, amountInWei, from, 0, {
-      gasLimit,
-    });
-
-    const tx = await pool.supply(contractAddress, amountInWei, from, 0, {
-      gasLimit,
-    });
-    await tx.wait();
-
-    return tx.hash;
-  },
-  getEstimateFeeForStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
-    const tokenContract = new ethers.Contract(
+    const tx = await pool.supply.populateTransaction(
       contractAddress,
-      erc20,
-      walletSigner,
+      amountInWei,
+      from,
+      0,
+      {gasLimit},
     );
+    console.log('populated trx: ', tx);
+    return tx;
+  },
+  getEstimateFeeForStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const amountInWei = parseUnits(amount.toString(), decimals);
     const pool = new ethers.Contract(
       aavePoolContractAddress,
@@ -152,15 +145,14 @@ export const aaveProvider = {
       // Aave v3 supply consistently costs 220k-280k gas for USDT/USDC
       estimateGas = approveGas + 300000n;
     }
-    return {estimateGas};
+    return {
+      estimateGas,
+      toAddress: aavePoolContractAddress,
+      value: amountInWei,
+    };
   },
-  unStaking: async (
-    {from, amount, privateKey, contractAddress, evmProvider},
-    provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const pool = new ethers.Contract(
         aavePoolContractAddress,
         aavePoolABI,
@@ -175,12 +167,16 @@ export const aaveProvider = {
 
       await pool.withdraw.staticCall(contractAddress, ethers.MaxUint256, from);
 
-      const tx = await pool.withdraw(contractAddress, ethers.MaxUint256, from, {
-        gasLimit,
-      });
-      await tx.wait();
+      const tx = await pool.withdraw.populateTransaction(
+        contractAddress,
+        ethers.MaxUint256,
+        from,
+        {
+          gasLimit,
+        },
+      );
 
-      return tx.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
@@ -213,13 +209,10 @@ export const aaveProvider = {
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const pool = new ethers.Contract(
         aavePoolContractAddress,
         aavePoolABI,
@@ -230,7 +223,11 @@ export const aaveProvider = {
         ethers.MaxUint256,
         from,
       );
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: aavePoolContractAddress,
+        value: ethers.MaxUint256,
+      };
     } catch (e) {
       console.error('Error in EVMChain getEstimateFeeForDeactivateStaking', e);
       throw e;

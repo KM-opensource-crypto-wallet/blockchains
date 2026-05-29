@@ -1,5 +1,4 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
-import erc20 from '../../abis/erc20.json';
 import fluidFTokenAbi from '../../abis/spark_abi.json';
 
 // Fluid fToken vaults on Ethereum mainnet (ERC4626-compliant)
@@ -47,24 +46,21 @@ export const fluidProvider = {
   stakedAmount: '0',
   stakedAmountRaw: null,
 
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
         throw new Error(`No Fluid fToken for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const amountInWei = parseUnits(amount.toString(), decimals);
 
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
       const fToken = new ethers.Contract(
         fTokenAddress,
         fluidFTokenAbi,
@@ -80,32 +76,29 @@ export const fluidProvider = {
       const approveTx = await tokenContract.approve(fTokenAddress, amountInWei);
       await approveTx.wait();
 
-      const tx = await fToken.deposit(amountInWei, from);
-      const receipt = await tx.wait();
-      return receipt.hash;
+      const tx = await fToken.deposit.populateTransaction(amountInWei, from);
+
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
 
-  getEstimateFeeForStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  getEstimateFeeForStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const fTokenAddress = getFTokenAddress(contractAddress);
     if (!fTokenAddress)
       throw new Error(`No Fluid fToken found for token: ${contractAddress}`);
 
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
     const amountInWei = parseUnits(amount.toString(), decimals);
 
-    const tokenContract = new ethers.Contract(
-      contractAddress,
-      erc20,
-      walletSigner,
-    );
     const fToken = new ethers.Contract(
       fTokenAddress,
       fluidFTokenAbi,
@@ -122,20 +115,19 @@ export const fluidProvider = {
       );
       estimateGas = approveGas + 250000n;
     }
-    return {estimateGas};
+    return {
+      estimateGas,
+      toAddress: fTokenAddress,
+      value: amountInWei,
+    };
   },
 
-  unStaking: async (
-    {from, privateKey, contractAddress, evmProvider},
-    provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
         throw new Error(`No Fluid fToken for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const fToken = new ethers.Contract(
         fTokenAddress,
         fluidFTokenAbi,
@@ -143,9 +135,9 @@ export const fluidProvider = {
       );
 
       const shares = await fToken.balanceOf(from);
-      const tx = await fToken.redeem(shares, from, from);
-      const receipt = await tx.wait();
-      return receipt.hash;
+      const tx = await fToken.redeem.populateTransaction(shares, from, from);
+
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
@@ -154,17 +146,14 @@ export const fluidProvider = {
 
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
         throw new Error(`No Fluid fToken found for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const fToken = new ethers.Contract(
         fTokenAddress,
         fluidFTokenAbi,
@@ -173,7 +162,11 @@ export const fluidProvider = {
 
       const shares = await fToken.balanceOf(from);
       const estimateGas = await fToken.redeem.estimateGas(shares, from, from);
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: fTokenAddress,
+        value: ethers.MaxUint256,
+      };
     } catch (e) {
       console.error(
         'Error in fluidProvider getEstimateFeeForDeactivateStaking',
@@ -183,10 +176,7 @@ export const fluidProvider = {
     }
   },
 
-  getStakingBalance: async (
-    {evmProvider, address, contractAddress},
-    provider,
-  ) => {
+  getStakingBalance: async ({evmProvider, address, contractAddress}) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
@@ -210,10 +200,12 @@ export const fluidProvider = {
     }
   },
 
-  fetchData: async (
-    {evmProvider, contractAddress, walletAddress, tokenDecimals},
-    provider,
-  ) => {
+  fetchData: async ({
+    evmProvider,
+    contractAddress,
+    walletAddress,
+    tokenDecimals,
+  }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress) return null;

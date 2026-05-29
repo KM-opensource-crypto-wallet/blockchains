@@ -1,5 +1,4 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
-import erc20 from '../../abis/erc20.json';
 import maplePoolABI from '../../abis/maple_pool.json';
 import mapleSyrupRouterABI from '../../abis/maple_syrup_router.json';
 
@@ -86,10 +85,14 @@ export const mapleProvider = {
   apy: '0% APY',
   stakedAmount: '0',
   stakedAmountRaw: null,
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    _provider,
-  ) => {
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
@@ -105,15 +108,7 @@ export const mapleProvider = {
           'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
         );
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const amountInWei = parseUnits(amount.toString(), decimals);
-
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
 
       // USDT requires resetting allowance to 0 before setting a new value
       const allowance = await tokenContract.allowance(
@@ -138,9 +133,12 @@ export const mapleProvider = {
 
       let tx;
       if (isSyrupLender) {
-        tx = await router.deposit(amountInWei, MAPLE_DEPOSIT_DATA);
+        tx = await router.deposit.populateTransaction(
+          amountInWei,
+          MAPLE_DEPOSIT_DATA,
+        );
       } else {
-        tx = await router.authorizeAndDeposit(
+        tx = await router.authorizeAndDeposit.populateTransaction(
           authSig.bitmap,
           authSig.deadline,
           authSig.v,
@@ -150,18 +148,21 @@ export const mapleProvider = {
           MAPLE_DEPOSIT_DATA,
         );
       }
-      const receipt = await tx.wait();
 
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
-  getEstimateFeeForStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    _provider,
-  ) => {
+  getEstimateFeeForStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const config = getVaultConfig(contractAddress);
     if (!config)
       throw new Error(`No Maple vault found for token: ${contractAddress}`);
@@ -176,15 +177,8 @@ export const mapleProvider = {
         'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
       );
 
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
     const amountInWei = parseUnits(amount.toString(), decimals);
 
-    const tokenContract = new ethers.Contract(
-      contractAddress,
-      erc20,
-      walletSigner,
-    );
     const router = new ethers.Contract(
       config.routerAddress,
       mapleSyrupRouterABI,
@@ -205,19 +199,18 @@ export const mapleProvider = {
       // authorizeAndDeposit costs slightly more than a plain deposit
       estimateGas = approveGas + (isSyrupLender ? 250000n : 300000n);
     }
-    return {estimateGas};
+    return {
+      estimateGas,
+      toAddress: config.routerAddress,
+      value: amountInWei,
+    };
   },
-  unStaking: async (
-    {from, privateKey, contractAddress, evmProvider},
-    _provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
         throw new Error(`No Maple vault for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const pool = new ethers.Contract(
         config.poolAddress,
         maplePoolABI,
@@ -225,10 +218,9 @@ export const mapleProvider = {
       );
 
       const shares = await pool.balanceOf(from);
-      const tx = await pool.requestRedeem(shares, from); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
-      const receipt = await tx.wait();
+      const tx = await pool.requestRedeem.populateTransaction(shares, from); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
 
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
@@ -236,17 +228,14 @@ export const mapleProvider = {
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
         throw new Error(`No Maple vault found for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const pool = new ethers.Contract(
         config.poolAddress,
         maplePoolABI,
@@ -255,7 +244,11 @@ export const mapleProvider = {
 
       const shares = await pool.balanceOf(from);
       const estimateGas = await pool.requestRedeem.estimateGas(shares, from);
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: config.poolAddress,
+        value: ethers.MaxUint256,
+      };
     } catch (e) {
       console.error(
         'Error in mapleProvider getEstimateFeeForDeactivateStaking',

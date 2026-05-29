@@ -1,5 +1,4 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
-import erc20 from '../../abis/erc20.json';
 import morphoVaultAbi from '../../abis/spark_abi.json'; // MetaMorpho vaults implement ERC4626
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
@@ -56,24 +55,21 @@ export const morphoProvider = {
   apy: '0% APY',
   stakedAmount: '0',
   stakedAmountRaw: null,
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Morpho vault for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const amountInWei = parseUnits(amount.toString(), decimals);
 
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
       const vault = new ethers.Contract(
         vaultAddress,
         morphoVaultAbi,
@@ -89,32 +85,28 @@ export const morphoProvider = {
       const approveTx = await tokenContract.approve(vaultAddress, amountInWei);
       await approveTx.wait();
 
-      const tx = await vault.deposit(amountInWei, from);
-      const receipt = await tx.wait();
+      const tx = await vault.deposit.populateTransaction(amountInWei, from);
 
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
-  getEstimateFeeForStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  getEstimateFeeForStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const vaultAddress = getVaultAddress(contractAddress);
     if (!vaultAddress)
       throw new Error(`No Morpho vault found for token: ${contractAddress}`);
 
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
     const amountInWei = parseUnits(amount.toString(), decimals);
 
-    const tokenContract = new ethers.Contract(
-      contractAddress,
-      erc20,
-      walletSigner,
-    );
     const vault = new ethers.Contract(
       vaultAddress,
       morphoVaultAbi,
@@ -131,19 +123,18 @@ export const morphoProvider = {
       );
       estimateGas = approveGas + 250000n;
     }
-    return {estimateGas};
+    return {
+      estimateGas,
+      toAddress: vaultAddress,
+      value: amountInWei,
+    };
   },
-  unStaking: async (
-    {from, privateKey, contractAddress, evmProvider},
-    provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Morpho vault for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const vault = new ethers.Contract(
         vaultAddress,
         morphoVaultAbi,
@@ -151,10 +142,8 @@ export const morphoProvider = {
       );
 
       const shares = await vault.balanceOf(from);
-      const tx = await vault.redeem(shares, from, from);
-      const receipt = await tx.wait();
-
-      return receipt.hash;
+      const tx = await vault.redeem.populateTransaction(shares, from, from);
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
@@ -162,17 +151,14 @@ export const morphoProvider = {
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Morpho vault found for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const vault = new ethers.Contract(
         vaultAddress,
         morphoVaultAbi,
@@ -181,7 +167,11 @@ export const morphoProvider = {
 
       const shares = await vault.balanceOf(from);
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: vaultAddress,
+        value: shares,
+      };
     } catch (e) {
       console.error(
         'Error in morphoProvider getEstimateFeeForDeactivateStaking',

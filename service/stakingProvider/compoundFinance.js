@@ -1,5 +1,4 @@
 import {ethers, parseUnits} from 'ethers';
-import erc20 from '../../abis/erc20.json';
 import cometContractABI from '../../abis/comet_compound_abi.json';
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
@@ -24,19 +23,16 @@ export const compoundProvider = {
   apy: '0% APY',
   stakedAmount: '0',
   stakedAmountRaw: null,
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
       const amountInWei = parseUnits(amount.toString(), decimals);
       const comet = new ethers.Contract(
         cometAddress,
@@ -68,31 +64,26 @@ export const compoundProvider = {
       const approveTx = await tokenContract.approve(cometAddress, amountInWei);
       await approveTx.wait();
       // � Step 4: Supply (THIS = staking)
-      const tx = await comet.supply(contractAddress, amountInWei);
-      await tx.wait();
+      const tx = await comet.supply.populateTransaction(
+        contractAddress,
+        amountInWei,
+      );
 
-      console.log('✅ Successfully supplied to Compound V3');
-
-      return tx.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
-  unStaking: async (
-    {from, amount, privateKey, contractAddress, evmProvider},
-    provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const comet = new ethers.Contract(
         cometAddress,
         cometContractABI,
         walletSigner,
       );
-      //  const amountInWei = ethers.parseUnits(amount.toString(), 6);
+
       // � Parse amount (USDC = 6 decimals)
       const baseToken = await comet.baseToken();
       console.log('baseToken:', baseToken);
@@ -106,20 +97,13 @@ export const compoundProvider = {
 
       console.log('Supplied Balance:', ethers.formatUnits(suppliedBalance, 6));
 
-      // if (suppliedBalance < amountInWei) {
-      //   throw new Error(' Not enough supplied balance');
-      // }
-
       // � Step 3: Withdraw (unstake)
-      const tx = await comet.withdraw(
+      const tx = await comet.withdraw.populateTransaction(
         contractAddress,
         ethers.MaxUint256, // � withdraw ALL
       );
-      await tx.wait();
 
-      console.log('✅ Withdraw successful');
-
-      return tx.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
@@ -127,14 +111,14 @@ export const compoundProvider = {
   },
   getStakingBalance: async (
     {evmProvider, address, contractAddress},
-    provider,
+    _provider,
   ) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
       const comet = new ethers.Contract(
         cometAddress,
         cometContractABI,
-        provider,
+        evmProvider,
       );
 
       const balance = await comet.balanceOf(address);
@@ -150,21 +134,15 @@ export const compoundProvider = {
     }
   },
   getEstimateFeeForStaking: async ({
+    from,
     amount,
-    privateKey,
     contractAddress,
     decimals,
-    evmProvider,
+    tokenContract,
+    walletSigner,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
       const amountInWei = parseUnits(amount.toString(), decimals);
       const comet = new ethers.Contract(
         cometAddress,
@@ -187,21 +165,22 @@ export const compoundProvider = {
         // Compound V3 supply consistently costs ~150k-200k gas
         estimateGas = approveGas + 250000n;
       }
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: cometAddress,
+        value: amountInWei,
+      };
     } catch (e) {
       console.error('Error in compoundProvider getEstimateFeeForStaking', e);
       throw e;
     }
   },
   getEstimateFeeForDeactivateStaking: async ({
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const comet = new ethers.Contract(
         cometAddress,
         cometContractABI,
@@ -211,7 +190,11 @@ export const compoundProvider = {
         contractAddress,
         ethers.MaxUint256,
       );
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: cometAddress,
+        value: ethers.MaxUint256,
+      };
     } catch (e) {
       console.error(
         'Error in compoundProvider getEstimateFeeForDeactivateStaking',

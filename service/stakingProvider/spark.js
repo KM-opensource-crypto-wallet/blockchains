@@ -1,5 +1,4 @@
 import {ethers, formatUnits, parseUnits} from 'ethers';
-import erc20 from '../../abis/erc20.json';
 import sparkAbi from '../../abis/spark_abi.json';
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 const SPARK_VAULT_BY_TOKEN = {
@@ -22,23 +21,21 @@ export const sparkProvider = {
   name: 'Spark',
   apy: '0% APY',
   stakedAmount: '0',
-  createStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  createStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     try {
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       const amountInWei = parseUnits(amount.toString(), decimals);
       if (!vaultAddress)
         throw new Error(`No Spark vault for token: ${contractAddress}`);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
-      const tokenContract = new ethers.Contract(
-        contractAddress,
-        erc20,
-        walletSigner,
-      );
+
       const allowance = await tokenContract.allowance(from, vaultAddress);
       if (allowance > 0n) {
         console.log('Resetting allowance to 0...');
@@ -50,33 +47,28 @@ export const sparkProvider = {
       await approveTx.wait();
 
       console.log('Depositing into Spark savings vault...');
-      const tx = await vault.deposit(amountInWei, from);
-      const receipt = await tx.wait();
+      const tx = await vault.deposit.populateTransaction(amountInWei, from);
 
-      console.log('Stake successful:', receipt.hash);
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
-  getEstimateFeeForStaking: async (
-    {from, amount, privateKey, contractAddress, decimals, evmProvider},
-    provider,
-  ) => {
+  getEstimateFeeForStaking: async ({
+    from,
+    amount,
+    contractAddress,
+    decimals,
+    tokenContract,
+    walletSigner,
+  }) => {
     const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
     if (!vaultAddress)
       throw new Error(`No Spark vault found for token: ${contractAddress}`);
 
-    const wallet = new ethers.Wallet(privateKey);
-    const walletSigner = wallet.connect(evmProvider);
     const amountInWei = parseUnits(amount.toString(), decimals);
 
-    const tokenContract = new ethers.Contract(
-      contractAddress,
-      erc20,
-      walletSigner,
-    );
     const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
     let estimateGas;
@@ -92,35 +84,29 @@ export const sparkProvider = {
       // Spark ERC4626 deposit consistently costs ~150k-200k gas
       estimateGas = approveGas + 250000n;
     }
-    return {estimateGas};
+    return {
+      estimateGas,
+      toAddress: vaultAddress,
+      value: amountInWei,
+    };
   },
-  unStaking: async (
-    {from, amount, privateKey, contractAddress, evmProvider},
-    provider,
-  ) => {
+  unStaking: async ({from, contractAddress, walletSigner}) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
       // Redeem all shares
       const shares = await vault.balanceOf(from);
 
-      const tx = await vault.redeem(shares, from, from);
-      const receipt = await tx.wait();
+      const tx = await vault.redeem.populateTransaction(shares, from, from);
 
-      console.log('Unstake successful:', receipt.hash);
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;
     }
   },
-  getStakingBalance: async (
-    {evmProvider, address, contractAddress},
-    provider,
-  ) => {
+  getStakingBalance: async ({evmProvider, address, contractAddress}) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       if (!vaultAddress)
@@ -128,12 +114,7 @@ export const sparkProvider = {
 
       const vault = new ethers.Contract(vaultAddress, sparkAbi, evmProvider);
 
-      const [assetsInWei, sharesInWei] = await Promise.all([
-        vault.assetsOf(address),
-        vault.balanceOf(address),
-      ]);
-
-      const assets = formatUnits(assetsInWei, 6); // both USDT & USDC are 6 decimals
+      const sharesInWei = await vault.balanceOf(address);
       const shares = formatUnits(sharesInWei, 18); // vault shares are 18 decimals
       return {
         stakingBalance: shares.toString() || '0',
@@ -147,31 +128,34 @@ export const sparkProvider = {
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
-    evmProvider,
+    walletSigner,
   }) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       if (!vaultAddress)
         throw new Error(`No Spark vault found for token: ${contractAddress}`);
 
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
       const shares = await vault.balanceOf(from);
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);
-      return {estimateGas};
+      return {
+        estimateGas,
+        toAddress: vaultAddress,
+        value: ethers.MaxUint256,
+      };
     } catch (e) {
       console.error('Error in EVMChain getEstimateFeeForDeactivateStaking', e);
       throw e;
     }
   },
-  fetchData: async (
-    {evmProvider, contractAddress, walletAddress, tokenDecimals},
-    provider,
-  ) => {
+  fetchData: async ({
+    evmProvider,
+    contractAddress,
+    walletAddress,
+    tokenDecimals,
+  }) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       if (!vaultAddress)

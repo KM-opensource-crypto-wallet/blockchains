@@ -1,5 +1,3 @@
-import {FetchRequest, JsonRpcProvider} from 'ethers';
-import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {aaveProvider} from './aave';
 import {compoundProvider} from './compoundFinance';
 import {sparkProvider} from './spark';
@@ -8,13 +6,6 @@ import {mapleProvider} from './maple';
 import {fluidProvider} from './fluid';
 
 export {aavePoolContractAddress, aaveDataProviderContractAddress} from './aave';
-
-const createEvmProvider = () => {
-  const rpcUrls = getFreeRPCUrl('ethereum');
-  const rpcUrl = Array.isArray(rpcUrls) ? rpcUrls[0] : rpcUrls;
-  const fetchRequest = new FetchRequest(rpcUrl);
-  return new JsonRpcProvider(fetchRequest, undefined, {staticNetwork: true});
-};
 
 // Add new providers here — each must implement fetchData or leave it undefined for static data
 const providers = [
@@ -30,13 +21,12 @@ export const EvmStakingProvider = {
   createStaking: async ({
     from,
     amount,
-    privateKey,
     contractAddress,
     decimals,
+    tokenContract,
+    walletSigner,
     stakingProviderName,
-    evmProvider: externalEvmProvider,
   }) => {
-    const evmProvider = externalEvmProvider || createEvmProvider();
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
       : providers[0];
@@ -45,21 +35,24 @@ export const EvmStakingProvider = {
         `[EvmStakingProvider] No staking provider found: ${stakingProviderName}`,
       );
     }
-    return provider.createStaking(
-      {from, amount, privateKey, contractAddress, decimals, evmProvider},
-      provider,
-    );
+    return provider.createStaking({
+      from,
+      amount,
+      contractAddress,
+      decimals,
+      tokenContract,
+      walletSigner,
+    });
   },
   getEstimateFeeForStaking: async ({
     from,
     amount,
-    privateKey,
     contractAddress,
     decimals,
     stakingProviderName,
-    evmProvider: externalEvmProvider,
+    tokenContract,
+    walletSigner,
   }) => {
-    const evmProvider = externalEvmProvider || createEvmProvider();
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
       : providers[0];
@@ -68,19 +61,21 @@ export const EvmStakingProvider = {
         `[EvmStakingProvider] No staking provider found: ${stakingProviderName}`,
       );
     }
-    return provider.getEstimateFeeForStaking(
-      {from, amount, privateKey, contractAddress, decimals, evmProvider},
-      provider,
-    );
+    return provider.getEstimateFeeForStaking({
+      from,
+      amount,
+      contractAddress,
+      decimals,
+      tokenContract,
+      walletSigner,
+    });
   },
   unStaking: async ({
     from,
-    privateKey,
     contractAddress,
     stakingProviderName,
-    evmProvider: externalEvmProvider,
+    walletSigner,
   }) => {
-    const evmProvider = externalEvmProvider || createEvmProvider();
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
       : providers[0];
@@ -89,19 +84,16 @@ export const EvmStakingProvider = {
         `[EvmStakingProvider] No unstaking provider found: ${stakingProviderName}`,
       );
     }
-    return provider.unStaking(
-      {from, privateKey, contractAddress, evmProvider},
-      provider,
-    );
+    return provider.unStaking({from, contractAddress, walletSigner});
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
-    privateKey,
     contractAddress,
     stakingProviderName,
+    walletSigner,
     evmProvider: externalEvmProvider,
   }) => {
-    const evmProvider = externalEvmProvider || createEvmProvider();
+    const evmProvider = externalEvmProvider;
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
       : providers[0];
@@ -113,11 +105,21 @@ export const EvmStakingProvider = {
         `[EvmStakingProvider] No getEstimateFeeForDeactivateStaking found: ${stakingProviderName}`,
       );
     }
+    if (typeof provider.getStakingBalance === 'function') {
+      const {stakingBalance} = await provider.getStakingBalance(
+        {evmProvider, address: from, contractAddress},
+        provider,
+      );
+      if (!parseFloat(stakingBalance)) {
+        throw new Error(
+          `Insufficient balance: No balance to withdraw from ${provider.name}`,
+        );
+      }
+    }
     return provider.getEstimateFeeForDeactivateStaking({
       from,
-      privateKey,
       contractAddress,
-      evmProvider,
+      walletSigner,
     });
   },
   getStakingBalance: async ({
@@ -126,7 +128,7 @@ export const EvmStakingProvider = {
     stakingProviderName,
     evmProvider: externalEvmProvider,
   }) => {
-    const evmProvider = externalEvmProvider || createEvmProvider();
+    const evmProvider = externalEvmProvider;
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
       : providers[0];
@@ -144,13 +146,13 @@ export const EvmStakingProvider = {
     contractAddress,
     walletAddress,
     tokenDecimals = 6,
+    evmProvider,
   }) => {
     const results = await Promise.all(
       providers.map(async provider => {
         if (typeof provider.fetchData !== 'function' || !contractAddress) {
           return provider;
         }
-        const evmProvider = createEvmProvider();
         let result = provider;
         try {
           const data = await provider.fetchData(
