@@ -46,7 +46,7 @@ const fetchMorphoVaultAPY = async vaultAddress => {
   const json = await response.json();
   const state = json?.data?.vaultByAddress?.state;
   const raw = state?.netApy ?? state?.apy ?? 0;
-  return (parseFloat(raw) * 100).toFixed(2);
+  return `${(parseFloat(raw) * 100).toFixed(2)}% APY`;
 };
 
 export const morphoProvider = {

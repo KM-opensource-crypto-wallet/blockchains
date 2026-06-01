@@ -84,6 +84,10 @@ export const aaveProvider = {
       aavePoolContractAddress,
     );
     if (allowance < amountInWei) {
+      if (allowance > 0n) {
+        const resetTx = await tokenContract.approve(aavePoolContractAddress, 0);
+        await resetTx.wait();
+      }
       const approveTx = await tokenContract.approve(
         aavePoolContractAddress,
         amountInWei,
@@ -110,7 +114,6 @@ export const aaveProvider = {
       0,
       {gasLimit},
     );
-    console.log('populated trx: ', tx);
     return tx;
   },
   getEstimateFeeForStaking: async ({
@@ -137,13 +140,21 @@ export const aaveProvider = {
         0,
       );
     } catch {
-      // Allowance not yet set — estimate approve gas + known Aave v3 supply cost
+      // Allowance not yet set or insufficient — estimate approve gas + known Aave v3 supply cost
+      const allowance = await tokenContract.allowance(
+        from,
+        aavePoolContractAddress,
+      );
       const approveGas = await tokenContract.approve.estimateGas(
         aavePoolContractAddress,
         amountInWei,
       );
+      const resetGas =
+        allowance > 0n && allowance < amountInWei
+          ? await tokenContract.approve.estimateGas(aavePoolContractAddress, 0)
+          : 0n;
       // Aave v3 supply consistently costs 220k-280k gas for USDT/USDC
-      estimateGas = approveGas + 300000n;
+      estimateGas = resetGas + approveGas + 300000n;
     }
     return {
       estimateGas,

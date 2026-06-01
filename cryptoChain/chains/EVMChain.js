@@ -1,10 +1,4 @@
-import {
-  ethers,
-  FetchRequest,
-  JsonRpcProvider,
-  parseUnits,
-  Transaction,
-} from 'ethers';
+import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
 import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
@@ -2164,6 +2158,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       additionalL1Fee,
       isFetchNonce,
       existingNonce,
+      stakingProviderName,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -2180,6 +2175,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               amount,
               contractAddress,
               decimals,
+              stakingProviderName,
               tokenContract,
               walletSigner,
             });
