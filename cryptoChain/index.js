@@ -28,6 +28,7 @@ import {APP_VERSION} from 'utils/common';
 const chains = {
   tron: TronChain,
   ethereum: EVMChain,
+  hyperliquid: EVMChain,
   binance_smart_chain: EVMChain,
   bitcoin: BitcoinChain, // this is native segwit
   bitcoin_legacy: BitcoinChain,
@@ -282,6 +283,12 @@ const getBaseCoin = async (chain, wallet, coin) => {
         address: wallet.address,
         ...payload,
       }),
+    getTransaction: async payload =>
+      await chain?.getTransaction({
+        address: wallet.address,
+        deriveAddresses: effectiveDeriveAddresses,
+        ...payload,
+      }),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
         from: wallet.address,
@@ -347,6 +354,10 @@ const getBaseCoin = async (chain, wallet, coin) => {
       await chain.approveClaimDeposit(payload),
     rejectClaimDeposit: async payload =>
       await chain.rejectClaimDeposit(payload),
+    checkDelegation: async () =>
+      await chain.checkDelegation?.({address: wallet.address}),
+    revokeDelegation: async () =>
+      await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
   };
 
   return coinWrapper;
@@ -476,6 +487,8 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         decimal: token?.decimal,
         ...payload,
       }),
+    getTransaction: async payload =>
+      await chain?.getTransaction({txHash: payload.txHash}),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
         from: wallet.address,
@@ -546,6 +559,10 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.approveClaimDeposit(payload),
     rejectClaimDeposit: async payload =>
       await chain.rejectClaimDeposit(payload),
+    checkDelegation: async () =>
+      await chain.checkDelegation?.({address: wallet.address}),
+    revokeDelegation: async () =>
+      await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
   };
 
   return coinWrapper;
@@ -575,7 +592,7 @@ const hashObject = {
   gnosis: 'hash',
   viction: 'hash',
   // ! polkadot: 'hash',
-  // ! ton: 'hash',
+  ton: 'hash',
   dogecoin: '',
   aptos: '',
   linea: 'hash',

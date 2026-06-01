@@ -2,6 +2,7 @@ import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
   getCosmosRequiredFeeAmount,
+  getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -14,7 +15,6 @@ import {
 import {DirectSecp256k1Wallet} from '@cosmjs/proto-signing';
 import {fromBech32} from '@cosmjs/encoding';
 import {CosmosScan} from 'dok-wallet-blockchain-networks/service/mintscan';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
 export const CosmosChain = () => {
@@ -135,38 +135,48 @@ export const CosmosChain = () => {
       try {
         const transactions = await CosmosScan.getTransactions(address);
         if (Array.isArray(transactions?.data)) {
-          return transactions?.data?.map(item => {
-            const txHash = item?.txhash;
-            const events = item?.logs[0]?.events || [];
-            const transferObj = events?.find(
-              subItem => subItem.type === 'transfer',
-            );
-            const sender = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'sender',
-            )?.value;
-            const recipient = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'recipient',
-            )?.value;
-            const amount = transferObj?.attributes?.find(
-              subItem => subItem?.key === 'amount',
-            )?.value;
-            const finalAmount = parseInt(amount || 0, 10);
-            return {
-              amount: finalAmount.toString(),
-              link: txHash.substring(0, 13) + '...',
-              url: `${config.COSMOS_SCAN_URL}/cosmos/tx/${txHash}`,
-              status: !item?.code ? 'SUCCESS' : 'Failed',
-              date: new Date(item?.timestamp), //new Date(transaction.raw_data.timestamp),
-              from: sender,
-              to: recipient,
-              totalCourse: '0$',
-            };
-          });
+          return transactions.data.map(item => ({
+            amount: item.amount,
+            link: item.txHash,
+            url: getExplorerTxUrl('cosmos', item.txHash),
+            status: item.success ? 'SUCCESS' : 'FAILED',
+            date: new Date(item.timestamp),
+            from: item.from,
+            to: item.to,
+            totalCourse: '0$',
+            transactionType: 'regular',
+          }));
         }
         return [];
       } catch (e) {
         console.error(`error getting transactions for cosmos ${e}`);
         return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        const transaction = await CosmosScan.getTransaction({txHash});
+        if (transaction) {
+          return {
+            data: {
+              amount: transaction?.data?.amount ?? '0',
+              link: txHash,
+              url: getExplorerTxUrl('cosmos', txHash),
+              status: transaction.data.success ? 'SUCCESS' : 'FAILED',
+              date: new Date(transaction?.data?.timestamp),
+              from: transaction?.data?.from ?? null,
+              to: transaction?.data?.to ?? null,
+              totalCourse: '0$',
+              blockNumber: transaction?.data?.blockNumber ?? null,
+              confirmations: transaction?.data?.confirmations ?? null,
+            },
+          };
+        }
+
+        return {data: null};
+      } catch (e) {
+        console.error(`error getting transactions for cosmos ${e}`);
+        return {data: null};
       }
     },
     send: async ({

@@ -9,12 +9,7 @@ import {
   IS_SANDBOX,
 } from 'dok-wallet-blockchain-networks/config/config';
 import bs58 from 'bs58';
-import {useSelector} from 'react-redux';
-import {
-  getCurrentWalletIndex,
-  selectAllWallets,
-  selectCurrentWallet,
-} from '../redux/wallets/walletsSelector';
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 dayjs.extend(duration);
 
 export function getCustomizePublicAddress(str) {
@@ -101,6 +96,7 @@ const ethereumChains = {
   kava: 'ethereum',
   ink: 'ethereum',
   sei: 'ethereum',
+  hyperliquid: 'ethereum',
 };
 
 const supportedChain = [
@@ -315,6 +311,7 @@ const EVM_CHAINS = [
   'kava',
   'ink',
   'sei',
+  'hyperliquid',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
@@ -421,6 +418,26 @@ const feesOptionsChains = [
 
 export const isFeesOptionChain = chain_name =>
   feesOptionsChains.includes(chain_name);
+
+const TRANSACTION_LIST_LIMIT_100 = [
+  'ethereum',
+  'polygon',
+  'binance_smart_chain',
+  'base',
+  'arbitrum',
+  'optimism',
+  'optimism_binance_smart_chain',
+  'avalanche',
+  'fantom',
+  'gnosis',
+  'viction',
+  'linea',
+  'zksync',
+  'sei',
+];
+
+export const isTransactionListLimit100 = chain_name =>
+  TRANSACTION_LIST_LIMIT_100.includes(chain_name);
 
 const EPOCH_TIME_SUPPORT_CHAIN = ['solana'];
 
@@ -736,6 +753,14 @@ export const ModalAddTokenList = [
     token_type: 'ERC20',
     isEVM: true,
   },
+  {
+    label: 'Hyperliquid',
+    value: 'hyperliquid',
+    chain_symbol: 'HYPE',
+    type: 'token',
+    token_type: 'ERC20',
+    isEVM: true,
+  },
 ];
 
 export const PrivateKeyList = [
@@ -806,6 +831,10 @@ export const PrivateKeyList = [
   {
     label: 'Hedera',
     value: 'hedera',
+  },
+  {
+    label: 'Hyperliquid',
+    value: 'hyperliquid',
   },
   {
     label: 'Ink',
@@ -899,6 +928,7 @@ export const CustomRPCList = [
   {label: 'Kava', value: 'kava'},
   {label: 'Ink', value: 'ink'},
   {label: 'Sei', value: 'sei'},
+  {label: 'Hyperliquid', value: 'hyperliquid'},
 ];
 export const AUTO_LOCK = [
   {
@@ -963,7 +993,7 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
         ? 'polygon_blockscout'
         : 'polygon_scan';
     }
-    return `${SCAN_URL[chain_name]}/address/${address}${
+    return `${SCAN_URL[chain_name].baseUrl}/address/${address}${
       type === 'token' ? '#tokentxns' : ''
     }`;
   } else if (chain_name === 'tron') {
@@ -1516,6 +1546,27 @@ export const formatBalance = value => {
     return num.toLocaleString('en-US', {maximumFractionDigits: 2});
   }
   return num.toFixed(2);
+};
+
+const getScanUrlName = chain_name => {
+  if (chain_name === 'polygon') {
+    return getRPCUrl('polygon_blockscout')
+      ? 'polygon_blockscout'
+      : 'polygon_scan';
+  }
+  return chain_name;
+};
+
+export const getExplorerTxUrl = (chain_name, txHash) => {
+  const scanConfig = SCAN_URL[getScanUrlName(chain_name)];
+  if (!scanConfig) {
+    return '';
+  }
+  const {baseUrl, txPath, sandboxQueryParam} = scanConfig;
+  const url = txPath
+    ? `${baseUrl}/${txPath}/${txHash}`
+    : `${baseUrl}/${txHash}`;
+  return sandboxQueryParam && IS_SANDBOX ? `${url}?${sandboxQueryParam}` : url;
 };
 
 export const toDirection = (notifyOnReceive, notifyOnSend) => {

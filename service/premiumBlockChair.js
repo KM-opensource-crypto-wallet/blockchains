@@ -39,11 +39,14 @@ export const PremiumBlockChair = {
       txHex,
     });
   },
-  getTransaction: async ({chain, transactionId}) => {
+  getTransaction: async ({chain, transactionId, address, derive_addresses}) => {
     return getAllBlockchairAPI({
       type: 'getTransaction',
       chain,
       transactionId,
+      address,
+      derive_addresses,
+      isNew: true,
     });
   },
   getTransactionFees: async ({chain}) => {

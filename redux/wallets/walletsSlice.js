@@ -23,6 +23,7 @@ import {
   fetchBatchTransactionBalances,
   getCoinSnapshot,
   getNativeCoin,
+  getSingleTransaction,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
   _currentWalletIndexSelector,
@@ -61,6 +62,7 @@ import {
   getLargestNumber,
   getWalletTotalBalance,
   delay,
+  getExplorerTxUrl,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -146,17 +148,17 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
   return chainWallets;
 };
 
-const refreshCoinData = (dispatch, currentCoin) => {
-  if (
-    MainNavigation.getCurrentRouteName() === 'TransactionList' ||
-    MainNavigation.getCurrentRouteName() === '/home/transactions'
-  ) {
+const refreshCoinData = (dispatch, currentCoin, txHash = null) => {
+  const routeName = MainNavigation.getCurrentRouteName();
+  if (routeName === 'TransactionList' || routeName === '/home/transactions') {
     dispatch(
       refreshCurrentCoin({
         currentCoin,
         fetchTransaction: true,
       }),
     );
+  } else if (routeName === 'TransactionDetails') {
+    dispatch(refreshCurrentCoin({currentCoin, txHash}));
   } else {
     dispatch(refreshCoins());
   }
@@ -510,7 +512,6 @@ export const refreshCoins = createAsyncThunk(
             false,
             false,
             false,
-            false,
           );
         }),
       );
@@ -533,6 +534,8 @@ export const refreshCurrentCoin = createAsyncThunk(
     const isFetchUTXOs = refreshData?.fetchUTXOs || false;
     const isFetchStaking = refreshData?.isFetchStaking || false;
     const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
+    const txHash = refreshData?.txHash || null;
+    const isFetchDelegation = refreshData?.isFetchDelegation || false;
     const allCoins = selectUserCoins(currentState);
     const parentCoin = getNativeCoinByTokenCoin(allCoins, currentCoin);
     const validatedChainName = validateSupportedChain(currentCoin?.chain_name);
@@ -553,6 +556,8 @@ export const refreshCurrentCoin = createAsyncThunk(
       isFetchStaking,
       isFetchUTXOs,
       isFetchUnclaimDeposit,
+      txHash,
+      isFetchDelegation,
     );
     let updatedNativeCoin;
     if (parentCoin) {
@@ -565,10 +570,62 @@ export const refreshCurrentCoin = createAsyncThunk(
         false,
         false,
         false,
-        false,
       );
     }
     return {updatedCurrentCoin, updatedNativeCoin};
+  },
+);
+
+export const revokeDelegation = createAsyncThunk(
+  'wallets/revokeDelegation',
+  async (_, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const currentWallet = selectCurrentWallet(currentState);
+    const currentCoin = selectCurrentCoin(currentState);
+    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+      currentCoin?.chain_name,
+      currentWallet?.clientId,
+    )(currentState);
+    const nativeCoin = await getCoin(
+      currentWallet.phrase,
+      currentCoin,
+      null,
+      currentWallet,
+      customRpcUrl,
+    );
+    const txResponse = await nativeCoin.revokeDelegation();
+    if (txResponse) {
+      await nativeCoin.waitForConfirmation({
+        transaction: txResponse,
+        retries: 10,
+        interval: 3000,
+      });
+    }
+    return true;
+  },
+);
+
+export const fetchTransactionByHash = createAsyncThunk(
+  'wallets/fetchTransactionByHash',
+  async ({txHash, currentWallet, currentCoin}, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const localCurrentWallet =
+      currentWallet || selectCurrentWallet(currentState);
+    const localCurrentCoin = currentCoin || selectCurrentCoin(currentState);
+    const validatedChainName = validateSupportedChain(
+      localCurrentCoin?.chain_name,
+    );
+    if (!localCurrentCoin || !validatedChainName || !txHash) {
+      return null;
+    }
+    const recentTransaction = await getSingleTransaction(
+      currentState,
+      localCurrentCoin,
+      localCurrentWallet,
+      txHash,
+    );
+
+    return {recentTransaction, coinId: localCurrentCoin._id};
   },
 );
 
@@ -1008,6 +1065,44 @@ export const sendFunds = createAsyncThunk(
           );
         }
 
+        let tx_hash = getHashString(res, currentCoin?.chain_name);
+        const pendingTransaction = {
+          amount: txData?.amount,
+          to: txData?.to,
+          from: txData?.from || currentCoin?.address,
+          status: 'PENDING',
+          date: new Date().toISOString(),
+          link: tx_hash,
+          totalCourse: txData.totalCourse,
+          url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
+          currentCoin: currentCoin,
+          isNFT: txData?.isNFT || false,
+          isBatchTransaction: txData?.isBatchTransaction || false,
+          isCreateStaking: txData?.isCreateStaking || false,
+          isWithdrawStaking: txData?.isWithdrawStaking || false,
+          isDeactivateStaking: txData?.isDeactivateStaking || false,
+          isStakingRewards: txData?.isStakingRewards || false,
+          isCreateVote: txData?.isCreateVote || false,
+          ...(txData?.isNFT && {
+            nftName: txData?.nftName,
+            nftTokenId: txData?.nftTokenId,
+            nftImage: txData?.nftImage,
+          }),
+          ...(txData?.isBatchTransaction && {
+            transactionsData: txData?.transactionsData,
+          }),
+          ...((txData?.isCreateStaking ||
+            txData?.isWithdrawStaking ||
+            txData?.isDeactivateStaking ||
+            txData?.isStakingRewards) && {
+            validatorPubKey: txData?.validatorPubKey,
+            validatorName: txData?.validatorName,
+            resourceType: txData?.resourceType,
+          }),
+          ...(txData?.isCreateVote && {
+            displayValidators: txData?.displayValidators,
+          }),
+        };
         toastId = showToast({
           type: 'progressToast',
           title: `${
@@ -1017,6 +1112,16 @@ export const sendFunds = createAsyncThunk(
             txData?.isExchange ? 'exchange' : ''
           } transaction submitted successfully. Once the transaction completed you will be notified.`,
           autoHide: false,
+          props: {
+            ...(!txData?.isExchange && {
+              onViewTransaction: () => {
+                MainNavigation.navigate({
+                  name: 'TransactionDetails',
+                  params: {transaction: pendingTransaction},
+                });
+              },
+            }),
+          },
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
           const key = createPendingTransactionKey({
@@ -1031,7 +1136,6 @@ export const sendFunds = createAsyncThunk(
             }),
           );
         }
-        const tx_hash = getHashString(res, currentCoin?.chain_name);
         confirmTransaction = await nativeCoin.waitForConfirmation({
           transaction: res,
           interval: 5000,
@@ -1044,12 +1148,24 @@ export const sendFunds = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
-        } else if (confirmTransaction && !txData?.isExchange) {
+        } else if (confirmTransaction?.status === 'failed') {
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction Failed',
+            message:
+              'Your transaction failed on the network. Please try again.',
+            toastId,
+          });
+        } else if (confirmTransaction) {
           showToast({
             type: 'successToast',
-            title: 'Transaction Successful',
+            title: txData?.isExchange
+              ? 'Exchange Successful'
+              : 'Transaction Successful',
             message: `Your transaction completed successfully.${
-              txData?.isBatchTransaction
+              txData?.isExchange
+                ? ` You just exchanged: ${txData?.amount} ${txData?.currentCoin?.symbol}`
+                : txData?.isBatchTransaction
                 ? 'Batch transactions are completed successfully.'
                 : txData?.isCreateStaking
                 ? `Your staking : ${txData?.amount} ${txData?.currentCoin?.symbol} will be reflects in couple of minutes.`
@@ -1060,10 +1176,30 @@ export const sendFunds = createAsyncThunk(
                 : `You just sent: ${txData?.amount} ${txData?.currentCoin?.symbol}`
             }`,
             toastId,
+            props: {
+              ...(!txData?.isExchange && {
+                onViewTransaction: () => {
+                  MainNavigation.navigate({
+                    name: 'TransactionDetails',
+                    params: {
+                      transaction: {...pendingTransaction, status: 'SUCCESS'},
+                    },
+                  });
+                },
+              }),
+            },
           });
         }
-        refreshCoinData(thunkAPI.dispatch, txData.currentCoin);
-        return {tx_hash, status: confirmTransaction === 'pending' ? 2 : 3};
+        refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        return {
+          tx_hash,
+          status:
+            confirmTransaction === 'pending'
+              ? 2
+              : confirmTransaction?.status === 'failed'
+              ? 1
+              : 3,
+        };
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -1184,12 +1320,31 @@ export const sendPendingTransactions = createAsyncThunk(
           ? thunkAPI.dispatch(setUpdateTransactionSubmitting(false))
           : thunkAPI.dispatch(setPendingTransferSubmitting(false));
 
+        const tx_hash = getHashString(res, currentCoin?.chain_name);
+        const pendingTransaction = {
+          to: payload?.to,
+          from: payload?.from || currentCoin?.address,
+          status: 'PENDING',
+          date: new Date().toISOString(),
+          link: tx_hash,
+          url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
+          currentCoin: currentCoin,
+        };
+
         toastId = showToast({
           type: 'progressToast',
           title: 'Updated Transaction In-progress',
           message:
             'Your Updated transaction submitted successfully. Once the transaction completed you will be notified.',
           autoHide: false,
+          props: {
+            onViewTransaction: () => {
+              MainNavigation.navigate({
+                name: 'TransactionDetails',
+                params: {transaction: pendingTransaction},
+              });
+            },
+          },
         });
         let key = null;
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -1219,6 +1374,14 @@ export const sendPendingTransactions = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
+        } else if (confirmTransaction?.status === 'failed') {
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction Failed',
+            message:
+              'Your transaction failed on the network. Please try again.',
+            toastId,
+          });
         } else if (confirmTransaction) {
           if (payload?.pendingTxHash) {
             thunkAPI.dispatch(
@@ -1233,6 +1396,16 @@ export const sendPendingTransactions = createAsyncThunk(
             title: 'Transaction Successful',
             message: 'Your transaction completed successfully',
             toastId,
+            props: {
+              onViewTransaction: () => {
+                MainNavigation.navigate({
+                  name: 'TransactionDetails',
+                  params: {
+                    transaction: {...pendingTransaction, status: 'SUCCESS'},
+                  },
+                });
+              },
+            },
           });
         }
         refreshCoinData(thunkAPI.dispatch, null);
@@ -2322,6 +2495,19 @@ export const walletsSlice = createSlice({
             allCoins,
           );
         }
+      }
+    });
+    builder.addCase(fetchTransactionByHash.fulfilled, (state, {payload}) => {
+      if (!payload?.recentTransaction) {
+        return;
+      }
+      const {recentTransaction, coinId} = payload;
+      const currentWallets = state.allWallets[state.currentWalletIndex] || {};
+      const allCoins = [...currentWallets.coins];
+      const foundIndex = allCoins.findIndex(item => item?._id === coinId);
+      if (foundIndex !== -1) {
+        allCoins[foundIndex] = {...allCoins[foundIndex], recentTransaction};
+        currentWallets.coins = allCoins;
       }
     });
     builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {

@@ -78,6 +78,7 @@ const SANDBOX_CHAIN_ID = {
   kava: 2221,
   ink: 763373,
   sei: 1328,
+  hyperliquid: 998,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -99,13 +100,14 @@ const PRODUCTION_CHAIN_ID = {
   kava: 2222,
   ink: 57073,
   sei: 1329,
+  hyperliquid: 999,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
 
 const MORALIS_CHAIN_SANDBOX = {
   Ethereum: EvmChain.SEPOLIA,
-  Polygon: EvmChain.MUMBAI,
+  Polygon: EvmChain.POLYGON_AMOY,
   BSC: EvmChain.BSC_TESTNET,
   Solana: SolNetwork.DEVNET,
   Arbitrum: EvmChain.ARBITRUM_TESTNET,
@@ -214,6 +216,11 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'sei',
     symbol: 'SEI',
   },
+  'eip155:998': {
+    chain_display_name: 'Hyperliquid',
+    chain_name: 'hyperliquid',
+    symbol: 'HYPE',
+  },
   'tron:0xcd8690dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -317,6 +324,11 @@ const WalletConnectSupportedChainProduction = {
     chain_name: 'sei',
     symbol: 'SEI',
   },
+  'eip155:999': {
+    chain_display_name: 'Hyperliquid',
+    chain_name: 'hyperliquid',
+    symbol: 'HYPE',
+  },
   'tron:0x2b6653dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -333,50 +345,6 @@ const ETHER_API_KEYS = shuffleArray([
   process.env.ETHERSCAN_API_KEY_1,
   process.env.ETHERSCAN_API_KEY_2,
 ]);
-
-export const SCAN_URL = {
-  ethereum: IS_SANDBOX
-    ? 'https://sepolia.etherscan.io'
-    : 'https://etherscan.io',
-  binance_smart_chain: IS_SANDBOX
-    ? 'https://testnet.bscscan.com'
-    : 'https://bscscan.com',
-  polygon_scan: IS_SANDBOX
-    ? 'https://amoy.polygonscan.com'
-    : 'https://polygonscan.com',
-  polygon_blockscout: IS_SANDBOX
-    ? 'https://amoy.polygonscan.com'
-    : 'https://polygon.blockscout.com',
-  base: IS_SANDBOX ? 'https://goerli.basescan.org' : 'https://basescan.org',
-  arbitrum: IS_SANDBOX
-    ? 'https://goerli-optimism.etherscan.io/'
-    : 'https://arbiscan.io',
-  optimism: IS_SANDBOX
-    ? 'https://goerli-optimism.etherscan.io'
-    : 'https://optimistic.etherscan.io/',
-  optimism_binance_smart_chain: IS_SANDBOX
-    ? 'https://opbnb-testnet.bscscan.com'
-    : 'https://opbnb.bscscan.com',
-  avalanche: IS_SANDBOX
-    ? 'https://testnet.snowtrace.io'
-    : 'https://snowtrace.io',
-  fantom: IS_SANDBOX ? 'https://testnet.ftmscan.com' : 'https://ftmscan.com',
-  gnosis: 'https://gnosisscan.io/',
-  viction: IS_SANDBOX ? 'https://testnet.vicscan.xyz' : 'https://vicscan.xyz',
-  linea: IS_SANDBOX
-    ? 'https://sepolia.lineascan.build'
-    : 'https://lineascan.build',
-  zkSync: IS_SANDBOX
-    ? 'https://sepolia.explorer.zksync.io'
-    : 'https://explorer.zksync.io',
-  kava: IS_SANDBOX ? 'https://testnet.kavascan.io/' : 'https://kavascan.com/',
-  ethereum_classic: 'https://etc.blockscout.com',
-  ethereum_pow: 'https://www.oklink.com/ethw',
-  ink: IS_SANDBOX
-    ? 'https://explorer-sepolia.inkonchain.com/'
-    : 'https://explorer.inkonchain.com/',
-  sei: IS_SANDBOX ? 'https://testnet.seiscan.io' : 'https://seiscan.io',
-};
 
 export const config = {
   TRON_SOLIDITY_NODE: 'https://api.trongrid.io',
@@ -464,7 +432,7 @@ export const config = {
   RIPPLE_SCAN_URL: IS_SANDBOX
     ? 'https://testnet.xrpl.org'
     : 'https://livenet.xrpl.org',
-  THORCHAIN_API_URL: 'https://midgard.ninerealms.com',
+  THORCHAIN_API_URL: 'https://midgard.thorchain.network',
   THORCHAIN_SCAN_URL: 'https://viewblock.io/thorchain',
   TZKT_API_BASE_URL: IS_SANDBOX
     ? 'https://api.ghostnet.tzkt.io'
@@ -475,6 +443,7 @@ export const config = {
   COSMOS_SCAN_URL: 'https://www.mintscan.io',
   COSMOS_SCAN_BASE_URL: 'https://apis.mintscan.io',
   COSMOS_API_KEY: process.env.COSMOS_API_KEY,
+  COSMOS_REST_BASE_URL: 'https://cosmos-rest.publicnode.com',
   AVAX_SCAN_API_URL:
     'https://api-beta.avascan.info/v2/network/mainnet/evm/43114',
   VICTION_SCAN_API_URL: IS_SANDBOX
@@ -523,6 +492,131 @@ export const config = {
   FILECOIN_SCAN_URL: IS_SANDBOX
     ? 'https://calibration.filscan.io/en'
     : 'https://filscan.io/en',
+};
+
+export const SCAN_URL = {
+  // EVM chains
+  ethereum: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia.etherscan.io'
+      : 'https://etherscan.io',
+    txPath: 'tx',
+  },
+  binance_smart_chain: {
+    baseUrl: IS_SANDBOX ? 'https://testnet.bscscan.com' : 'https://bscscan.com',
+    txPath: 'tx',
+  },
+  polygon_scan: {
+    baseUrl: IS_SANDBOX
+      ? 'https://amoy.polygonscan.com'
+      : 'https://polygonscan.com',
+    txPath: 'tx',
+  },
+  polygon_blockscout: {
+    baseUrl: IS_SANDBOX
+      ? 'https://amoy.polygonscan.com'
+      : 'https://polygon.blockscout.com',
+    txPath: 'tx',
+  },
+  base: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia.basescan.org'
+      : 'https://basescan.org',
+    txPath: 'tx',
+  },
+  arbitrum: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia.arbiscan.io/'
+      : 'https://arbiscan.io',
+    txPath: 'tx',
+  },
+  optimism: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia-optimism.etherscan.io'
+      : 'https://optimistic.etherscan.io/',
+    txPath: 'tx',
+  },
+  optimism_binance_smart_chain: {
+    baseUrl: IS_SANDBOX
+      ? 'https://opbnb-testnet.bscscan.com'
+      : 'https://opbnb.bscscan.com',
+    txPath: 'tx',
+  },
+  avalanche: {
+    baseUrl: IS_SANDBOX
+      ? 'https://testnet.snowtrace.io'
+      : 'https://snowtrace.io',
+    txPath: 'tx',
+  },
+  fantom: {
+    baseUrl: IS_SANDBOX ? 'https://testnet.ftmscan.com' : 'https://ftmscan.com',
+    txPath: 'tx',
+  },
+  gnosis: {baseUrl: 'https://gnosisscan.io/', txPath: 'tx'},
+  viction: {
+    baseUrl: IS_SANDBOX ? 'https://testnet.vicscan.xyz' : 'https://vicscan.xyz',
+    txPath: 'tx',
+  },
+  linea: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia.lineascan.build'
+      : 'https://lineascan.build',
+    txPath: 'tx',
+  },
+  zksync: {
+    baseUrl: IS_SANDBOX
+      ? 'https://sepolia.explorer.zksync.io'
+      : 'https://explorer.zksync.io',
+    txPath: 'tx',
+  },
+  kava: {
+    baseUrl: IS_SANDBOX
+      ? 'https://testnet.kavascan.io/'
+      : 'https://kavascan.com/',
+    txPath: 'tx',
+  },
+  ethereum_classic: {baseUrl: 'https://etc.blockscout.com', txPath: 'tx'},
+  ethereum_pow: {baseUrl: 'https://www.oklink.com/ethw', txPath: 'tx'},
+  ink: {
+    baseUrl: IS_SANDBOX
+      ? 'https://explorer-sepolia.inkonchain.com/'
+      : 'https://explorer.inkonchain.com/',
+    txPath: 'tx',
+  },
+  sei: {
+    baseUrl: IS_SANDBOX ? 'https://testnet.seiscan.io' : 'https://seiscan.io',
+    txPath: 'tx',
+  },
+  hyperliquid: {
+    baseUrl: 'https://hyperevmscan.io/',
+    txPath: 'tx',
+  },
+  // Non-EVM chains
+  tron: {baseUrl: config.TRON_SCAN_URL, txPath: 'transaction'},
+  solana: {
+    baseUrl: config.SOLANA_SCAN_URL,
+    txPath: 'tx',
+    sandboxQueryParam: 'cluster=devnet',
+  },
+  bitcoin: {baseUrl: config.BITCOIN_SCAN_URL, txPath: 'tx'},
+  bitcoin_cash: {baseUrl: config.BITCOIN_CASH_SCAN_URL, txPath: 'transaction'},
+  dogecoin: {baseUrl: config.DOGECOIN_SCAN_URL, txPath: 'transaction'},
+  litecoin: {baseUrl: config.LITECOIN_SCAN_URL, txPath: 'transaction'},
+  cosmos: {baseUrl: config.COSMOS_SCAN_URL, txPath: 'cosmos/tx'},
+  polkadot: {baseUrl: config.POLKADOT_SCAN_URL, txPath: 'extrinsic'},
+  tezos: {baseUrl: config.TEZOS_SCAN_URL, txPath: ''},
+  thorchain: {baseUrl: config.THORCHAIN_SCAN_URL, txPath: 'tx'},
+  stellar: {baseUrl: config.STELLAR_SCAN_URL, txPath: 'transactions'},
+  aptos: {
+    baseUrl: config.APTOS_SCAN_URL,
+    txPath: 'txn',
+    sandboxQueryParam: 'network=testnet',
+  },
+  hedera: {baseUrl: config.HEDERA_SCAN_URL, txPath: 'transaction'},
+  cardano: {baseUrl: config.CARDANO_SCAN_URL, txPath: 'transaction'},
+  filecoin: {baseUrl: config.FILECOIN_SCAN_URL, txPath: 'message'},
+  ripple: {baseUrl: config.RIPPLE_SCAN_URL, txPath: 'transactions'},
+  ton: {baseUrl: config.TON_SCAN_URL, txPath: 'tx'},
 };
 
 export const APP_NAME = process?.env?.APP_NAME || '';
