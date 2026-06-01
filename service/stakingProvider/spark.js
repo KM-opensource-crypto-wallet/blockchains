@@ -23,15 +23,14 @@ export const sparkProvider = {
   stakedAmount: '0',
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
-      const amountInWei = parseUnits(amount.toString(), decimals);
       if (!vaultAddress)
         throw new Error(`No Spark vault for token: ${contractAddress}`);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
@@ -46,8 +45,15 @@ export const sparkProvider = {
       const approveTx = await tokenContract.approve(vaultAddress, amountInWei);
       await approveTx.wait();
 
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await vault.deposit.estimateGas(amountInWei, from);
+
       console.log('Depositing into Spark savings vault...');
-      const tx = await vault.deposit.populateTransaction(amountInWei, from);
+      const tx = await vault.deposit.populateTransaction(amountInWei, from, {
+        gasLimit,
+      });
 
       return tx;
     } catch (error) {
@@ -57,17 +63,14 @@ export const sparkProvider = {
   },
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
     const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
     if (!vaultAddress)
       throw new Error(`No Spark vault found for token: ${contractAddress}`);
-
-    const amountInWei = parseUnits(amount.toString(), decimals);
 
     const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
@@ -90,7 +93,7 @@ export const sparkProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
@@ -98,7 +101,14 @@ export const sparkProvider = {
       // Redeem all shares
       const shares = await vault.balanceOf(from);
 
-      const tx = await vault.redeem.populateTransaction(shares, from, from);
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await vault.redeem.estimateGas(shares, from, from);
+
+      const tx = await vault.redeem.populateTransaction(shares, from, from, {
+        gasLimit,
+      });
 
       return tx;
     } catch (error) {

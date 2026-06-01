@@ -2086,48 +2086,108 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contractAddress,
       decimals,
       stakingProviderName,
-    }) =>
-      retryFunc(async evmProvider => {
-        const wallet = new ethers.Wallet(privateKey);
-        const walletSigner = wallet.connect(evmProvider);
-        const tokenContract = new ethers.Contract(
-          contractAddress,
-          erc20Abi,
-          walletSigner,
-        );
+      estimateGas,
+      gasFee,
+      feesType,
+      maxPriorityFeePerGas,
+      isMax,
+    }) => {
+      const evmProvider = createRpcProvider(allRpcUrls[0]);
+      const wallet = new ethers.Wallet(privateKey);
+      const walletSigner = wallet.connect(evmProvider);
+      const tokenContract = new ethers.Contract(
+        contractAddress,
+        erc20Abi,
+        walletSigner,
+      );
+      const amountInWei = BigInt(
+        convertToSmallAmount(amount.toString(), decimals),
+      );
+      let finalGasPrice = gasFee;
+      let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+      if (typeof finalGasPrice !== 'bigint') {
+        const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+        finalGasPrice = gasFeeData?.gasPrice;
+        finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+      }
 
-        const tx = await EvmStakingProvider.createStaking({
-          from,
-          amount,
-          privateKey,
-          contractAddress,
-          decimals,
-          stakingProviderName,
-          tokenContract,
-          walletSigner,
-          evmProvider,
-        });
-        return await createSendTransaction(walletSigner, tx);
-      }, null),
+      const tx = await EvmStakingProvider.createStaking({
+        from,
+        amountInWei,
+        contractAddress,
+        stakingProviderName,
+        tokenContract,
+        walletSigner,
+        evmProvider,
+        estimateGas,
+      });
+
+      if (typeof estimateGas === 'bigint') {
+        tx.gasLimit = estimateGas;
+      }
+      tx.maxFeePerGas = finalGasPrice;
+      tx.maxPriorityFeePerGas = isMax
+        ? finalGasPrice
+        : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice);
+      // Re-fetch nonce after provider may have consumed it with approval transactions
+      tx.nonce = await evmProvider.getTransactionCount(from, 'pending');
+      if (isEip1559NotSupported(chain_name)) {
+        delete tx.maxFeePerGas;
+        delete tx.maxPriorityFeePerGas;
+        tx.gasPrice = finalGasPrice;
+      }
+
+      return await createSendTransaction(walletSigner, tx);
+    },
     deactivateStaking: async ({
       from,
       privateKey,
       contractAddress,
       stakingProviderName,
-    }) =>
-      retryFunc(async evmProvider => {
-        const wallet = new ethers.Wallet(privateKey);
-        const walletSigner = wallet.connect(evmProvider);
-        const tx = await EvmStakingProvider.unStaking({
-          from,
-          privateKey,
-          contractAddress,
-          stakingProviderName,
-          walletSigner,
-          evmProvider,
-        });
-        return await createSendTransaction(walletSigner, tx);
-      }, null),
+      estimateGas,
+      gasFee,
+      feesType,
+      maxPriorityFeePerGas,
+      isMax,
+      nonce,
+    }) => {
+      const evmProvider = createRpcProvider(allRpcUrls[0]);
+      const wallet = new ethers.Wallet(privateKey);
+      const walletSigner = wallet.connect(evmProvider);
+
+      let finalGasPrice = gasFee;
+      let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+      if (typeof finalGasPrice !== 'bigint') {
+        const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+        finalGasPrice = gasFeeData?.gasPrice;
+        finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+      }
+
+      const tx = await EvmStakingProvider.unStaking({
+        from,
+        contractAddress,
+        stakingProviderName,
+        walletSigner,
+        evmProvider,
+        estimateGas,
+      });
+
+      if (typeof estimateGas === 'bigint') {
+        tx.gasLimit = estimateGas;
+      }
+      tx.maxFeePerGas = finalGasPrice;
+      tx.maxPriorityFeePerGas = isMax
+        ? finalGasPrice
+        : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice);
+      tx.nonce = nonce;
+      if (isEip1559NotSupported(chain_name)) {
+        delete tx.maxFeePerGas;
+        delete tx.maxPriorityFeePerGas;
+        tx.gasPrice = finalGasPrice;
+      }
+
+      return await createSendTransaction(walletSigner, tx);
+    },
     getStakingValidators: async ({address, contractAddress}) =>
       retryFunc(
         async evmProvider => {
@@ -2169,12 +2229,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             erc20Abi,
             walletSigner,
           );
+          const amountInWei = BigInt(
+            convertToSmallAmount(amount.toString(), decimals),
+          );
           const {estimateGas, toAddress, value} =
             await EvmStakingProvider.getEstimateFeeForStaking({
               from: fromAddress,
-              amount,
+              amountInWei,
               contractAddress,
-              decimals,
               stakingProviderName,
               tokenContract,
               walletSigner,

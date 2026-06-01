@@ -87,11 +87,11 @@ export const mapleProvider = {
   stakedAmountRaw: null,
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
     try {
       const config = getVaultConfig(contractAddress);
@@ -107,8 +107,6 @@ export const mapleProvider = {
         throw new Error(
           'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
         );
-
-      const amountInWei = parseUnits(amount.toString(), decimals);
 
       // USDT requires resetting allowance to 0 before setting a new value
       const allowance = await tokenContract.allowance(
@@ -131,11 +129,17 @@ export const mapleProvider = {
         walletSigner,
       );
 
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await router.deposit.estimateGas(amountInWei, MAPLE_DEPOSIT_DATA);
+
       let tx;
       if (isSyrupLender) {
         tx = await router.deposit.populateTransaction(
           amountInWei,
           MAPLE_DEPOSIT_DATA,
+          {gasLimit},
         );
       } else {
         tx = await router.authorizeAndDeposit.populateTransaction(
@@ -146,6 +150,7 @@ export const mapleProvider = {
           authSig.s,
           amountInWei,
           MAPLE_DEPOSIT_DATA,
+          {gasLimit},
         );
       }
 
@@ -157,9 +162,8 @@ export const mapleProvider = {
   },
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
@@ -176,8 +180,6 @@ export const mapleProvider = {
       throw new Error(
         'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
       );
-
-    const amountInWei = parseUnits(amount.toString(), decimals);
 
     const router = new ethers.Contract(
       config.routerAddress,
@@ -205,7 +207,7 @@ export const mapleProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
@@ -218,7 +220,15 @@ export const mapleProvider = {
       );
 
       const shares = await pool.balanceOf(from);
-      const tx = await pool.requestRedeem.populateTransaction(shares, from); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
+
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await pool.requestRedeem.estimateGas(shares, from);
+
+      const tx = await pool.requestRedeem.populateTransaction(shares, from, {
+        gasLimit,
+      }); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
 
       return tx;
     } catch (error) {

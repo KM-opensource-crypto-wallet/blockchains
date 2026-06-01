@@ -20,12 +20,12 @@ const providers = [
 export const EvmStakingProvider = {
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
     stakingProviderName,
+    estimateGas,
   }) => {
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
@@ -37,18 +37,17 @@ export const EvmStakingProvider = {
     }
     return provider.createStaking({
       from,
-      amount,
+      amountInWei,
       contractAddress,
-      decimals,
       tokenContract,
       walletSigner,
+      estimateGas,
     });
   },
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     stakingProviderName,
     tokenContract,
     walletSigner,
@@ -63,9 +62,8 @@ export const EvmStakingProvider = {
     }
     return provider.getEstimateFeeForStaking({
       from,
-      amount,
+      amountInWei,
       contractAddress,
-      decimals,
       tokenContract,
       walletSigner,
     });
@@ -75,6 +73,7 @@ export const EvmStakingProvider = {
     contractAddress,
     stakingProviderName,
     walletSigner,
+    estimateGas,
   }) => {
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
@@ -84,7 +83,12 @@ export const EvmStakingProvider = {
         `[EvmStakingProvider] No unstaking provider found: ${stakingProviderName}`,
       );
     }
-    return provider.unStaking({from, contractAddress, walletSigner});
+    return provider.unStaking({
+      from,
+      contractAddress,
+      walletSigner,
+      estimateGas,
+    });
   },
   getEstimateFeeForDeactivateStaking: async ({
     from,
@@ -120,6 +124,27 @@ export const EvmStakingProvider = {
       from,
       contractAddress,
       walletSigner,
+    });
+  },
+  claimRewards: async ({
+    from,
+    contractAddress,
+    stakingProviderName,
+    privateKey,
+    evmProvider: externalEvmProvider,
+  }) => {
+    const evmProvider = externalEvmProvider;
+    const provider = stakingProviderName
+      ? providers.find(p => p.name === stakingProviderName)
+      : providers[0];
+    if (!provider || typeof provider.claimRewards !== 'function') {
+      return null;
+    }
+    return provider.claimRewards({
+      from,
+      contractAddress,
+      privateKey,
+      evmProvider,
     });
   },
   getStakingBalance: async ({

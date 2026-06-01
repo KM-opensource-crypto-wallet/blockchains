@@ -66,14 +66,12 @@ export const aaveProvider = {
   dataProviderABI: aaveDataProviderABI,
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
-    const amountInWei = parseUnits(amount.toString(), decimals);
-
     const balance = await tokenContract.balanceOf(from);
     if (balance < amountInWei) {
       throw new Error('Insufficient balance');
@@ -100,12 +98,10 @@ export const aaveProvider = {
       aavePoolABI,
       walletSigner,
     );
-    const gasLimit = await pool.supply.estimateGas(
-      contractAddress,
-      amountInWei,
-      from,
-      0,
-    );
+    const gasLimit =
+      typeof estimateGas === 'bigint'
+        ? estimateGas
+        : await pool.supply.estimateGas(contractAddress, amountInWei, from, 0);
 
     const tx = await pool.supply.populateTransaction(
       contractAddress,
@@ -118,13 +114,11 @@ export const aaveProvider = {
   },
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
-    const amountInWei = parseUnits(amount.toString(), decimals);
     const pool = new ethers.Contract(
       aavePoolContractAddress,
       aavePoolABI,
@@ -162,7 +156,7 @@ export const aaveProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const pool = new ethers.Contract(
         aavePoolContractAddress,
@@ -170,11 +164,14 @@ export const aaveProvider = {
         walletSigner,
       );
 
-      const gasLimit = await pool.withdraw.estimateGas(
-        contractAddress,
-        ethers.MaxUint256,
-        from,
-      );
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await pool.withdraw.estimateGas(
+              contractAddress,
+              ethers.MaxUint256,
+              from,
+            );
 
       await pool.withdraw.staticCall(contractAddress, ethers.MaxUint256, from);
 
@@ -182,9 +179,7 @@ export const aaveProvider = {
         contractAddress,
         ethers.MaxUint256,
         from,
-        {
-          gasLimit,
-        },
+        {gasLimit},
       );
 
       return tx;

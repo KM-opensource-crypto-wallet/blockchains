@@ -977,7 +977,10 @@ export const sendFunds = createAsyncThunk(
         ? await nativeCoin.deactivateStaking({
             from: txData?.from,
             amount: txData.amount,
+            contractAddress: txData?.currentCoin?.contractAddress,
             gasFee: transferData?.gasFee,
+            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+            isMax: transferData?.isMax,
             estimateGas: transferData?.estimateGas,
             transactionFee: transferData?.transactionFee,
             nonce: txData?.nonce ?? transferData?.nonce,
@@ -1012,6 +1015,8 @@ export const sendFunds = createAsyncThunk(
             validatorPubKey: txData?.validatorPubKey,
             stakingAddress: txData?.stakingAddress,
             memo: txData?.memo,
+            stakingProviderName: txData?.stakingProviderName,
+            contractAddress: txData?.currentCoin?.contractAddress,
           })
         : txData?.isBatchTransaction
         ? await nativeCoin.sendBatchTransaction({

@@ -57,18 +57,16 @@ export const morphoProvider = {
   stakedAmountRaw: null,
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Morpho vault for token: ${contractAddress}`);
-
-      const amountInWei = parseUnits(amount.toString(), decimals);
 
       const vault = new ethers.Contract(
         vaultAddress,
@@ -85,7 +83,14 @@ export const morphoProvider = {
       const approveTx = await tokenContract.approve(vaultAddress, amountInWei);
       await approveTx.wait();
 
-      const tx = await vault.deposit.populateTransaction(amountInWei, from);
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await vault.deposit.estimateGas(amountInWei, from);
+
+      const tx = await vault.deposit.populateTransaction(amountInWei, from, {
+        gasLimit,
+      });
 
       return tx;
     } catch (error) {
@@ -95,17 +100,14 @@ export const morphoProvider = {
   },
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
     const vaultAddress = getVaultAddress(contractAddress);
     if (!vaultAddress)
       throw new Error(`No Morpho vault found for token: ${contractAddress}`);
-
-    const amountInWei = parseUnits(amount.toString(), decimals);
 
     const vault = new ethers.Contract(
       vaultAddress,
@@ -129,7 +131,7 @@ export const morphoProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
@@ -142,7 +144,15 @@ export const morphoProvider = {
       );
 
       const shares = await vault.balanceOf(from);
-      const tx = await vault.redeem.populateTransaction(shares, from, from);
+
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await vault.redeem.estimateGas(shares, from, from);
+
+      const tx = await vault.redeem.populateTransaction(shares, from, from, {
+        gasLimit,
+      });
       return tx;
     } catch (error) {
       console.log(error);
@@ -180,10 +190,7 @@ export const morphoProvider = {
       throw e;
     }
   },
-  getStakingBalance: async (
-    {evmProvider, address, contractAddress},
-    provider,
-  ) => {
+  getStakingBalance: async ({evmProvider, address, contractAddress}) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
@@ -209,10 +216,12 @@ export const morphoProvider = {
       throw error;
     }
   },
-  fetchData: async (
-    {evmProvider, contractAddress, walletAddress, tokenDecimals},
-    provider,
-  ) => {
+  fetchData: async ({
+    evmProvider,
+    contractAddress,
+    walletAddress,
+    tokenDecimals,
+  }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress) return null;

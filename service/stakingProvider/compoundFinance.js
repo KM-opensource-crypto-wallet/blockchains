@@ -1,4 +1,4 @@
-import {ethers, parseUnits} from 'ethers';
+import {ethers} from 'ethers';
 import cometContractABI from '../../abis/comet_compound_abi.json';
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
@@ -25,15 +25,14 @@ export const compoundProvider = {
   stakedAmountRaw: null,
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const amountInWei = parseUnits(amount.toString(), decimals);
       const comet = new ethers.Contract(
         cometAddress,
         cometContractABI,
@@ -63,10 +62,16 @@ export const compoundProvider = {
       }
       const approveTx = await tokenContract.approve(cometAddress, amountInWei);
       await approveTx.wait();
-      // � Step 4: Supply (THIS = staking)
+
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await comet.supply.estimateGas(contractAddress, amountInWei);
+      //� Step 4: Supply (THIS = staking)
       const tx = await comet.supply.populateTransaction(
         contractAddress,
         amountInWei,
+        {gasLimit},
       );
 
       return tx;
@@ -75,7 +80,7 @@ export const compoundProvider = {
       throw error;
     }
   },
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
       const comet = new ethers.Contract(
@@ -84,7 +89,7 @@ export const compoundProvider = {
         walletSigner,
       );
 
-      // � Parse amount (USDC = 6 decimals)
+      //� Parse amount (USDC = 6 decimals)
       const baseToken = await comet.baseToken();
       console.log('baseToken:', baseToken);
 
@@ -97,10 +102,19 @@ export const compoundProvider = {
 
       console.log('Supplied Balance:', ethers.formatUnits(suppliedBalance, 6));
 
-      // � Step 3: Withdraw (unstake)
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await comet.withdraw.estimateGas(
+              contractAddress,
+              ethers.MaxUint256,
+            );
+
+      //� Step 3: Withdraw (unstake)
       const tx = await comet.withdraw.populateTransaction(
         contractAddress,
-        ethers.MaxUint256, // � withdraw ALL
+        ethers.MaxUint256,
+        {gasLimit}, //� withdraw ALL
       );
 
       return tx;
@@ -134,16 +148,13 @@ export const compoundProvider = {
     }
   },
   getEstimateFeeForStaking: async ({
-    from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
-      const amountInWei = parseUnits(amount.toString(), decimals);
       const comet = new ethers.Contract(
         cometAddress,
         cometContractABI,

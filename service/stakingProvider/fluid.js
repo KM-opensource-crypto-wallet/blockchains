@@ -48,18 +48,16 @@ export const fluidProvider = {
 
   createStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
+    estimateGas,
   }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
         throw new Error(`No Fluid fToken for token: ${contractAddress}`);
-
-      const amountInWei = parseUnits(amount.toString(), decimals);
 
       const fToken = new ethers.Contract(
         fTokenAddress,
@@ -76,7 +74,14 @@ export const fluidProvider = {
       const approveTx = await tokenContract.approve(fTokenAddress, amountInWei);
       await approveTx.wait();
 
-      const tx = await fToken.deposit.populateTransaction(amountInWei, from);
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await fToken.deposit.estimateGas(amountInWei, from);
+
+      const tx = await fToken.deposit.populateTransaction(amountInWei, from, {
+        gasLimit,
+      });
 
       return tx;
     } catch (error) {
@@ -87,17 +92,14 @@ export const fluidProvider = {
 
   getEstimateFeeForStaking: async ({
     from,
-    amount,
+    amountInWei,
     contractAddress,
-    decimals,
     tokenContract,
     walletSigner,
   }) => {
     const fTokenAddress = getFTokenAddress(contractAddress);
     if (!fTokenAddress)
       throw new Error(`No Fluid fToken found for token: ${contractAddress}`);
-
-    const amountInWei = parseUnits(amount.toString(), decimals);
 
     const fToken = new ethers.Contract(
       fTokenAddress,
@@ -122,7 +124,7 @@ export const fluidProvider = {
     };
   },
 
-  unStaking: async ({from, contractAddress, walletSigner}) => {
+  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
@@ -135,7 +137,15 @@ export const fluidProvider = {
       );
 
       const shares = await fToken.balanceOf(from);
-      const tx = await fToken.redeem.populateTransaction(shares, from, from);
+
+      const gasLimit =
+        typeof estimateGas === 'bigint'
+          ? estimateGas
+          : await fToken.redeem.estimateGas(shares, from, from);
+
+      const tx = await fToken.redeem.populateTransaction(shares, from, from, {
+        gasLimit,
+      });
 
       return tx;
     } catch (error) {
