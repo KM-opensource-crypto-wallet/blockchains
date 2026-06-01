@@ -441,6 +441,22 @@ export const getSubscriptionsByUser = async userId => {
   }
 };
 
+export const getNotificationHistory = async (
+  userId,
+  {page = 1, walletId} = {},
+) => {
+  try {
+    const params = {page};
+    if (walletId) params.walletId = walletId;
+    const resp = await DokApi.get(`/notification-history/${userId}`, {params});
+    console.log('getNotificationHistory response:', resp?.data?.data);
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in getNotificationHistory', JSON.stringify(e));
+    throw e;
+  }
+};
+
 export const getAllBlockchairAPI = async payload => {
   try {
     const resp = await DokApi.post('/get-all-blockchair-api', payload, {

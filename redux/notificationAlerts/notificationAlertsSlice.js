@@ -4,8 +4,13 @@ import {
   updateSubscription,
   deleteSubscription,
   getSubscriptionsByUser,
+  getNotificationHistory,
 } from '../../service/dokApi';
-import {getMasterClientId, selectAllWallets} from '../wallets/walletsSelector';
+import {
+  getMasterClientId,
+  selectAllWallets,
+  selectCurrentWalletClientId,
+} from '../wallets/walletsSelector';
 import {toDirection} from 'dok-wallet-blockchain-networks/helper';
 
 /**
@@ -22,6 +27,7 @@ export const createCustomAlert = createAsyncThunk(
         walletId: payload.walletId,
         oneSignalPlayerId,
         wallet: payload.wallet,
+        ...(payload.wallets?.length ? {wallets: payload.wallets} : {}),
         coin: {
           symbol: payload.coinSymbol,
           chain_name: payload.chainName,
@@ -109,6 +115,7 @@ export const fetchSubscriptionsThunk = createAsyncThunk(
             coinDecimal: sub.coin.decimal ?? 18,
             contractAddress: sub.coin.contractAddress ?? null,
             wallet: sub.wallet,
+            wallets: sub.wallets ?? [],
             minAmount: sub.minAmount ?? null,
             notifyOnReceive: ['receive', 'both'].includes(sub.direction),
             notifyOnSend: ['send', 'both'].includes(sub.direction),
@@ -117,6 +124,27 @@ export const fetchSubscriptionsThunk = createAsyncThunk(
         }, []);
 
       return {subs, missingAlerts};
+    } catch (err) {
+      return rejectWithValue(err?.message);
+    }
+  },
+);
+
+export const fetchNotificationHistoryThunk = createAsyncThunk(
+  'notificationAlerts/fetchHistory',
+  async ({reset = false} = {}, {getState, rejectWithValue}) => {
+    try {
+      const state = getState();
+      const userId = getMasterClientId(state);
+      const walletId = selectCurrentWalletClientId(state);
+      const page = reset ? 1 : state.notificationAlerts?.historyPage ?? 1;
+      const result = await getNotificationHistory(userId, {page, walletId});
+      const {
+        items = [],
+        hasMore = false,
+        page: returnedPage = page,
+      } = result?.data ?? {};
+      return {items, hasMore, page: returnedPage, reset};
     } catch (err) {
       return rejectWithValue(err?.message);
     }
@@ -140,6 +168,10 @@ export const deleteAlertThunk = createAsyncThunk(
 
 const initialState = {
   notificationAlerts: [],
+  notificationHistory: [],
+  historyLoading: false,
+  historyPage: 1,
+  historyHasMore: true,
 };
 
 export const notificationAlertsSlice = createSlice({
@@ -174,6 +206,20 @@ export const notificationAlertsSlice = createSlice({
         state.notificationAlerts = state.notificationAlerts.filter(
           obj => obj.id !== payload?.id,
         );
+      })
+      .addCase(fetchNotificationHistoryThunk.pending, state => {
+        state.historyLoading = true;
+      })
+      .addCase(fetchNotificationHistoryThunk.fulfilled, (state, {payload}) => {
+        state.historyLoading = false;
+        state.notificationHistory = payload.reset
+          ? payload.items
+          : [...state.notificationHistory, ...payload.items];
+        state.historyHasMore = payload.hasMore;
+        state.historyPage = payload.reset ? 2 : state.historyPage + 1;
+      })
+      .addCase(fetchNotificationHistoryThunk.rejected, state => {
+        state.historyLoading = false;
       })
       .addCase(fetchSubscriptionsThunk.fulfilled, (state, {payload}) => {
         const {subs, missingAlerts} = payload;
