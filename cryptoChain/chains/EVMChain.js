@@ -435,7 +435,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
             const tempItem = {
               amount: amount,
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: getExplorerTxUrl(chain_name, txHash),
               status: i === 0 ? 'PENDING' : 'QUEUE',
               date: transactionData.date, //new Date(transaction.raw_data.timestamp),
@@ -1374,7 +1374,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       const formatAmount = parseBalance(amount, localDecimals);
       return {
         amount: formatAmount,
-        link: hash.substring(0, 13) + '...',
+        link: hash,
         url: getExplorerTxUrl(chain_name, txHash),
         status: 'PENDING',
         from: tr?.from,
@@ -1449,7 +1449,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 item?.input?.startsWith(BATCH_EXECUTE_SELECTOR));
             return {
               amount: bnValue.toString(),
-              link: txHash.substring(0, 13) + '...',
+              link: txHash,
               url: getExplorerTxUrl(chain_name, txHash),
               status: Number(item?.confirmations) >= 1 ? 'SUCCESS' : 'FAIL',
               date: item?.timeStamp * 1000, //new Date(transaction.raw_data.timestamp),

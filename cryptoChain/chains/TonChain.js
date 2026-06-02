@@ -355,7 +355,7 @@ export const TonChain = () => {
           const txHash = transaction?.transaction_hash;
           return {
             amount: transaction?.amount,
-            link: txHash.substring(0, 13) + '...',
+            link: txHash,
             url: getExplorerTxUrl('ton', txHash),
             status: 'Unknown',
             date: new Date(transaction?.transaction_now * 1000), //new Date(transaction.raw_data.timestamp),

@@ -803,7 +803,7 @@ export const SolanaChain = () => {
                   transactionDetails?.destination === tokenAccount.toString();
                 finalData.push({
                   amount: bnValue?.toString(),
-                  link: txHash.substring(0, 13) + '...',
+                  link: txHash,
                   url: getExplorerTxUrl('solana', txHash),
                   status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
                   date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
