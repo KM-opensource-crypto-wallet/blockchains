@@ -74,6 +74,7 @@ export const EvmStakingProvider = {
     stakingProviderName,
     walletSigner,
     estimateGas,
+    amountInWei,
   }) => {
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
@@ -88,6 +89,7 @@ export const EvmStakingProvider = {
       contractAddress,
       walletSigner,
       estimateGas,
+      amountInWei,
     });
   },
   getEstimateFeeForDeactivateStaking: async ({
@@ -96,6 +98,7 @@ export const EvmStakingProvider = {
     stakingProviderName,
     walletSigner,
     evmProvider: externalEvmProvider,
+    amountInWei,
   }) => {
     const evmProvider = externalEvmProvider;
     const provider = stakingProviderName
@@ -124,6 +127,29 @@ export const EvmStakingProvider = {
       from,
       contractAddress,
       walletSigner,
+      amountInWei,
+    });
+  },
+  getEstimateFeeForClaimRewards: async ({
+    from,
+    contractAddress,
+    stakingProviderName,
+    evmProvider: externalEvmProvider,
+  }) => {
+    const evmProvider = externalEvmProvider;
+    const provider = stakingProviderName
+      ? providers.find(p => p.name === stakingProviderName)
+      : providers[0];
+    if (
+      !provider ||
+      typeof provider.getEstimateFeeForClaimRewards !== 'function'
+    ) {
+      return null;
+    }
+    return provider.getEstimateFeeForClaimRewards({
+      from,
+      contractAddress,
+      evmProvider,
     });
   },
   claimRewards: async ({

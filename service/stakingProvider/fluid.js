@@ -1,4 +1,4 @@
-import {ethers, formatUnits, parseUnits} from 'ethers';
+import {ethers, formatUnits} from 'ethers';
 import fluidFTokenAbi from '../../abis/spark_abi.json';
 
 // Fluid fToken vaults on Ethereum mainnet (ERC4626-compliant)
@@ -124,7 +124,13 @@ export const fluidProvider = {
     };
   },
 
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
       if (!fTokenAddress)
@@ -136,7 +142,15 @@ export const fluidProvider = {
         walletSigner,
       );
 
-      const shares = await fToken.balanceOf(from);
+      const userShares = await fToken.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const rawShares = await fToken.convertToShares(amountInWei);
+        // Cap at actual balance — convertToShares can round UP and cause revert.
+        shares = rawShares > userShares ? userShares : rawShares;
+      } else {
+        shares = userShares;
+      }
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -158,6 +172,7 @@ export const fluidProvider = {
     from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
@@ -170,12 +185,15 @@ export const fluidProvider = {
         walletSigner,
       );
 
-      const shares = await fToken.balanceOf(from);
+      const shares =
+        amountInWei !== undefined
+          ? await fToken.convertToShares(amountInWei)
+          : await fToken.balanceOf(from);
       const estimateGas = await fToken.redeem.estimateGas(shares, from, from);
       return {
         estimateGas,
         toAddress: fTokenAddress,
-        value: ethers.MaxUint256,
+        value: shares,
       };
     } catch (e) {
       console.error(

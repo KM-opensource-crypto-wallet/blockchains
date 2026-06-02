@@ -80,7 +80,13 @@ export const compoundProvider = {
       throw error;
     }
   },
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
       const comet = new ethers.Contract(
@@ -89,32 +95,24 @@ export const compoundProvider = {
         walletSigner,
       );
 
-      //� Parse amount (USDC = 6 decimals)
-      const baseToken = await comet.baseToken();
-      console.log('baseToken:', baseToken);
-
-      if (contractAddress.toLowerCase() !== baseToken.toLowerCase()) {
-        throw new Error(
-          ' This Comet only supports its base asset (e.g., USDC)',
-        );
+      // Resolve to MaxUint256 when amount >= on-chain balance so that interest
+      // accrued between the fee snapshot and tx confirmation leaves no dust.
+      let withdrawAmount = ethers.MaxUint256;
+      if (amountInWei !== undefined) {
+        const currentBalance = await comet.balanceOf(from);
+        withdrawAmount =
+          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
       }
-      const suppliedBalance = await comet.balanceOf(from);
-
-      console.log('Supplied Balance:', ethers.formatUnits(suppliedBalance, 6));
 
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
-          : await comet.withdraw.estimateGas(
-              contractAddress,
-              ethers.MaxUint256,
-            );
+          : await comet.withdraw.estimateGas(contractAddress, withdrawAmount);
 
-      //� Step 3: Withdraw (unstake)
       const tx = await comet.withdraw.populateTransaction(
         contractAddress,
-        ethers.MaxUint256,
-        {gasLimit}, //� withdraw ALL
+        withdrawAmount,
+        {gasLimit},
       );
 
       return tx;
@@ -187,8 +185,10 @@ export const compoundProvider = {
     }
   },
   getEstimateFeeForDeactivateStaking: async ({
+    from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
@@ -197,14 +197,20 @@ export const compoundProvider = {
         cometContractABI,
         walletSigner,
       );
+      let withdrawAmount = ethers.MaxUint256;
+      if (amountInWei !== undefined) {
+        const currentBalance = await comet.balanceOf(from);
+        withdrawAmount =
+          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
+      }
       const estimateGas = await comet.withdraw.estimateGas(
         contractAddress,
-        ethers.MaxUint256,
+        withdrawAmount,
       );
       return {
         estimateGas,
         toAddress: cometAddress,
-        value: ethers.MaxUint256,
+        value: withdrawAmount,
       };
     } catch (e) {
       console.error(
@@ -254,6 +260,32 @@ export const compoundProvider = {
     } catch (e) {
       console.warn('[compoundProvider] fetchData error:', e);
       return null;
+    }
+  },
+  getEstimateFeeForClaimRewards: async ({
+    from,
+    evmProvider,
+    contractAddress,
+  }) => {
+    try {
+      const cometAddress = getCometAddress(contractAddress);
+      const rewardsContract = new ethers.Contract(
+        cometRewardAddress,
+        cometContractABI,
+        evmProvider,
+      );
+      const estimateGas = await rewardsContract.claim.estimateGas(
+        cometAddress,
+        from,
+        true,
+      );
+      return {estimateGas, toAddress: cometRewardAddress, value: 0n};
+    } catch (e) {
+      console.error(
+        'Error in compoundProvider getEstimateFeeForClaimRewards',
+        e,
+      );
+      throw e;
     }
   },
   getRewards: async ({from, evmProvider, contractAddress}) => {

@@ -1,4 +1,4 @@
-import {ethers, formatUnits, parseUnits} from 'ethers';
+import {ethers, formatUnits} from 'ethers';
 import morphoVaultAbi from '../../abis/spark_abi.json'; // MetaMorpho vaults implement ERC4626
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
@@ -131,7 +131,13 @@ export const morphoProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
       if (!vaultAddress)
@@ -143,7 +149,15 @@ export const morphoProvider = {
         walletSigner,
       );
 
-      const shares = await vault.balanceOf(from);
+      const userShares = await vault.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const rawShares = await vault.convertToShares(amountInWei);
+        // Cap at actual balance — convertToShares can round UP and cause revert.
+        shares = rawShares > userShares ? userShares : rawShares;
+      } else {
+        shares = userShares;
+      }
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -163,6 +177,7 @@ export const morphoProvider = {
     from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
@@ -175,7 +190,10 @@ export const morphoProvider = {
         walletSigner,
       );
 
-      const shares = await vault.balanceOf(from);
+      const shares =
+        amountInWei !== undefined
+          ? await vault.convertToShares(amountInWei)
+          : await vault.balanceOf(from);
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);
       return {
         estimateGas,
@@ -254,6 +272,10 @@ export const morphoProvider = {
       console.warn('[morphoProvider] fetchData error:', error);
       return null;
     }
+  },
+  getEstimateFeeForClaimRewards: async () => {
+    // Merkl claim gas varies by proof size; 200k covers most cases
+    return {estimateGas: 200000n, toAddress: MERKL_DISTRIBUTOR, value: 0n};
   },
   getRewards: async ({from}) => {
     const rewardBase = {

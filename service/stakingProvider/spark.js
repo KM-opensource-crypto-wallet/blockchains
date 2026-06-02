@@ -1,4 +1,4 @@
-import {ethers, formatUnits, parseUnits} from 'ethers';
+import {ethers, formatUnits} from 'ethers';
 import sparkAbi from '../../abis/spark_abi.json';
 import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 const SPARK_VAULT_BY_TOKEN = {
@@ -93,13 +93,27 @@ export const sparkProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
-      // Redeem all shares
-      const shares = await vault.balanceOf(from);
+      const userShares = await vault.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const rawShares = await vault.convertToShares(amountInWei);
+        // convertToShares can round UP, yielding more shares than the user holds
+        // which causes redeem to revert. Cap at the actual balance.
+        shares = rawShares > userShares ? userShares : rawShares;
+      } else {
+        shares = userShares;
+      }
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -140,6 +154,7 @@ export const sparkProvider = {
     from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
@@ -148,12 +163,20 @@ export const sparkProvider = {
 
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
-      const shares = await vault.balanceOf(from);
+      const userShares = await vault.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const rawShares = await vault.convertToShares(amountInWei);
+        shares = rawShares > userShares ? userShares : rawShares;
+      } else {
+        shares = userShares;
+      }
+
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);
       return {
         estimateGas,
         toAddress: vaultAddress,
-        value: ethers.MaxUint256,
+        value: shares,
       };
     } catch (e) {
       console.error('Error in EVMChain getEstimateFeeForDeactivateStaking', e);
@@ -204,6 +227,14 @@ export const sparkProvider = {
       console.log(error);
       throw error;
     }
+  },
+  getEstimateFeeForClaimRewards: async ({contractAddress}) => {
+    const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+    if (!vaultAddress) {
+      throw new Error(`No Spark vault found for token: ${contractAddress}`);
+    }
+    // Yield redemption gas is consistent for ERC4626 redeem (~150k-200k)
+    return {estimateGas: 200000n, toAddress: vaultAddress, value: 0n};
   },
   getRewards: async ({from, evmProvider, contractAddress}) => {
     const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];

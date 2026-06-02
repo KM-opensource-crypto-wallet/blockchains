@@ -1,4 +1,4 @@
-import {ethers, formatUnits, parseUnits} from 'ethers';
+import {ethers, formatUnits} from 'ethers';
 import maplePoolABI from '../../abis/maple_pool.json';
 import mapleSyrupRouterABI from '../../abis/maple_syrup_router.json';
 
@@ -207,7 +207,13 @@ export const mapleProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const config = getVaultConfig(contractAddress);
       if (!config)
@@ -219,16 +225,28 @@ export const mapleProvider = {
         walletSigner,
       );
 
-      const shares = await pool.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const userShares = await pool.balanceOf(from);
+        const userAssets = await pool.convertToExitAssets(userShares);
+        shares =
+          BigInt(amountInWei) >= BigInt(userAssets)
+            ? userShares
+            : await pool.convertToExitShares(amountInWei);
+      } else {
+        shares = await pool.balanceOf(from);
+      }
 
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
           : await pool.requestRedeem.estimateGas(shares, from);
 
+      // NOTE: Withdrawals are processed automatically by Maple. Expected processing time is typically
+      // less than 2 days but can take up to 30 days depending on available liquidity.
       const tx = await pool.requestRedeem.populateTransaction(shares, from, {
         gasLimit,
-      }); // NOTE: Withdrawals are processed automatically by Maple. If there is sufficient liquidity in the pool, the withdrawal will be processed within a few minutes. Expected processing time is typically less than 2 days, but it can take up to 30 days depending on available liquidity.
+      });
 
       return tx;
     } catch (error) {
@@ -240,6 +258,7 @@ export const mapleProvider = {
     from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const config = getVaultConfig(contractAddress);
@@ -252,12 +271,23 @@ export const mapleProvider = {
         walletSigner,
       );
 
-      const shares = await pool.balanceOf(from);
+      let shares;
+      if (amountInWei !== undefined) {
+        const userShares = await pool.balanceOf(from);
+        const userAssets = await pool.convertToExitAssets(userShares);
+        shares =
+          BigInt(amountInWei) >= BigInt(userAssets)
+            ? userShares
+            : await pool.convertToExitShares(amountInWei);
+      } else {
+        shares = await pool.balanceOf(from);
+      }
+
       const estimateGas = await pool.requestRedeem.estimateGas(shares, from);
       return {
         estimateGas,
         toAddress: config.poolAddress,
-        value: ethers.MaxUint256,
+        value: shares,
       };
     } catch (e) {
       console.error(

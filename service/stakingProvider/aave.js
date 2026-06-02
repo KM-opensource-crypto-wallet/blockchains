@@ -1,12 +1,16 @@
-import {ethers, formatUnits, parseUnits} from 'ethers';
+import {ethers, formatUnits} from 'ethers';
 import erc20 from '../../abis/erc20.json';
 import aavePoolABI from '../../abis/aave_pool.json';
 import aaveDataProviderABI from '../../abis/aave_data_provider.json';
+import aaveRewardsControllerABI from '../../abis/aave_rewards_controller.json';
+import {getTokenLogoUrl} from 'dok-wallet-blockchain-networks/helper';
 
 export const aavePoolContractAddress =
   '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2';
 export const aaveDataProviderContractAddress =
   '0x7B4EB56E7CD4b454BA8ff71E4518426369a138a3';
+export const aaveRewardsControllerAddress =
+  '0x8164Cc65827dcFe994AB23944CBC90e0aa80bFcb';
 
 const aaveFetchData = async ({
   evmProvider,
@@ -156,7 +160,13 @@ export const aaveProvider = {
       value: amountInWei,
     };
   },
-  unStaking: async ({from, contractAddress, walletSigner, estimateGas}) => {
+  unStaking: async ({
+    from,
+    contractAddress,
+    walletSigner,
+    estimateGas,
+    amountInWei,
+  }) => {
     try {
       const pool = new ethers.Contract(
         aavePoolContractAddress,
@@ -164,20 +174,39 @@ export const aaveProvider = {
         walletSigner,
       );
 
+      // Resolve to MaxUint256 when amount >= on-chain aToken balance so that
+      // interest accrued between the fee snapshot and tx confirmation doesn't
+      // leave dust in the position.
+      let withdrawAmount = ethers.MaxUint256;
+      if (amountInWei !== undefined) {
+        const dataProvider = new ethers.Contract(
+          aaveDataProviderContractAddress,
+          aaveDataProviderABI,
+          walletSigner,
+        );
+        const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+          contractAddress,
+        );
+        const aToken = new ethers.Contract(aTokenAddress, erc20, walletSigner);
+        const currentBalance = await aToken.balanceOf(from);
+        withdrawAmount =
+          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
+      }
+
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
           : await pool.withdraw.estimateGas(
               contractAddress,
-              ethers.MaxUint256,
+              withdrawAmount,
               from,
             );
 
-      await pool.withdraw.staticCall(contractAddress, ethers.MaxUint256, from);
+      await pool.withdraw.staticCall(contractAddress, withdrawAmount, from);
 
       const tx = await pool.withdraw.populateTransaction(
         contractAddress,
-        ethers.MaxUint256,
+        withdrawAmount,
         from,
         {gasLimit},
       );
@@ -217,6 +246,7 @@ export const aaveProvider = {
     from,
     contractAddress,
     walletSigner,
+    amountInWei,
   }) => {
     try {
       const pool = new ethers.Contract(
@@ -224,15 +254,17 @@ export const aaveProvider = {
         aavePoolABI,
         walletSigner,
       );
+      const withdrawAmount =
+        amountInWei !== undefined ? amountInWei : ethers.MaxUint256;
       const estimateGas = await pool.withdraw.estimateGas(
         contractAddress,
-        ethers.MaxUint256,
+        withdrawAmount,
         from,
       );
       return {
         estimateGas,
         toAddress: aavePoolContractAddress,
-        value: ethers.MaxUint256,
+        value: withdrawAmount,
       };
     } catch (e) {
       console.error('Error in EVMChain getEstimateFeeForDeactivateStaking', e);
@@ -253,4 +285,114 @@ export const aaveProvider = {
       dataProviderContractAddress: provider.dataProviderContractAddress,
       dataProviderABI: provider.dataProviderABI,
     }),
+  getEstimateFeeForClaimRewards: async ({
+    from,
+    evmProvider,
+    contractAddress,
+  }) => {
+    try {
+      const dataProvider = new ethers.Contract(
+        aaveDataProviderContractAddress,
+        aaveDataProviderABI,
+        evmProvider,
+      );
+      const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+        contractAddress,
+      );
+      const rewardsController = new ethers.Contract(
+        aaveRewardsControllerAddress,
+        aaveRewardsControllerABI,
+        evmProvider,
+      );
+      const estimateGas = await rewardsController.claimAllRewards.estimateGas(
+        [aTokenAddress],
+        from,
+      );
+      return {estimateGas, toAddress: aaveRewardsControllerAddress, value: 0n};
+    } catch (e) {
+      console.error('Error in aaveProvider getEstimateFeeForClaimRewards', e);
+      throw e;
+    }
+  },
+  getRewards: async ({from, evmProvider, contractAddress}) => {
+    try {
+      const dataProvider = new ethers.Contract(
+        aaveDataProviderContractAddress,
+        aaveDataProviderABI,
+        evmProvider,
+      );
+      const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+        contractAddress,
+      );
+
+      const rewardsController = new ethers.Contract(
+        aaveRewardsControllerAddress,
+        aaveRewardsControllerABI,
+        evmProvider,
+      );
+      const [rewardsList, unclaimedAmounts] =
+        await rewardsController.getAllUserRewards([aTokenAddress], from);
+
+      if (!rewardsList.length) {
+        return {token: null, amount: '0', symbol: 'AAVE', logo: null};
+      }
+
+      // Prefer first token with a non-zero balance; fall back to index 0
+      let idx = rewardsList.findIndex((_, i) => unclaimedAmounts[i] > 0n);
+      if (idx === -1) {
+        idx = 0;
+      }
+
+      const rewardToken = rewardsList[idx];
+      const rewardAmount = unclaimedAmounts[idx];
+
+      const tokenContract = new ethers.Contract(
+        rewardToken,
+        erc20,
+        evmProvider,
+      );
+      const [decimals, symbol] = await Promise.all([
+        tokenContract.decimals(),
+        tokenContract.symbol(),
+      ]);
+
+      return {
+        token: rewardToken,
+        amount: formatUnits(rewardAmount, decimals),
+        symbol,
+        logo: getTokenLogoUrl(rewardToken),
+      };
+    } catch (error) {
+      console.warn('[aaveProvider getRewards] error:', error?.message);
+      return {token: null, amount: '0', symbol: 'AAVE', logo: null};
+    }
+  },
+  claimRewards: async ({from, contractAddress, privateKey, evmProvider}) => {
+    try {
+      const dataProvider = new ethers.Contract(
+        aaveDataProviderContractAddress,
+        aaveDataProviderABI,
+        evmProvider,
+      );
+      const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+        contractAddress,
+      );
+
+      const wallet = new ethers.Wallet(privateKey);
+      const walletSigner = wallet.connect(evmProvider);
+
+      const rewardsController = new ethers.Contract(
+        aaveRewardsControllerAddress,
+        aaveRewardsControllerABI,
+        walletSigner,
+      );
+
+      const tx = await rewardsController.claimAllRewards([aTokenAddress], from);
+      await tx.wait();
+      return tx.hash;
+    } catch (error) {
+      console.log('[aaveProvider claimRewards] error:', error);
+      throw error;
+    }
+  },
 };

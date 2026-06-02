@@ -2150,6 +2150,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       maxPriorityFeePerGas,
       isMax,
       nonce,
+      amount,
+      tokenDecimals,
     }) => {
       const evmProvider = createRpcProvider(allRpcUrls[0]);
       const wallet = new ethers.Wallet(privateKey);
@@ -2163,6 +2165,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
       }
 
+      const amountInWei =
+        amount && tokenDecimals
+          ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
+          : undefined;
+
       const tx = await EvmStakingProvider.unStaking({
         from,
         contractAddress,
@@ -2170,6 +2177,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         walletSigner,
         evmProvider,
         estimateGas,
+        amountInWei,
       });
 
       if (typeof estimateGas === 'bigint') {
@@ -2266,11 +2274,17 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       additionalL1Fee,
       isFetchNonce,
       existingNonce,
+      amount,
+      tokenDecimals,
     }) =>
       retryFunc(async evmProvider => {
         try {
           const wallet = new ethers.Wallet(privateKey);
           const walletSigner = wallet.connect(evmProvider);
+          const amountInWei =
+            amount && tokenDecimals
+              ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
+              : undefined;
           const {estimateGas, value, toAddress} =
             await EvmStakingProvider.getEstimateFeeForDeactivateStaking({
               from: fromAddress,
@@ -2278,6 +2292,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               stakingProviderName,
               walletSigner,
               evmProvider,
+              amountInWei,
             });
           return calculateTotalFees({
             evmProvider,
@@ -2298,6 +2313,61 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw e;
         }
       }, null),
+    getEstimateFeeForStakingRewards: async ({
+      fromAddress,
+      contractAddress,
+      feesType,
+      stakingProviderName,
+      additionalL1Fee,
+      isFetchNonce,
+      existingNonce,
+    }) =>
+      retryFunc(async evmProvider => {
+        try {
+          const feeData =
+            await EvmStakingProvider.getEstimateFeeForClaimRewards({
+              from: fromAddress,
+              contractAddress,
+              stakingProviderName,
+              evmProvider,
+            });
+          if (!feeData) {
+            throw new Error(
+              `[EVMChain] No claim rewards fee estimator for provider: ${stakingProviderName}`,
+            );
+          }
+          const {estimateGas, toAddress, value} = feeData;
+          return calculateTotalFees({
+            evmProvider,
+            feesType,
+            value,
+            estimateGas,
+            fromAddress,
+            toAddress,
+            additionalL1Fee,
+            isFetchNonce,
+            existingNonce,
+          });
+        } catch (e) {
+          console.error('Error in EVMChain getEstimateFeeForStakingRewards', e);
+          throw e;
+        }
+      }, null),
+    stakingRewards: async ({
+      from,
+      contractAddress,
+      stakingProviderName,
+      privateKey,
+    }) => {
+      const evmProvider = createRpcProvider(allRpcUrls[0]);
+      return EvmStakingProvider.claimRewards({
+        from,
+        contractAddress,
+        stakingProviderName,
+        privateKey,
+        evmProvider,
+      });
+    },
     getStaking: async ({address, contractAddress, tokenDecimals}) =>
       retryFunc(async evmProvider => {
         const providerList = await EvmStakingProvider.getlistOfProviders({

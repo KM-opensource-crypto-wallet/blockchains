@@ -977,6 +977,7 @@ export const sendFunds = createAsyncThunk(
         ? await nativeCoin.deactivateStaking({
             from: txData?.from,
             amount: txData.amount,
+            tokenDecimals: txData?.currentCoin?.decimal,
             contractAddress: txData?.currentCoin?.contractAddress,
             gasFee: transferData?.gasFee,
             maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
