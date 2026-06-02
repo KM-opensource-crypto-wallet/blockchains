@@ -102,7 +102,10 @@ function getEVMTransactionType(item, isBatch, chainName) {
   const fromAddress = item?.from?.toLowerCase();
   const functionName = (item?.functionName || '').toLowerCase();
   const input = item?.input || '';
-  const selector = (input?.startsWith('0x') && input?.length >= 10) ? input.slice(0, 10).toLowerCase() : '';
+  const selector =
+    input?.startsWith('0x') && input?.length >= 10
+      ? input.slice(0, 10).toLowerCase()
+      : '';
   const chainContracts = STAKING_CONTRACTS[chainName] || {};
   const contractType = chainContracts[toAddress];
 
@@ -171,6 +174,46 @@ function decodeBatchTotalAmount(input) {
   return '0';
 }
 
+const TRANSFER_SELECTOR = '0xa9059cbb'; // transfer(address,uint256)
+const erc20TransferInterface = new ethers.Interface(erc20Abi);
+
+// A batch sub-call transferring tokens carries native `value` 0; the real token
+// amount + recipient live inside the sub-call `data`. Sum the inner transfer
+// amounts whose target is the coin being viewed so token batches don't show 0.
+function decodeBatchTokenTransfer(input, contractAddress) {
+  try {
+    if (!contractAddress) {
+      return null;
+    }
+    const decoded = batchContractInterface.parseTransaction({data: input});
+    const calls = decoded?.args?.[0];
+    if (!Array.isArray(calls)) {
+      return null;
+    }
+    const target = contractAddress.toLowerCase();
+    let total = 0n;
+    let recipient = null;
+    for (const call of calls) {
+      const to = call?.[0]?.toLowerCase();
+      const data = call?.[2];
+      if (
+        to === target &&
+        typeof data === 'string' &&
+        data.slice(0, 10).toLowerCase() === TRANSFER_SELECTOR
+      ) {
+        const inner = erc20TransferInterface.parseTransaction({data});
+        total += BigInt(inner.args[1]);
+        if (!recipient) {
+          recipient = inner.args[0];
+        }
+      }
+    }
+    return recipient ? {amount: total.toString(), to: recipient} : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 const FEES_BY_RPC_CHAINS = [
   'viction',
   'ethereum_classic',
@@ -215,10 +258,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         address: ethers.ZeroAddress,
         nonce: currentNonce + 1,
       });
-      const {
-        gasPrice: finalGasPrice,
-        maxPriorityFeePerGas,
-      } = await getEtherGasPrice('recommended', evmProvider);
+      const {gasPrice: finalGasPrice, maxPriorityFeePerGas} =
+        await getEtherGasPrice('recommended', evmProvider);
       const revokeTx = {
         type: 4,
         from: walletSigner.address,
@@ -1262,7 +1303,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return [];
       }
     },
-    getTransaction: async ({txHash}) => {
+    getTransaction: async ({txHash, contractAddress}) => {
       try {
         const [tx, receipt] = await Promise.all([
           safeGetTransactionData(txHash),
@@ -1295,14 +1336,34 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           (batchContractAddress &&
             toAddr === batchContractAddress.toLowerCase()) ||
           (toAddr === fromAddr && tx.data?.startsWith(BATCH_EXECUTE_SELECTOR));
+        // For ERC20/BEP20 token transfers the native `value` is 0 and the real
+        // amount + recipient live in the `transfer(address,uint256)` calldata.
+        const selector =
+          typeof tx.data === 'string' && tx.data.length >= 10
+            ? tx.data.slice(0, 10).toLowerCase()
+            : '';
+        const erc20Transfer =
+          !isBatchTx && selector === '0xa9059cbb'
+            ? parseTransaction(tx.data)
+            : null;
+        // For a token batch, the per-token amount + recipient live inside the
+        // sub-calls; the native batch total (decodeBatchTotalAmount) would be 0.
+        const batchTokenTransfer =
+          isBatchTx && contractAddress
+            ? decodeBatchTokenTransfer(tx.data, contractAddress)
+            : null;
         const txAmount = isBatchTx
-          ? decodeBatchTotalAmount(tx.data)
+          ? batchTokenTransfer
+            ? batchTokenTransfer.amount
+            : decodeBatchTotalAmount(tx.data)
+          : erc20Transfer?.value != null
+          ? erc20Transfer.value
           : tx.value.toString();
         return {
           data: {
             link: tx.hash,
             from: tx.from,
-            to: tx.to,
+            to: erc20Transfer?.toAddress || batchTokenTransfer?.to || tx.to,
             url: getExplorerTxUrl(chain_name, txHash),
             amount: txAmount,
             blockNumber: tx.blockNumber
@@ -1979,22 +2040,25 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         }
       }, 'pending'),
     checkDelegation: ({address}) =>
-      retryFunc(async evmProvider => {
-        try {
-          const code = await evmProvider.getCode(address);
-          if (
-            code &&
-            code.toLowerCase().startsWith('0xef0100') &&
-            code.length === 48
-          ) {
-            return {isDelegated: true, contractAddress: '0x' + code.slice(8)};
+      retryFunc(
+        async evmProvider => {
+          try {
+            const code = await evmProvider.getCode(address);
+            if (
+              code &&
+              code.toLowerCase().startsWith('0xef0100') &&
+              code.length === 48
+            ) {
+              return {isDelegated: true, contractAddress: '0x' + code.slice(8)};
+            }
+            return {isDelegated: false, contractAddress: null};
+          } catch (e) {
+            console.error('Error checking delegation', e);
+            return {isDelegated: false, contractAddress: null};
           }
-          return {isDelegated: false, contractAddress: null};
-        } catch (e) {
-          console.error('Error checking delegation', e);
-          return {isDelegated: false, contractAddress: null};
-        }
-      }, {isDelegated: false, contractAddress: null}),
+        },
+        {isDelegated: false, contractAddress: null},
+      ),
     revokeDelegation: ({privateKey}) =>
       retryFunc(async evmProvider => {
         const wallet = new ethers.Wallet(privateKey);
