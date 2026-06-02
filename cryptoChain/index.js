@@ -488,7 +488,10 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         ...payload,
       }),
     getTransaction: async payload =>
-      await chain?.getTransaction({txHash: payload.txHash}),
+      await chain?.getTransaction({
+        txHash: payload.txHash,
+        contractAddress: token?.contractAddress,
+      }),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
         from: wallet.address,

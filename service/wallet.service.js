@@ -231,7 +231,11 @@ export const getSingleTransaction = async (state, coinDef, wallet, txHash) => {
     customRpcUrl,
   );
   const currentPrice = coinDef?.currencyRate || 0;
-  let trx = await nativeCoin.getTransaction?.({txHash});
+  let trx = await nativeCoin.getTransaction?.({
+    txHash,
+    contractAddress:
+      coinDef?.type === 'token' ? coinDef?.contractAddress : null,
+  });
   if (trx) {
     const amount = trx?.data?.amount;
     trx = {
