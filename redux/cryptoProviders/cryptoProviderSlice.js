@@ -12,6 +12,7 @@ import {getSelectedCountry} from 'dok-wallet-blockchain-networks/redux/cryptoPro
 const initialState = {
   providers: [],
   sellCryptoProviders: [],
+  tutorial_videos: [],
   shownOTC: false,
   loading: false,
   error: null,
@@ -78,6 +79,9 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       additional_l1_fees: data?.additional_l1_fees || {},
       is_max_wallet_limit_reached: data?.is_max_wallet_limit_reached || false,
       android_latest_version: data?.android_latest_version || null,
+      tutorial_videos: Array.isArray(data?.tutorial_videos)
+        ? data?.tutorial_videos
+        : [],
     };
   },
 );
@@ -176,6 +180,9 @@ export const cryptoProviderSlice = createSlice({
         state.is_max_wallet_limit_reached =
           payload?.is_max_wallet_limit_reached;
         state.android_latest_version = payload?.android_latest_version;
+        state.tutorial_videos = Array.isArray(payload?.tutorial_videos)
+          ? payload?.tutorial_videos
+          : [];
       },
     );
     builder.addCase(
