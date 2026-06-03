@@ -179,7 +179,7 @@ export const sparkProvider = {
         value: shares,
       };
     } catch (e) {
-      console.error('Error in EVMChain getEstimateFeeForDeactivateStaking', e);
+      console.error('[sparkProvider getEstimateFeeForDeactivateStaking]', e);
       throw e;
     }
   },
