@@ -37,3 +37,6 @@ export const getIsMaxWalletLimitReached = state =>
 
 export const getAndroidLatestVersion = state =>
   state?.cryptoProvider?.android_latest_version;
+
+export const getTutorialVideos = state =>
+  state?.cryptoProvider?.tutorial_videos || [];
