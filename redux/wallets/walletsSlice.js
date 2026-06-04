@@ -2050,6 +2050,50 @@ export const walletsSlice = createSlice({
       }
       selectedCoin.deriveAddresses = updateDeriveAddress;
     },
+    deleteMultipleDeriveAddressesInCurrentCoin(state, {payload}) {
+      const addresses = Array.isArray(payload?.addresses)
+        ? payload.addresses
+        : [];
+      if (!addresses.length) {
+        console.warn(
+          'addresses payload is required for delete derive addresses',
+        );
+        return;
+      }
+      const currentWalletIndex = state.currentWalletIndex;
+      const currentWallet = state.allWallets[currentWalletIndex];
+      const selectedCoinId = currentWallet?.selectedCoin;
+      const selectedCoin = currentWallet?.coins.find(
+        item => item?._id === selectedCoinId,
+      );
+      if (!selectedCoin) {
+        console.warn('No selected coin found');
+        return;
+      }
+      const deriveAddresses = Array.isArray(selectedCoin?.deriveAddresses)
+        ? selectedCoin?.deriveAddresses
+        : [];
+      // Defense in depth: never delete the active address.
+      const addressSet = new Set(
+        addresses.filter(addr => addr && addr !== selectedCoin?.address),
+      );
+      if (!addressSet.size) {
+        console.warn('No valid derive addresses to delete');
+        return;
+      }
+      const updateDeriveAddress = deriveAddresses.filter(
+        item => !addressSet.has(item?.address),
+      );
+      if (!updateDeriveAddress.length) {
+        console.warn("you can't delete all derive addresses");
+        return;
+      }
+      if (updateDeriveAddress.length === deriveAddresses.length) {
+        console.warn('no derive addresses for delete found');
+        return;
+      }
+      selectedCoin.deriveAddresses = updateDeriveAddress;
+    },
     updateIsEVMAddressesAdded: (state, action) => {
       const updateWalletIndex = action?.payload?.index;
       const value = action?.payload?.value;
@@ -2784,6 +2828,7 @@ export const {
   updateIsEVMAddressesAdded,
   removeEVMDeriveAddresses,
   deleteDeriveAddressInCurrentCoin,
+  deleteMultipleDeriveAddressesInCurrentCoin,
   setSelectedDeriveAddress,
   updateContractAddress,
   setWalletPosition,
