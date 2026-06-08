@@ -92,6 +92,7 @@ export const mapleProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     try {
       const config = getVaultConfig(contractAddress);
@@ -108,20 +109,27 @@ export const mapleProvider = {
           'Your wallet is not authorized to deposit into Maple Finance. Please complete verification at app.maple.finance before staking.',
         );
 
+      let currentNonce = nonce;
+
       // USDT requires resetting allowance to 0 before setting a new value
       const allowance = await tokenContract.allowance(
         from,
         config.routerAddress,
       );
       if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(config.routerAddress, 0n);
+        const resetTx = await tokenContract.approve(config.routerAddress, 0n, {
+          nonce: currentNonce,
+        });
         await resetTx.wait();
+        currentNonce++;
       }
       const approveTx = await tokenContract.approve(
         config.routerAddress,
         amountInWei,
+        {nonce: currentNonce},
       );
       await approveTx.wait();
+      currentNonce++;
 
       const router = new ethers.Contract(
         config.routerAddress,
@@ -153,6 +161,7 @@ export const mapleProvider = {
           {gasLimit},
         );
       }
+      tx.nonce = currentNonce;
 
       return tx;
     } catch (error) {
@@ -226,15 +235,15 @@ export const mapleProvider = {
       );
 
       let shares;
-      if (amountInWei !== undefined) {
+      if (amountInWei === ethers.MaxUint256 || amountInWei === undefined) {
+        shares = await pool.balanceOf(from);
+      } else {
         const userShares = await pool.balanceOf(from);
         const userAssets = await pool.convertToExitAssets(userShares);
         shares =
           BigInt(amountInWei) >= BigInt(userAssets)
             ? userShares
             : await pool.convertToExitShares(amountInWei);
-      } else {
-        shares = await pool.balanceOf(from);
       }
 
       const gasLimit =
@@ -272,15 +281,15 @@ export const mapleProvider = {
       );
 
       let shares;
-      if (amountInWei !== undefined) {
+      if (amountInWei === ethers.MaxUint256 || amountInWei === undefined) {
+        shares = await pool.balanceOf(from);
+      } else {
         const userShares = await pool.balanceOf(from);
         const userAssets = await pool.convertToExitAssets(userShares);
         shares =
           BigInt(amountInWei) >= BigInt(userAssets)
             ? userShares
             : await pool.convertToExitShares(amountInWei);
-      } else {
-        shares = await pool.balanceOf(from);
       }
 
       const estimateGas = await pool.requestRedeem.estimateGas(shares, from);

@@ -62,6 +62,7 @@ export const morphoProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     try {
       const vaultAddress = getVaultAddress(contractAddress);
@@ -74,14 +75,22 @@ export const morphoProvider = {
         walletSigner,
       );
 
+      let currentNonce = nonce;
+
       // USDT requires resetting allowance to 0 before setting a new value
       const allowance = await tokenContract.allowance(from, vaultAddress);
       if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(vaultAddress, 0n);
+        const resetTx = await tokenContract.approve(vaultAddress, 0n, {
+          nonce: currentNonce,
+        });
         await resetTx.wait();
+        currentNonce++;
       }
-      const approveTx = await tokenContract.approve(vaultAddress, amountInWei);
+      const approveTx = await tokenContract.approve(vaultAddress, amountInWei, {
+        nonce: currentNonce,
+      });
       await approveTx.wait();
+      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -91,6 +100,7 @@ export const morphoProvider = {
       const tx = await vault.deposit.populateTransaction(amountInWei, from, {
         gasLimit,
       });
+      tx.nonce = currentNonce;
 
       return tx;
     } catch (error) {
@@ -149,15 +159,10 @@ export const morphoProvider = {
         walletSigner,
       );
 
-      const userShares = await vault.balanceOf(from);
-      let shares;
-      if (amountInWei !== undefined) {
-        const rawShares = await vault.convertToShares(amountInWei);
-        // Cap at actual balance — convertToShares can round UP and cause revert.
-        shares = rawShares > userShares ? userShares : rawShares;
-      } else {
-        shares = userShares;
-      }
+      const shares =
+        amountInWei === ethers.MaxUint256
+          ? await vault.balanceOf(from)
+          : await vault.convertToShares(amountInWei);
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -191,7 +196,7 @@ export const morphoProvider = {
       );
 
       const shares =
-        amountInWei !== undefined
+        amountInWei !== undefined && amountInWei !== ethers.MaxUint256
           ? await vault.convertToShares(amountInWei)
           : await vault.balanceOf(from);
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);

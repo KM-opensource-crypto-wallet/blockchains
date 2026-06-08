@@ -991,6 +991,7 @@ export const sendFunds = createAsyncThunk(
             resourceType: txData?.resourceType,
             memo: txData?.memo,
             stakingProviderName: txData?.stakingProviderName,
+            isMaxCheckbox: transferData?.isMaxCheckbox,
           })
         : txData?.isWithdrawStaking
         ? await nativeCoin.withdrawStaking({

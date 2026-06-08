@@ -30,6 +30,7 @@ export const compoundProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
@@ -51,28 +52,36 @@ export const compoundProvider = {
         throw new Error('❌ Insufficient token balance');
       }
 
+      let currentNonce = nonce;
+
       // USDT requires resetting allowance to 0 before setting a new value
       const currentAllowance = await tokenContract.allowance(
         from,
         cometAddress,
       );
       if (currentAllowance > 0n) {
-        const resetTx = await tokenContract.approve(cometAddress, 0n);
+        const resetTx = await tokenContract.approve(cometAddress, 0n, {
+          nonce: currentNonce,
+        });
         await resetTx.wait();
+        currentNonce++;
       }
-      const approveTx = await tokenContract.approve(cometAddress, amountInWei);
+      const approveTx = await tokenContract.approve(cometAddress, amountInWei, {
+        nonce: currentNonce,
+      });
       await approveTx.wait();
+      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
           : await comet.supply.estimateGas(contractAddress, amountInWei);
-      //� Step 4: Supply (THIS = staking)
       const tx = await comet.supply.populateTransaction(
         contractAddress,
         amountInWei,
         {gasLimit},
       );
+      tx.nonce = currentNonce;
 
       return tx;
     } catch (error) {
@@ -95,14 +104,10 @@ export const compoundProvider = {
         walletSigner,
       );
 
-      // Resolve to MaxUint256 when amount >= on-chain balance so that interest
-      // accrued between the fee snapshot and tx confirmation leaves no dust.
-      let withdrawAmount = ethers.MaxUint256;
-      if (amountInWei !== undefined) {
-        const currentBalance = await comet.balanceOf(from);
-        withdrawAmount =
-          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
-      }
+      const withdrawAmount =
+        amountInWei === ethers.MaxUint256
+          ? await comet.balanceOf(from)
+          : amountInWei;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -197,12 +202,10 @@ export const compoundProvider = {
         cometContractABI,
         walletSigner,
       );
-      let withdrawAmount = ethers.MaxUint256;
-      if (amountInWei !== undefined) {
-        const currentBalance = await comet.balanceOf(from);
-        withdrawAmount =
-          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
-      }
+      const withdrawAmount =
+        amountInWei === ethers.MaxUint256
+          ? await comet.balanceOf(from)
+          : amountInWei;
       const estimateGas = await comet.withdraw.estimateGas(
         contractAddress,
         withdrawAmount,

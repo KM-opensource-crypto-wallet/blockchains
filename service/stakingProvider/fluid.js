@@ -53,6 +53,7 @@ export const fluidProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     try {
       const fTokenAddress = getFTokenAddress(contractAddress);
@@ -65,14 +66,24 @@ export const fluidProvider = {
         walletSigner,
       );
 
+      let currentNonce = nonce;
+
       // USDT requires resetting allowance to 0 before setting a new value
       const allowance = await tokenContract.allowance(from, fTokenAddress);
       if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(fTokenAddress, 0n);
+        const resetTx = await tokenContract.approve(fTokenAddress, 0n, {
+          nonce: currentNonce,
+        });
         await resetTx.wait();
+        currentNonce++;
       }
-      const approveTx = await tokenContract.approve(fTokenAddress, amountInWei);
+      const approveTx = await tokenContract.approve(
+        fTokenAddress,
+        amountInWei,
+        {nonce: currentNonce},
+      );
       await approveTx.wait();
+      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -82,6 +93,7 @@ export const fluidProvider = {
       const tx = await fToken.deposit.populateTransaction(amountInWei, from, {
         gasLimit,
       });
+      tx.nonce = currentNonce;
 
       return tx;
     } catch (error) {
@@ -142,14 +154,14 @@ export const fluidProvider = {
         walletSigner,
       );
 
-      const userShares = await fToken.balanceOf(from);
       let shares;
-      if (amountInWei !== undefined) {
+      if (amountInWei === ethers.MaxUint256 || amountInWei === undefined) {
+        shares = await fToken.balanceOf(from);
+      } else {
+        const userShares = await fToken.balanceOf(from);
         const rawShares = await fToken.convertToShares(amountInWei);
         // Cap at actual balance — convertToShares can round UP and cause revert.
         shares = rawShares > userShares ? userShares : rawShares;
-      } else {
-        shares = userShares;
       }
 
       const gasLimit =
@@ -185,10 +197,14 @@ export const fluidProvider = {
         walletSigner,
       );
 
-      const shares =
-        amountInWei !== undefined
-          ? await fToken.convertToShares(amountInWei)
-          : await fToken.balanceOf(from);
+      let shares;
+      if (amountInWei === ethers.MaxUint256 || amountInWei === undefined) {
+        shares = await fToken.balanceOf(from);
+      } else {
+        const userShares = await fToken.balanceOf(from);
+        const rawShares = await fToken.convertToShares(amountInWei);
+        shares = rawShares > userShares ? userShares : rawShares;
+      }
       const estimateGas = await fToken.redeem.estimateGas(shares, from, from);
       return {
         estimateGas,

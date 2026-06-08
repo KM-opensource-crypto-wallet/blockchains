@@ -26,6 +26,7 @@ export const EvmStakingProvider = {
     walletSigner,
     stakingProviderName,
     estimateGas,
+    nonce,
   }) => {
     const provider = stakingProviderName
       ? providers.find(p => p.name === stakingProviderName)
@@ -42,6 +43,7 @@ export const EvmStakingProvider = {
       tokenContract,
       walletSigner,
       estimateGas,
+      nonce,
     });
   },
   getEstimateFeeForStaking: async ({

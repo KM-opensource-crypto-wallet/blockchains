@@ -2091,6 +2091,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       feesType,
       maxPriorityFeePerGas,
       isMax,
+      nonce,
     }) => {
       const evmProvider = createRpcProvider(allRpcUrls[0]);
       const wallet = new ethers.Wallet(privateKey);
@@ -2120,6 +2121,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         walletSigner,
         evmProvider,
         estimateGas,
+        nonce,
       });
 
       if (typeof estimateGas === 'bigint') {
@@ -2129,8 +2131,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       tx.maxPriorityFeePerGas = isMax
         ? finalGasPrice
         : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice);
-      // Re-fetch nonce after provider may have consumed it with approval transactions
-      tx.nonce = await evmProvider.getTransactionCount(from, 'pending');
       if (isEip1559NotSupported(chain_name)) {
         delete tx.maxFeePerGas;
         delete tx.maxPriorityFeePerGas;
@@ -2152,6 +2152,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       nonce,
       amount,
       tokenDecimals,
+      isMaxCheckbox,
     }) => {
       const evmProvider = createRpcProvider(allRpcUrls[0]);
       const wallet = new ethers.Wallet(privateKey);
@@ -2165,10 +2166,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
       }
 
-      const amountInWei =
-        amount && tokenDecimals
-          ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
-          : undefined;
+      const amountInWei = isMaxCheckbox
+        ? ethers.MaxUint256
+        : amount && tokenDecimals
+        ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
+        : undefined;
 
       const tx = await EvmStakingProvider.unStaking({
         from,
@@ -2276,15 +2278,17 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       existingNonce,
       amount,
       tokenDecimals,
+      isMaxCheckbox,
     }) =>
       retryFunc(async evmProvider => {
         try {
           const wallet = new ethers.Wallet(privateKey);
           const walletSigner = wallet.connect(evmProvider);
-          const amountInWei =
-            amount && tokenDecimals
-              ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
-              : undefined;
+          const amountInWei = isMaxCheckbox
+            ? ethers.MaxUint256
+            : amount && tokenDecimals
+            ? BigInt(convertToSmallAmount(amount.toString(), tokenDecimals))
+            : undefined;
           const {estimateGas, value, toAddress} =
             await EvmStakingProvider.getEstimateFeeForDeactivateStaking({
               from: fromAddress,

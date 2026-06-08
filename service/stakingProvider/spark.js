@@ -13,6 +13,13 @@ const TOKEN_SYMBOL_BY_ADDRESS = {
   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48': 'USDC',
 };
 
+const getSparkVaultAddress = contractAddress =>
+  SPARK_VAULT_BY_TOKEN[
+    Object.keys(SPARK_VAULT_BY_TOKEN).find(
+      key => key.toLowerCase() === contractAddress?.toLowerCase(),
+    )
+  ];
+
 const getTokenSymbol = contractAddress =>
   TOKEN_SYMBOL_BY_ADDRESS[contractAddress] ?? null;
 
@@ -28,32 +35,39 @@ export const sparkProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Spark vault for token: ${contractAddress}`);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
+      let currentNonce = nonce;
+
       const allowance = await tokenContract.allowance(from, vaultAddress);
       if (allowance > 0n) {
-        console.log('Resetting allowance to 0...');
-        const resetTx = await tokenContract.approve(vaultAddress, 0n);
+        const resetTx = await tokenContract.approve(vaultAddress, 0n, {
+          nonce: currentNonce,
+        });
         await resetTx.wait();
+        currentNonce++;
       }
-      console.log('Approving...');
-      const approveTx = await tokenContract.approve(vaultAddress, amountInWei);
+      const approveTx = await tokenContract.approve(vaultAddress, amountInWei, {
+        nonce: currentNonce,
+      });
       await approveTx.wait();
+      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
           : await vault.deposit.estimateGas(amountInWei, from);
 
-      console.log('Depositing into Spark savings vault...');
       const tx = await vault.deposit.populateTransaction(amountInWei, from, {
         gasLimit,
       });
+      tx.nonce = currentNonce;
 
       return tx;
     } catch (error) {
@@ -68,7 +82,7 @@ export const sparkProvider = {
     tokenContract,
     walletSigner,
   }) => {
-    const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+    const vaultAddress = getSparkVaultAddress(contractAddress);
     if (!vaultAddress)
       throw new Error(`No Spark vault found for token: ${contractAddress}`);
 
@@ -101,18 +115,19 @@ export const sparkProvider = {
     amountInWei,
   }) => {
     try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
+      if (!vaultAddress)
+        throw new Error(`No Spark vault for token: ${contractAddress}`);
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
-      const userShares = await vault.balanceOf(from);
       let shares;
-      if (amountInWei !== undefined) {
-        const rawShares = await vault.convertToShares(amountInWei);
-        // convertToShares can round UP, yielding more shares than the user holds
-        // which causes redeem to revert. Cap at the actual balance.
-        shares = rawShares > userShares ? userShares : rawShares;
+      if (amountInWei === ethers.MaxUint256) {
+        shares = await vault.balanceOf(from);
       } else {
-        shares = userShares;
+        const userShares = await vault.balanceOf(from);
+        const rawShares = await vault.convertToShares(amountInWei);
+        // convertToShares can round UP, cap at actual balance to prevent revert
+        shares = rawShares > userShares ? userShares : rawShares;
       }
 
       const gasLimit =
@@ -132,7 +147,7 @@ export const sparkProvider = {
   },
   getStakingBalance: async ({evmProvider, address, contractAddress}) => {
     try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Spark vault for token: ${contractAddress}`);
 
@@ -157,19 +172,19 @@ export const sparkProvider = {
     amountInWei,
   }) => {
     try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Spark vault found for token: ${contractAddress}`);
 
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
-      const userShares = await vault.balanceOf(from);
       let shares;
-      if (amountInWei !== undefined) {
+      if (amountInWei === ethers.MaxUint256 || amountInWei === undefined) {
+        shares = await vault.balanceOf(from);
+      } else {
+        const userShares = await vault.balanceOf(from);
         const rawShares = await vault.convertToShares(amountInWei);
         shares = rawShares > userShares ? userShares : rawShares;
-      } else {
-        shares = userShares;
       }
 
       const estimateGas = await vault.redeem.estimateGas(shares, from, from);
@@ -190,7 +205,7 @@ export const sparkProvider = {
     tokenDecimals,
   }) => {
     try {
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Spark vault found for token: ${contractAddress}`);
 
@@ -229,7 +244,7 @@ export const sparkProvider = {
     }
   },
   getEstimateFeeForClaimRewards: async ({contractAddress}) => {
-    const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+    const vaultAddress = getSparkVaultAddress(contractAddress);
     if (!vaultAddress) {
       throw new Error(`No Spark vault found for token: ${contractAddress}`);
     }
@@ -237,7 +252,7 @@ export const sparkProvider = {
     return {estimateGas: 200000n, toAddress: vaultAddress, value: 0n};
   },
   getRewards: async ({from, evmProvider, contractAddress}) => {
-    const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+    const vaultAddress = getSparkVaultAddress(contractAddress);
     if (!vaultAddress) return null;
 
     const vault = new ethers.Contract(vaultAddress, sparkAbi, evmProvider);
@@ -287,7 +302,7 @@ export const sparkProvider = {
     try {
       const wallet = new ethers.Wallet(privateKey);
       const walletSigner = wallet.connect(evmProvider);
-      const vaultAddress = SPARK_VAULT_BY_TOKEN[contractAddress];
+      const vaultAddress = getSparkVaultAddress(contractAddress);
       if (!vaultAddress)
         throw new Error(`No Spark vault for token: ${contractAddress}`);
 

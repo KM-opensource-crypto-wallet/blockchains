@@ -75,11 +75,14 @@ export const aaveProvider = {
     tokenContract,
     walletSigner,
     estimateGas,
+    nonce,
   }) => {
     const balance = await tokenContract.balanceOf(from);
     if (balance < amountInWei) {
       throw new Error('Insufficient balance');
     }
+
+    let currentNonce = nonce;
 
     const allowance = await tokenContract.allowance(
       from,
@@ -87,14 +90,21 @@ export const aaveProvider = {
     );
     if (allowance < amountInWei) {
       if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(aavePoolContractAddress, 0);
+        const resetTx = await tokenContract.approve(
+          aavePoolContractAddress,
+          0,
+          {nonce: currentNonce},
+        );
         await resetTx.wait();
+        currentNonce++;
       }
       const approveTx = await tokenContract.approve(
         aavePoolContractAddress,
         amountInWei,
+        {nonce: currentNonce},
       );
       await approveTx.wait();
+      currentNonce++;
     }
 
     const pool = new ethers.Contract(
@@ -114,6 +124,7 @@ export const aaveProvider = {
       0,
       {gasLimit},
     );
+    tx.nonce = currentNonce;
     return tx;
   },
   getEstimateFeeForStaking: async ({
@@ -174,24 +185,19 @@ export const aaveProvider = {
         walletSigner,
       );
 
-      // Resolve to MaxUint256 when amount >= on-chain aToken balance so that
-      // interest accrued between the fee snapshot and tx confirmation doesn't
-      // leave dust in the position.
-      let withdrawAmount = ethers.MaxUint256;
-      if (amountInWei !== undefined) {
-        const dataProvider = new ethers.Contract(
-          aaveDataProviderContractAddress,
-          aaveDataProviderABI,
-          walletSigner,
-        );
-        const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
-          contractAddress,
-        );
-        const aToken = new ethers.Contract(aTokenAddress, erc20, walletSigner);
-        const currentBalance = await aToken.balanceOf(from);
-        withdrawAmount =
-          amountInWei >= currentBalance ? ethers.MaxUint256 : amountInWei;
-      }
+      const dataProvider = new ethers.Contract(
+        aaveDataProviderContractAddress,
+        aaveDataProviderABI,
+        walletSigner,
+      );
+      const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+        contractAddress,
+      );
+      const aToken = new ethers.Contract(aTokenAddress, erc20, walletSigner);
+      const withdrawAmount =
+        amountInWei === ethers.MaxUint256
+          ? await aToken.balanceOf(from)
+          : amountInWei;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -201,8 +207,6 @@ export const aaveProvider = {
               withdrawAmount,
               from,
             );
-
-      await pool.withdraw.staticCall(contractAddress, withdrawAmount, from);
 
       const tx = await pool.withdraw.populateTransaction(
         contractAddress,
@@ -254,8 +258,19 @@ export const aaveProvider = {
         aavePoolABI,
         walletSigner,
       );
+      const dataProvider = new ethers.Contract(
+        aaveDataProviderContractAddress,
+        aaveDataProviderABI,
+        walletSigner,
+      );
+      const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
+        contractAddress,
+      );
+      const aToken = new ethers.Contract(aTokenAddress, erc20, walletSigner);
       const withdrawAmount =
-        amountInWei !== undefined ? amountInWei : ethers.MaxUint256;
+        amountInWei === ethers.MaxUint256
+          ? await aToken.balanceOf(from)
+          : amountInWei;
       const estimateGas = await pool.withdraw.estimateGas(
         contractAddress,
         withdrawAmount,
