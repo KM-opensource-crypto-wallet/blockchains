@@ -2,6 +2,10 @@ import {selectCurrentCoin} from 'dok-wallet-blockchain-networks/redux/wallets/wa
 import {validateNumber} from 'dok-wallet-blockchain-networks/helper';
 
 export const getStakingLoading = state => state.staking.loading;
+export const getStakingAllowance = state => state.staking.allowanceData;
+export const getStakingAllowanceLoading = state =>
+  state.staking.allowanceLoading;
+export const getApproveLoading = state => state.staking.approveLoading;
 export const getStakingError = state => state.staking.error;
 export const getStakingValidatorsByChain = state => {
   const validators = state.staking.validators;

@@ -26,8 +26,8 @@ export const compoundProvider = {
   createStaking: async ({
     from,
     amountInWei,
+    tokenBalance,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
@@ -45,33 +45,11 @@ export const compoundProvider = {
           '❌ This Comet only supports its base asset (e.g., USDC)',
         );
       }
-      const balance = await tokenContract.balanceOf(from);
-
-      console.log('Wallet Balance:', ethers.formatUnits(balance, 6));
-      if (balance < amountInWei) {
+      if (tokenBalance < amountInWei) {
         throw new Error('❌ Insufficient token balance');
       }
 
       let currentNonce = nonce;
-
-      // USDT requires resetting allowance to 0 before setting a new value
-      const currentAllowance = await tokenContract.allowance(
-        from,
-        cometAddress,
-      );
-      if (currentAllowance > 0n) {
-        const resetTx = await tokenContract.approve(cometAddress, 0n, {
-          nonce: currentNonce,
-        });
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(cometAddress, amountInWei, {
-        nonce: currentNonce,
-      });
-      await approveTx.wait();
-      currentNonce++;
-
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
@@ -88,6 +66,12 @@ export const compoundProvider = {
       console.log(error);
       throw error;
     }
+  },
+  getStakingAddress: async ({contractAddress}) => {
+    const cometAddress = getCometAddress(contractAddress);
+    return {
+      stakingProviderAddress: cometAddress,
+    };
   },
   unStaking: async ({
     from,
@@ -153,7 +137,6 @@ export const compoundProvider = {
   getEstimateFeeForStaking: async ({
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
   }) => {
     try {
@@ -170,14 +153,10 @@ export const compoundProvider = {
           contractAddress,
           amountInWei,
         );
-      } catch {
-        // Allowance not yet set — estimate approve gas + known Compound V3 supply cost
-        const approveGas = await tokenContract.approve.estimateGas(
-          cometAddress,
-          amountInWei,
-        );
-        // Compound V3 supply consistently costs ~150k-200k gas
-        estimateGas = approveGas + 250000n;
+        estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+      } catch (e) {
+        console.error('Error in estimateGas:', e?.message);
+        estimateGas = 220_000n; // fallback when allowance not yet set
       }
       return {
         estimateGas,

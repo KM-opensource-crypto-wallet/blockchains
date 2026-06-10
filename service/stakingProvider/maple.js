@@ -89,7 +89,6 @@ export const mapleProvider = {
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
@@ -110,26 +109,6 @@ export const mapleProvider = {
         );
 
       let currentNonce = nonce;
-
-      // USDT requires resetting allowance to 0 before setting a new value
-      const allowance = await tokenContract.allowance(
-        from,
-        config.routerAddress,
-      );
-      if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(config.routerAddress, 0n, {
-          nonce: currentNonce,
-        });
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(
-        config.routerAddress,
-        amountInWei,
-        {nonce: currentNonce},
-      );
-      await approveTx.wait();
-      currentNonce++;
 
       const router = new ethers.Contract(
         config.routerAddress,
@@ -169,11 +148,16 @@ export const mapleProvider = {
       throw error;
     }
   },
+  getStakingAddress: async ({contractAddress}) => {
+    const config = getVaultConfig(contractAddress);
+    return {
+      stakingProviderAddress: config.routerAddress,
+    };
+  },
   getEstimateFeeForStaking: async ({
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
   }) => {
     const config = getVaultConfig(contractAddress);
@@ -202,13 +186,10 @@ export const mapleProvider = {
         amountInWei,
         MAPLE_DEPOSIT_DATA,
       );
-    } catch {
-      const approveGas = await tokenContract.approve.estimateGas(
-        config.routerAddress,
-        amountInWei,
-      );
-      // authorizeAndDeposit costs slightly more than a plain deposit
-      estimateGas = approveGas + (isSyrupLender ? 250000n : 300000n);
+      estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+    } catch (e) {
+      console.error('Error in estimateGas:', e?.message);
+      estimateGas = 330_000n; // fallback when allowance not yet set
     }
     return {
       estimateGas,

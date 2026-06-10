@@ -32,7 +32,6 @@ export const sparkProvider = {
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
@@ -44,20 +43,6 @@ export const sparkProvider = {
       const vault = new ethers.Contract(vaultAddress, sparkAbi, walletSigner);
 
       let currentNonce = nonce;
-
-      const allowance = await tokenContract.allowance(from, vaultAddress);
-      if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(vaultAddress, 0n, {
-          nonce: currentNonce,
-        });
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(vaultAddress, amountInWei, {
-        nonce: currentNonce,
-      });
-      await approveTx.wait();
-      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -75,11 +60,16 @@ export const sparkProvider = {
       throw error;
     }
   },
+  getStakingAddress: async ({contractAddress}) => {
+    const vaultAddress = getSparkVaultAddress(contractAddress);
+    return {
+      stakingProviderAddress: vaultAddress,
+    };
+  },
   getEstimateFeeForStaking: async ({
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
   }) => {
     const vaultAddress = getSparkVaultAddress(contractAddress);
@@ -92,14 +82,10 @@ export const sparkProvider = {
     try {
       // Works when allowance is already sufficient
       estimateGas = await vault.deposit.estimateGas(amountInWei, from);
-    } catch {
-      // Allowance not yet set — estimate approve gas + known Spark deposit cost
-      const approveGas = await tokenContract.approve.estimateGas(
-        vaultAddress,
-        amountInWei,
-      );
-      // Spark ERC4626 deposit consistently costs ~150k-200k gas
-      estimateGas = approveGas + 250000n;
+      estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+    } catch (e) {
+      console.log('error in estimateGas:', e?.message);
+      estimateGas = 275_000n; // fallback when allowance not yet set
     }
     return {
       estimateGas,

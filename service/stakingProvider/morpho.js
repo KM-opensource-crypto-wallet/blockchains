@@ -59,7 +59,6 @@ export const morphoProvider = {
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
@@ -76,22 +75,6 @@ export const morphoProvider = {
       );
 
       let currentNonce = nonce;
-
-      // USDT requires resetting allowance to 0 before setting a new value
-      const allowance = await tokenContract.allowance(from, vaultAddress);
-      if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(vaultAddress, 0n, {
-          nonce: currentNonce,
-        });
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(vaultAddress, amountInWei, {
-        nonce: currentNonce,
-      });
-      await approveTx.wait();
-      currentNonce++;
-
       const gasLimit =
         typeof estimateGas === 'bigint'
           ? estimateGas
@@ -107,6 +90,12 @@ export const morphoProvider = {
       console.log(error);
       throw error;
     }
+  },
+  getStakingAddress: async ({contractAddress}) => {
+    const vaultAddress = getVaultAddress(contractAddress);
+    return {
+      stakingProviderAddress: vaultAddress,
+    };
   },
   getEstimateFeeForStaking: async ({
     from,
@@ -128,12 +117,10 @@ export const morphoProvider = {
     let estimateGas;
     try {
       estimateGas = await vault.deposit.estimateGas(amountInWei, from);
-    } catch {
-      const approveGas = await tokenContract.approve.estimateGas(
-        vaultAddress,
-        amountInWei,
-      );
-      estimateGas = approveGas + 250000n;
+      estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+    } catch (e) {
+      console.error('Error in estimateGas:', e?.message);
+      estimateGas = 275_000n; // fallback when allowance not yet set
     }
     return {
       estimateGas,

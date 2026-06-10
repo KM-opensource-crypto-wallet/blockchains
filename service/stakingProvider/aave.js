@@ -71,40 +71,14 @@ export const aaveProvider = {
   createStaking: async ({
     from,
     amountInWei,
+    tokenBalance,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
   }) => {
-    const balance = await tokenContract.balanceOf(from);
-    if (balance < amountInWei) {
+    if (tokenBalance < amountInWei) {
       throw new Error('Insufficient balance');
-    }
-
-    let currentNonce = nonce;
-
-    const allowance = await tokenContract.allowance(
-      from,
-      aavePoolContractAddress,
-    );
-    if (allowance < amountInWei) {
-      if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(
-          aavePoolContractAddress,
-          0,
-          {nonce: currentNonce},
-        );
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(
-        aavePoolContractAddress,
-        amountInWei,
-        {nonce: currentNonce},
-      );
-      await approveTx.wait();
-      currentNonce++;
     }
 
     const pool = new ethers.Contract(
@@ -124,14 +98,18 @@ export const aaveProvider = {
       0,
       {gasLimit},
     );
-    tx.nonce = currentNonce;
+    tx.nonce = nonce;
     return tx;
+  },
+  getStakingAddress: async () => {
+    return {
+      stakingProviderAddress: aavePoolContractAddress,
+    };
   },
   getEstimateFeeForStaking: async ({
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
   }) => {
     const pool = new ethers.Contract(
@@ -141,29 +119,16 @@ export const aaveProvider = {
     );
     let estimateGas;
     try {
-      // Works when allowance is already set
       estimateGas = await pool.supply.estimateGas(
         contractAddress,
         amountInWei,
         from,
         0,
       );
-    } catch {
-      // Allowance not yet set or insufficient — estimate approve gas + known Aave v3 supply cost
-      const allowance = await tokenContract.allowance(
-        from,
-        aavePoolContractAddress,
-      );
-      const approveGas = await tokenContract.approve.estimateGas(
-        aavePoolContractAddress,
-        amountInWei,
-      );
-      const resetGas =
-        allowance > 0n && allowance < amountInWei
-          ? await tokenContract.approve.estimateGas(aavePoolContractAddress, 0)
-          : 0n;
-      // Aave v3 supply consistently costs 220k-280k gas for USDT/USDC
-      estimateGas = resetGas + approveGas + 300000n;
+      estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+    } catch (e) {
+      console.error('Error in estimateGas:', e?.message);
+      estimateGas = 330_000n; // fallback when allowance not yet set
     }
     return {
       estimateGas,
@@ -392,19 +357,16 @@ export const aaveProvider = {
       const [aTokenAddress] = await dataProvider.getReserveTokensAddresses(
         contractAddress,
       );
-
-      const wallet = new ethers.Wallet(privateKey);
-      const walletSigner = wallet.connect(evmProvider);
-
+      const walletSigner = new ethers.Wallet(privateKey).connect(evmProvider);
       const rewardsController = new ethers.Contract(
         aaveRewardsControllerAddress,
         aaveRewardsControllerABI,
         walletSigner,
       );
-
-      const tx = await rewardsController.claimAllRewards([aTokenAddress], from);
-      await tx.wait();
-      return tx.hash;
+      return rewardsController.claimAllRewards.populateTransaction(
+        [aTokenAddress],
+        from,
+      );
     } catch (error) {
       console.log('[aaveProvider claimRewards] error:', error);
       throw error;

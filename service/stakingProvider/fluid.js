@@ -50,7 +50,6 @@ export const fluidProvider = {
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
     estimateGas,
     nonce,
@@ -67,23 +66,6 @@ export const fluidProvider = {
       );
 
       let currentNonce = nonce;
-
-      // USDT requires resetting allowance to 0 before setting a new value
-      const allowance = await tokenContract.allowance(from, fTokenAddress);
-      if (allowance > 0n) {
-        const resetTx = await tokenContract.approve(fTokenAddress, 0n, {
-          nonce: currentNonce,
-        });
-        await resetTx.wait();
-        currentNonce++;
-      }
-      const approveTx = await tokenContract.approve(
-        fTokenAddress,
-        amountInWei,
-        {nonce: currentNonce},
-      );
-      await approveTx.wait();
-      currentNonce++;
 
       const gasLimit =
         typeof estimateGas === 'bigint'
@@ -102,11 +84,17 @@ export const fluidProvider = {
     }
   },
 
+  getStakingAddress: async ({contractAddress}) => {
+    const fTokenAddress = getFTokenAddress(contractAddress);
+    return {
+      stakingProviderAddress: fTokenAddress,
+    };
+  },
+
   getEstimateFeeForStaking: async ({
     from,
     amountInWei,
     contractAddress,
-    tokenContract,
     walletSigner,
   }) => {
     const fTokenAddress = getFTokenAddress(contractAddress);
@@ -122,12 +110,10 @@ export const fluidProvider = {
     let estimateGas;
     try {
       estimateGas = await fToken.deposit.estimateGas(amountInWei, from);
-    } catch {
-      const approveGas = await tokenContract.approve.estimateGas(
-        fTokenAddress,
-        amountInWei,
-      );
-      estimateGas = approveGas + 250000n;
+      estimateGas = (estimateGas * 110n) / 100n; // add 10% buffer
+    } catch (e) {
+      console.error('Error in estimateGas:', e?.message);
+      estimateGas = 275_000n; // fallback when allowance not yet set
     }
     return {
       estimateGas,

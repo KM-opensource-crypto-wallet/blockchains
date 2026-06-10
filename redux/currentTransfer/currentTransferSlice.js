@@ -122,7 +122,12 @@ export const calculateEstimateFee = createAsyncThunk(
           additionalL1Fee: additionalL1Fee[chain_name],
         });
       } else if (payload?.isCreateStaking) {
-        respData = await nativeCoin?.getEstimateFeeForStaking(payload);
+        respData = await nativeCoin?.getEstimateFeeForStaking({
+          ...payload,
+          contractAddress:
+            payload.contractAddress ?? currentCoin?.contractAddress,
+          decimals: payload.decimals ?? currentCoin?.decimal,
+        });
       } else if (payload?.isCreateVote) {
         respData = await nativeCoin?.estimateFeesForStakeValidators(payload);
       } else if (payload?.isDeactivateStaking) {

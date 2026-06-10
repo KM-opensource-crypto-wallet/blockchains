@@ -21,8 +21,8 @@ export const EvmStakingProvider = {
   createStaking: async ({
     from,
     amountInWei,
+    tokenBalance,
     contractAddress,
-    tokenContract,
     walletSigner,
     stakingProviderName,
     estimateGas,
@@ -39,11 +39,24 @@ export const EvmStakingProvider = {
     return provider.createStaking({
       from,
       amountInWei,
+      tokenBalance,
       contractAddress,
-      tokenContract,
       walletSigner,
       estimateGas,
       nonce,
+    });
+  },
+  getStakingAddress: async ({contractAddress, stakingProviderName}) => {
+    const provider = stakingProviderName
+      ? providers.find(p => p.name === stakingProviderName)
+      : providers[0];
+    if (!provider || typeof provider.getStakingAddress !== 'function') {
+      throw new Error(
+        `[EvmStakingProvider] No getStakingAddress found: ${stakingProviderName}`,
+      );
+    }
+    return provider.getStakingAddress({
+      contractAddress,
     });
   },
   getEstimateFeeForStaking: async ({
@@ -51,7 +64,6 @@ export const EvmStakingProvider = {
     amountInWei,
     contractAddress,
     stakingProviderName,
-    tokenContract,
     walletSigner,
   }) => {
     const provider = stakingProviderName
@@ -66,7 +78,6 @@ export const EvmStakingProvider = {
       from,
       amountInWei,
       contractAddress,
-      tokenContract,
       walletSigner,
     });
   },
