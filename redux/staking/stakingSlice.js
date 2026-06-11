@@ -3,6 +3,8 @@ import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {countSelectedVotes, getSelectedVotes} from './stakingSelectors';
 import {
   convertToSmallAmount,
+  isEVMChain,
+  parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
@@ -12,6 +14,7 @@ import {
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {ethers, formatUnits} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import BigNumber from 'bignumber.js';
 
 const initialState = {
   loading: true,
@@ -53,6 +56,7 @@ export const fetchStakingAllowance = createAsyncThunk(
       amountInWeiStr: amountInWei.toString(),
       isApproved: result.isApproved,
       needsReset: result.needsReset,
+      decimal: currentCoin?.decimal,
     };
   },
 );
@@ -73,6 +77,7 @@ export const fetchStakingAllowanceEstimationFee = createAsyncThunk(
     const amountInWei = BigInt(
       convertToSmallAmount(payload.amount.toString(), decimals),
     );
+    let transactionFee;
     const result = await chain.getAllowanceEstimateFee({
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
@@ -81,13 +86,29 @@ export const fetchStakingAllowanceEstimationFee = createAsyncThunk(
       feesType: payload.feesType,
       nonce: payload.nonce,
     });
+    if (payload.customGasPrice) {
+      const isEVM = isEVMChain(chain_name);
+      const gasPrice = payload.customGasPrice;
+      const estimateGas = result.estimateGas;
+      const gasPriceBN = new BigNumber(
+        isEVM
+          ? convertToSmallAmount(gasPrice?.toString(), 9)?.toString()
+          : gasPrice?.toString(),
+      );
+      const estimateGasBN = new BigNumber(estimateGas);
+      const transactionFeeBN = gasPriceBN.multipliedBy(estimateGasBN);
+      transactionFee = parseBalance(
+        transactionFeeBN?.toString(),
+        isEVM ? 18 : 8,
+      );
+    }
     return {
       gasFee: result.gasFee?.toString() ?? null,
       maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
       feesOptions: result.feesOptions ?? null,
       estimateGas: result.estimateGas?.toString() ?? null,
       nonce: result.nonce ?? null,
-      transactionFee: result.fee ?? null,
+      transactionFee: transactionFee ?? result.fee ?? null,
     };
   },
 );
@@ -223,6 +244,7 @@ export const executeApprove = createAsyncThunk(
         : await chain.getNonce({address: currentCoin?.address});
 
     return chain.approve({
+      from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
       privateKey,
       stakingProviderName: payload.stakingProviderName,

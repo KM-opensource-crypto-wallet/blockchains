@@ -2454,127 +2454,144 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         null,
       ),
     approve: async ({
+      from,
       contractAddress,
       privateKey,
       stakingProviderName,
-      nonce,
       amountInWei,
+      estimateGas,
       gasFee,
+      feesType,
       maxPriorityFeePerGas,
     }) => {
-      const buildGasOptions = currentNonce => {
-        const opts = {nonce: currentNonce};
-        // Use 150k for all approve txs — the fee-estimation estimateGas is
-        // calculated for the reset tx (approve 0, ~30k gas) and is too low for
-        // the actual approve (0→non-zero costs ~50k due to cold SSTORE).
-        opts.gasLimit = 150_000n;
-        const gasFeeAmount = gasFee ? BigInt(gasFee) : 0n;
-        if (gasFeeAmount > 0n) {
-          if (isEip1559NotSupported(chain_name)) {
-            opts.gasPrice = gasFeeAmount;
-          } else {
-            opts.maxFeePerGas = gasFeeAmount;
-            if (maxPriorityFeePerGas) {
-              const priorityFee = BigInt(maxPriorityFeePerGas);
-              // priorityFee must not exceed maxFeePerGas (EIP-1559)
-              opts.maxPriorityFeePerGas =
-                priorityFee > gasFeeAmount ? gasFeeAmount : priorityFee;
-            }
-          }
-        }
-        return opts;
-      };
+      try {
+        const tx = await retryFunc(async evmProvider => {
+          const walletSigner = new ethers.Wallet(privateKey, evmProvider);
 
-      const waitForTx = async txResult => {
-        if (typeof txResult?.wait === 'function') {
-          try {
-            await txResult.wait(1);
-          } catch (e) {
-            if (e?.code !== 'TRANSACTION_REPLACED' || e?.cancelled) {
-              throw e;
-            }
-          }
-        } else {
-          const txHash = Array.isArray(txResult) ? txResult[0] : txResult;
-          if (txHash) {
-            await retryFunc(evmProvider =>
-              evmProvider.waitForTransaction(txHash, 1, 120000),
-            );
-          }
-        }
-      };
-
-      // Read stakingProviderAddress and current allowance
-      const {stakingProviderAddress, allowance} = await retryFunc(
-        async evmProvider => {
-          const walletSigner = new ethers.Wallet(privateKey).connect(
-            evmProvider,
-          );
           const tokenContract = new ethers.Contract(
             contractAddress,
-            erc20Abi,
-            evmProvider,
+            localErc20ABI,
+            walletSigner,
           );
-          const {stakingProviderAddress: spAddr} =
+
+          const {stakingProviderAddress} =
             await EvmStakingProvider.getStakingAddress({
               contractAddress,
               stakingProviderName,
             });
-          const currentAllowance = await tokenContract.allowance(
-            walletSigner.address,
-            spAddr,
+
+          const allowance = await tokenContract.allowance(
+            from,
+            stakingProviderAddress,
           );
-          return {stakingProviderAddress: spAddr, allowance: currentAllowance};
-        },
-      );
 
-      let currentNonce = nonce;
+          let finalEstimateGas = estimateGas;
 
-      if (allowance < BigInt(amountInWei)) {
-        if (allowance > 0n) {
-          // Tx 1: reset to 0 (USDT requires clearing existing allowance first)
-          const resetTx = await retryFunc(async evmProvider => {
-            const tokenContract = new ethers.Contract(
-              contractAddress,
-              erc20Abi,
-              evmProvider,
-            );
-            return tokenContract.approve.populateTransaction(
+          if (
+            typeof finalEstimateGas !== 'bigint' &&
+            typeof finalEstimateGas !== 'number'
+          ) {
+            try {
+              finalEstimateGas = await tokenContract.approve.estimateGas(
+                stakingProviderAddress,
+                amountInWei,
+              );
+            } catch {
+              finalEstimateGas = 100000n;
+            }
+          }
+
+          finalEstimateGas = (BigInt(finalEstimateGas) * 120n) / 100n;
+
+          let finalGasPrice = gasFee;
+          let finalMaxPriorityFee = maxPriorityFeePerGas;
+
+          if (typeof finalGasPrice !== 'bigint') {
+            const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+
+            finalGasPrice = gasFeeData?.gasPrice;
+            finalMaxPriorityFee = gasFeeData?.maxPriorityFeePerGas;
+          }
+
+          const buildOptions = (gasLimit, nonce) => {
+            const opts = {
+              gasLimit,
+              nonce,
+            };
+
+            if (isEip1559NotSupported(chain_name)) {
+              opts.gasPrice = finalGasPrice;
+            } else {
+              opts.type = 2;
+              opts.maxFeePerGas = finalGasPrice;
+              opts.maxPriorityFeePerGas = validatePriorityFee(
+                finalMaxPriorityFee,
+                finalGasPrice,
+              );
+            }
+
+            return opts;
+          };
+
+          const pendingNonce = await evmProvider.getTransactionCount(
+            from,
+            'pending',
+          );
+
+          let txResult;
+
+          if (allowance > 0n) {
+            console.log('Resetting allowance...');
+
+            const resetGasEstimate = await tokenContract.approve.estimateGas(
               stakingProviderAddress,
               0n,
-              buildGasOptions(currentNonce),
             );
-          });
-          const resetResult = await createSendTransaction(
-            new ethers.Wallet(privateKey),
-            resetTx,
-          );
-          await waitForTx(resetResult);
-          currentNonce++;
+
+            const resetTx = await tokenContract.approve(
+              stakingProviderAddress,
+              0n,
+              buildOptions((resetGasEstimate * 120n) / 100n, pendingNonce),
+            );
+
+            console.log('Reset tx:', resetTx.hash);
+
+            const resetReceipt = await resetTx.wait();
+
+            console.log('Reset confirmed:', resetReceipt.hash);
+
+            console.log('Approving amount...');
+
+            txResult = await tokenContract.approve.populateTransaction(
+              stakingProviderAddress,
+              amountInWei,
+              buildOptions(finalEstimateGas, pendingNonce + 1),
+            );
+            return txResult;
+          } else {
+            console.log('Approving amount...');
+
+            txResult = await tokenContract.approve.populateTransaction(
+              stakingProviderAddress,
+              amountInWei,
+              buildOptions(finalEstimateGas, pendingNonce),
+            );
+            return txResult;
+          }
+        }, null);
+
+        return await createSendTransaction(new ethers.Wallet(privateKey), tx);
+      } catch (e) {
+        console.error('Error in approve transaction', e);
+
+        try {
+          const {reason} = await errorDecoder.decode(e);
+
+          throw new Error(reason);
+        } catch {
+          throw e;
         }
-
-        // Tx 2: approve the actual amount
-        const approveTx = await retryFunc(async evmProvider => {
-          const tokenContract = new ethers.Contract(
-            contractAddress,
-            erc20Abi,
-            evmProvider,
-          );
-          return tokenContract.approve.populateTransaction(
-            stakingProviderAddress,
-            amountInWei,
-            buildGasOptions(currentNonce),
-          );
-        });
-        const approveResult = await createSendTransaction(
-          new ethers.Wallet(privateKey),
-          approveTx,
-        );
-        await waitForTx(approveResult);
-        currentNonce++;
       }
-
-      return {nonce: currentNonce};
     },
     getAllowanceEstimateFee: async ({
       from,
@@ -2595,19 +2612,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             contractAddress,
             stakingProviderName,
           });
-        const allowance = await tokenContract.allowance(
-          from,
+        const estimateGas = await tokenContract.approve.estimateGas(
           stakingProviderAddress,
+          amountInWei,
+          {from},
         );
-        const isApproved = allowance >= amountInWei;
-        const needsReset = !isApproved && allowance > 0n;
-        const estimateGas = isApproved
-          ? 0n
-          : await tokenContract.approve.estimateGas(
-              stakingProviderAddress,
-              needsReset ? 0n : amountInWei,
-              {from},
-            );
         return calculateTotalFees({
           feesType,
           evmProvider,
