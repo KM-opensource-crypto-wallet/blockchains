@@ -171,6 +171,7 @@ export const EvmStakingProvider = {
     stakingProviderName,
     privateKey,
     evmProvider: externalEvmProvider,
+    options,
   }) => {
     const evmProvider = externalEvmProvider;
     const provider = stakingProviderName
@@ -184,6 +185,7 @@ export const EvmStakingProvider = {
       contractAddress,
       privateKey,
       evmProvider,
+      options,
     });
   },
   getStakingBalance: async ({

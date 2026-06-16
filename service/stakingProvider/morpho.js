@@ -295,7 +295,7 @@ export const morphoProvider = {
       return {...rewardBase, amount: '0'};
     }
   },
-  claimRewards: async ({from, privateKey, evmProvider}) => {
+  claimRewards: async ({from, privateKey, evmProvider, options}) => {
     try {
       const response = await fetch(
         `${MERKL_API_BASE}/claim?user=${from}&chainId=1`,
@@ -313,14 +313,14 @@ export const morphoProvider = {
         merklDistributorAbi,
         walletSigner,
       );
-      const tx = await distributor.claim(
+      const tx = await distributor.claim.populateTransaction(
         claimData.users,
         claimData.tokens,
         claimData.amounts,
         claimData.proofs,
+        options,
       );
-      const receipt = await tx.wait();
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log('[morphoProvider claimRewards] error:', error);
       throw error;

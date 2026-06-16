@@ -289,7 +289,13 @@ export const compoundProvider = {
       };
     } catch (error) {}
   },
-  claimRewards: async ({from, contractAddress, privateKey, evmProvider}) => {
+  claimRewards: async ({
+    from,
+    contractAddress,
+    privateKey,
+    evmProvider,
+    options,
+  }) => {
     try {
       const cometAddress = getCometAddress(contractAddress);
       const wallet = new ethers.Wallet(privateKey);
@@ -299,14 +305,14 @@ export const compoundProvider = {
         cometContractABI,
         walletSigner,
       );
-      const tx = await rewardsContract.claim(
+      const tx = await rewardsContract.claim.populateTransaction(
         cometAddress,
         from,
+        options,
         true, // accrue first
       );
 
-      await tx.wait();
-      return tx.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;

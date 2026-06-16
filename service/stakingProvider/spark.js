@@ -284,7 +284,13 @@ export const sparkProvider = {
       return {...rewardBase, amount: '0'};
     }
   },
-  claimRewards: async ({from, contractAddress, privateKey, evmProvider}) => {
+  claimRewards: async ({
+    from,
+    contractAddress,
+    privateKey,
+    evmProvider,
+    options,
+  }) => {
     try {
       const wallet = new ethers.Wallet(privateKey);
       const walletSigner = wallet.connect(evmProvider);
@@ -327,11 +333,14 @@ export const sparkProvider = {
       }
 
       console.log('Claiming rewards:', formatUnits(rewardsInWei, 6));
-      const tx = await vault.redeem(rewardShares, from, from);
-      const receipt = await tx.wait();
+      const tx = await vault.redeem.populateTransaction(
+        rewardShares,
+        from,
+        from,
+        options,
+      );
 
-      console.log('Rewards claimed:', receipt.hash);
-      return receipt.hash;
+      return tx;
     } catch (error) {
       console.log(error);
       throw error;

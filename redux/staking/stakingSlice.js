@@ -1,8 +1,13 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {
+  getChain,
+  getHashString,
+} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {countSelectedVotes, getSelectedVotes} from './stakingSelectors';
 import {
+  calculatePrice,
   convertToSmallAmount,
+  getExplorerTxUrl,
   isEVMChain,
   parseBalance,
   validateNumber,
@@ -15,6 +20,8 @@ import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks
 import {ethers, formatUnits} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import BigNumber from 'bignumber.js';
+import {showToast} from 'utils/toast';
+import {MainNavigation} from 'utils/navigation';
 
 const initialState = {
   loading: true,
@@ -61,8 +68,8 @@ export const fetchStakingAllowance = createAsyncThunk(
   },
 );
 
-export const fetchStakingAllowanceEstimationFee = createAsyncThunk(
-  'staking/fetchStakingAllowanceEstimationFee',
+export const fetchStakingApproveEstimationFee = createAsyncThunk(
+  'staking/fetchStakingApproveEstimationFee',
   async (payload, thunkAPI) => {
     const currentState = thunkAPI.getState();
     const currentCoin = selectCurrentCoin(currentState);
@@ -77,38 +84,29 @@ export const fetchStakingAllowanceEstimationFee = createAsyncThunk(
     const amountInWei = BigInt(
       convertToSmallAmount(payload.amount.toString(), decimals),
     );
-    let transactionFee;
-    const result = await chain.getAllowanceEstimateFee({
+    const allowanceData = currentState?.staking?.allowanceData;
+    const allowance =
+      payload.allowanceType === 'unlimited'
+        ? ethers.MaxUint256
+        : BigInt(allowanceData?.amountInWeiStr || '0');
+
+    const result = await chain.getEstimateFeForAllowanceApprove({
+      isFetchNonce: payload.isFetchNonce,
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
       stakingProviderName: payload.stakingProviderName,
       amountInWei,
       feesType: payload.feesType,
       nonce: payload.nonce,
+      allowance: allowance,
     });
-    if (payload.customGasPrice) {
-      const isEVM = isEVMChain(chain_name);
-      const gasPrice = payload.customGasPrice;
-      const estimateGas = result.estimateGas;
-      const gasPriceBN = new BigNumber(
-        isEVM
-          ? convertToSmallAmount(gasPrice?.toString(), 9)?.toString()
-          : gasPrice?.toString(),
-      );
-      const estimateGasBN = new BigNumber(estimateGas);
-      const transactionFeeBN = gasPriceBN.multipliedBy(estimateGasBN);
-      transactionFee = parseBalance(
-        transactionFeeBN?.toString(),
-        isEVM ? 18 : 8,
-      );
-    }
     return {
       gasFee: result.gasFee?.toString() ?? null,
       maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
       feesOptions: result.feesOptions ?? null,
       estimateGas: result.estimateGas?.toString() ?? null,
       nonce: result.nonce ?? null,
-      transactionFee: transactionFee ?? result.fee ?? null,
+      transactionFee: result.fee,
     };
   },
 );
@@ -218,42 +216,129 @@ export const onChangeVotes = createAsyncThunk(
 export const executeApprove = createAsyncThunk(
   'staking/executeApprove',
   async (payload, thunkAPI) => {
-    const currentState = thunkAPI.getState();
-    const currentCoin = selectCurrentCoin(currentState);
-    const currentWallet = selectCurrentWallet(currentState);
-    const chain_name = currentCoin?.chain_name;
-    const customRPC = selectCustomRpcUrlByChainAndWallet(
-      chain_name,
-      currentWallet?.clientId,
-    )(currentState);
-    const chain = getChain(chain_name, currentWallet?.phrase, customRPC);
-    const nativeCoin = await getNativeCoin(currentState);
-    const privateKey = nativeCoin?.privateKey;
-    if (!privateKey) {
-      throw new Error('No private key available');
+    try {
+      const currentState = thunkAPI.getState();
+      const currentCoin = selectCurrentCoin(currentState);
+      const currentWallet = selectCurrentWallet(currentState);
+      const chain_name = currentCoin?.chain_name;
+      const customRPC = selectCustomRpcUrlByChainAndWallet(
+        chain_name,
+        currentWallet?.clientId,
+      )(currentState);
+      const chain = getChain(chain_name, currentWallet?.phrase, customRPC);
+      const nativeCoin = await getNativeCoin(currentState);
+      const privateKey = nativeCoin?.privateKey;
+      if (!privateKey) {
+        throw new Error('No private key available');
+      }
+      const allowanceData = currentState?.staking?.allowanceData;
+      const amountInWei =
+        payload.allowanceType === 'unlimited'
+          ? ethers.MaxUint256
+          : BigInt(allowanceData?.amountInWeiStr || '0');
+
+      const nonce =
+        payload.nonce != null
+          ? payload.nonce
+          : await chain.getNonce({address: currentCoin?.address});
+
+      const {confirmTransaction} = await chain.approve({
+        from: currentCoin?.address,
+        contractAddress: currentCoin?.contractAddress,
+        privateKey,
+        stakingProviderName: payload.stakingProviderName,
+        amountInWei,
+        nonce,
+        gasFee: payload.gasFee,
+        estimateGas: payload.estimateGas,
+        maxPriorityFeePerGas: payload.maxPriorityFeePerGas,
+        allowance: amountInWei,
+      });
+      let tx_hash = getHashString(confirmTransaction, currentCoin?.chain_name);
+      const pendingTransaction = {
+        amount: amountInWei,
+        to: payload.stakingProviderName,
+        from: currentCoin?.address,
+        status: 'PENDING',
+        date: new Date().toISOString(),
+        link: tx_hash,
+        totalCourse:
+          payload.allowanceType === 'unlimited'
+            ? '0'
+            : calculatePrice(
+                amountInWei.toString(),
+                currentCoin?.decimal,
+                currentCoin?.currencyRate,
+              ),
+        url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
+        currentCoin: currentCoin,
+        isNFT: false,
+        isBatchTransaction: false,
+        isCreateStaking: false,
+        isWithdrawStaking: false,
+        isDeactivateStaking: false,
+        isStakingRewards: false,
+        isCreateVote: false,
+      };
+      let toastId = showToast({
+        type: 'progressToast',
+        title: `Transaction In-progress`,
+        message: `Your transaction submitted successfully. Once the transaction completed you will be notified.`,
+        autoHide: false,
+        props: {
+          onViewTransaction: () => {
+            MainNavigation.navigate({
+              name: 'TransactionDetails',
+              params: {transaction: pendingTransaction},
+            });
+          },
+        },
+      });
+      if (confirmTransaction === 'pending') {
+        setTimeout(() => {
+          showToast({
+            type: 'warningToast',
+            title: 'Transaction pending',
+            message: 'Transaction take too long. Please check again later',
+            toastId,
+          });
+        }, 500);
+      } else if (confirmTransaction?.status === 'failed') {
+        setTimeout(() => {
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction Failed',
+            message:
+              'Your transaction failed on the network. Please try again.',
+            toastId,
+          });
+        }, 400);
+        return thunkAPI.rejectWithValue('Transaction failed');
+      } else if (confirmTransaction) {
+        showToast({
+          type: 'successToast',
+          title: 'Transaction Successful',
+          message: `Your transaction completed successfully.`,
+          toastId,
+          props: {
+            onViewTransaction: () => {
+              MainNavigation.navigate({
+                name: 'TransactionDetails',
+                params: {
+                  transaction: {...pendingTransaction, status: 'SUCCESS'},
+                },
+              });
+            },
+          },
+        });
+        return {
+          tx_hash: confirmTransaction?.hash || '',
+        };
+      }
+    } catch (error) {
+      console.error('Error in execute Approve', error?.message || error);
+      return thunkAPI.rejectWithValue(error?.message || 'Something went wrong');
     }
-    const allowanceData = currentState?.staking?.allowanceData;
-    const amountInWei =
-      payload.allowanceType === 'unlimited'
-        ? ethers.MaxUint256
-        : BigInt(allowanceData?.amountInWeiStr || '0');
-
-    const nonce =
-      payload.nonce != null
-        ? payload.nonce
-        : await chain.getNonce({address: currentCoin?.address});
-
-    return chain.approve({
-      from: currentCoin?.address,
-      contractAddress: currentCoin?.contractAddress,
-      privateKey,
-      stakingProviderName: payload.stakingProviderName,
-      nonce,
-      amountInWei,
-      gasFee: payload.gasFee,
-      estimateGas: payload.estimateGas,
-      maxPriorityFeePerGas: payload.maxPriorityFeePerGas,
-    });
   },
 );
 
@@ -266,6 +351,37 @@ export const stakingSlice = createSlice({
     },
     setSelectedVotes(state, {payload}) {
       state.selectedVotes = payload;
+    },
+    updateFees(state, {payload}) {
+      const gasPrice = payload?.gasPrice;
+      const l1Fees = state.allowanceData?.l1Fees;
+      if (!gasPrice || !state.allowanceData) {
+        return;
+      }
+      const isEVM = payload?.convertedChainName === 'ethereum';
+      const gasPriceBN = new BigNumber(
+        isEVM
+          ? convertToSmallAmount(gasPrice?.toString(), 9)?.toString()
+          : gasPrice?.toString(),
+      );
+      const estimateGasBN = new BigNumber(
+        state.allowanceData?.estimateGas || 0,
+      );
+      const l1FeesBn = new BigNumber(l1Fees || 0);
+      const transactionFeeBN = gasPriceBN
+        .multipliedBy(estimateGasBN)
+        .plus(l1FeesBn);
+      const transactionFee = parseBalance(
+        transactionFeeBN?.toString(),
+        isEVM ? 18 : 8,
+      );
+      const transactionFeeEtherBN = new BigNumber(transactionFee);
+      const currencyBN = new BigNumber(state.allowanceData?.currencyRate || 0);
+      state.allowanceData.gasFee = gasPriceBN.toString();
+      state.allowanceData.transactionFee = transactionFee;
+      state.allowanceData.fiatEstimateFee = currencyBN
+        .multipliedBy(transactionFeeEtherBN)
+        .toFixed(2);
     },
   },
   extraReducers: builder => {
@@ -281,12 +397,12 @@ export const stakingSlice = createSlice({
       state.allowanceData = null;
     });
     builder.addCase(
-      fetchStakingAllowanceEstimationFee.fulfilled,
+      fetchStakingApproveEstimationFee.fulfilled,
       (state, {payload}) => {
         state.allowanceData = {...state.allowanceData, ...payload};
       },
     );
-    builder.addCase(fetchStakingAllowanceEstimationFee.rejected, state => {
+    builder.addCase(fetchStakingApproveEstimationFee.rejected, state => {
       state.allowanceData = {
         ...state.allowanceData,
         gasFee: null,
@@ -324,4 +440,5 @@ export const stakingSlice = createSlice({
   },
 });
 
-export const {setStakingLoading, setSelectedVotes} = stakingSlice.actions;
+export const {setStakingLoading, setSelectedVotes, updateFees} =
+  stakingSlice.actions;

@@ -2269,11 +2269,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               stakingProviderName,
               walletSigner,
             });
+          const finalEstimateGas = (estimateGas * 110n) / 100n;
           return await calculateTotalFees({
             evmProvider,
             feesType,
             value,
-            estimateGas,
+            estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
             additionalL1Fee,
@@ -2316,11 +2317,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               evmProvider,
               amountInWei,
             });
+          const finalEstimateGas = (estimateGas * 110n) / 100n;
           return await calculateTotalFees({
             evmProvider,
             feesType,
             value,
-            estimateGas,
+            estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
             additionalL1Fee,
@@ -2358,17 +2360,30 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               `[EVMChain] No claim rewards fee estimator for provider: ${stakingProviderName}`,
             );
           }
+          let currentNonce;
+          if (isFetchNonce || existingNonce == null) {
+            currentNonce = await EVMChain(
+              chain_name,
+              undefined,
+              customRpcUrl,
+            ).getNonce({
+              address: fromAddress,
+            });
+          } else if (existingNonce) {
+            currentNonce = existingNonce;
+          }
           const {estimateGas, toAddress, value} = feeData;
+          const finalEstimateGas = (estimateGas * 110n) / 100n;
           return await calculateTotalFees({
             evmProvider,
             feesType,
             value,
-            estimateGas,
+            estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
             additionalL1Fee,
             isFetchNonce,
-            existingNonce,
+            existingNonce: currentNonce,
           });
         } catch (e) {
           console.error('Error in EVMChain getEstimateFeeForStakingRewards', e);
@@ -2380,15 +2395,41 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contractAddress,
       stakingProviderName,
       privateKey,
+      nonce,
+      estimateGas,
+      maxPriorityFeePerGas,
+      gasFee,
+      feesType,
     }) => {
       const tx = await retryFunc(async evmProvider => {
-        return EvmStakingProvider.claimRewards({
+        const finalEstimateGas = (BigInt(estimateGas) * 110n) / 100n;
+
+        let finalGasPrice = gasFee;
+        let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+        if (typeof finalGasPrice !== 'bigint') {
+          const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+          finalGasPrice = gasFeeData?.gasPrice;
+          finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+        }
+        let options = {
+          type: 2,
+          gasLimit: finalEstimateGas,
+          maxFeePerGas: finalGasPrice,
+          maxPriorityFeePerGas: validatePriorityFee(
+            finalMaxPriorityFeePerGas,
+            finalGasPrice,
+          ),
+          nonce,
+        };
+        const unSignedTrx = await EvmStakingProvider.claimRewards({
           from,
           contractAddress,
           stakingProviderName,
           privateKey,
           evmProvider,
+          options,
         });
+        return unSignedTrx;
       });
       return await createSendTransaction(new ethers.Wallet(privateKey), tx);
     },
@@ -2459,147 +2500,154 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       privateKey,
       stakingProviderName,
       amountInWei,
+      nonce,
       estimateGas,
+      maxPriorityFeePerGas,
       gasFee,
       feesType,
-      maxPriorityFeePerGas,
     }) => {
       try {
-        const tx = await retryFunc(async evmProvider => {
-          const walletSigner = new ethers.Wallet(privateKey, evmProvider);
+        const {currentAllowance, firstTrx, secondTrx} = await retryFunc(
+          async evmProvider => {
+            const walletSigner = new ethers.Wallet(privateKey, evmProvider);
 
-          const tokenContract = new ethers.Contract(
-            contractAddress,
-            localErc20ABI,
-            walletSigner,
-          );
-
-          const {stakingProviderAddress} =
-            await EvmStakingProvider.getStakingAddress({
+            const tokenContract = new ethers.Contract(
               contractAddress,
-              stakingProviderName,
-            });
+              localErc20ABI,
+              walletSigner,
+            );
 
-          const allowance = await tokenContract.allowance(
-            from,
-            stakingProviderAddress,
-          );
+            const {stakingProviderAddress} =
+              await EvmStakingProvider.getStakingAddress({
+                contractAddress,
+                stakingProviderName,
+              });
 
-          let finalEstimateGas = estimateGas;
+            const allowance = await tokenContract.allowance(
+              from,
+              stakingProviderAddress,
+            );
+            console.log('Current allowance:', allowance.toString());
 
-          if (
-            typeof finalEstimateGas !== 'bigint' &&
-            typeof finalEstimateGas !== 'number'
-          ) {
-            try {
-              finalEstimateGas = await tokenContract.approve.estimateGas(
-                stakingProviderAddress,
-                amountInWei,
-              );
-            } catch {
-              finalEstimateGas = 100000n;
+            if (allowance >= amountInWei) {
+              console.log('Already approved');
+              return true;
             }
-          }
 
-          finalEstimateGas = (BigInt(finalEstimateGas) * 120n) / 100n;
-
-          let finalGasPrice = gasFee;
-          let finalMaxPriorityFee = maxPriorityFeePerGas;
-
-          if (typeof finalGasPrice !== 'bigint') {
-            const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
-
-            finalGasPrice = gasFeeData?.gasPrice;
-            finalMaxPriorityFee = gasFeeData?.maxPriorityFeePerGas;
-          }
-
-          const buildOptions = (gasLimit, nonce) => {
-            const opts = {
-              gasLimit,
+            let finalEstimateGas = BigInt(estimateGas);
+            if (typeof finalEstimateGas !== 'bigint') {
+              finalEstimateGas = await tokenContract[
+                'transfer(address,uint256)'
+              ].estimateGas(stakingProviderAddress, amountInWei);
+            }
+            let finalGasPrice = gasFee;
+            let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+            if (typeof finalGasPrice !== 'bigint') {
+              const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
+              finalGasPrice = gasFeeData?.gasPrice;
+              finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+            }
+            let options = {
+              type: 2,
+              // gasLimit: 100000n, // NOTE: this needs to revert before commit (for pending transaction)
+              gasLimit: finalEstimateGas, // 100000
+              // maxFeePerGas: 1n, // NOTE: this needs to revert before commit
+              maxFeePerGas: finalGasPrice,
+              maxPriorityFeePerGas: validatePriorityFee(
+                finalMaxPriorityFeePerGas,
+                finalGasPrice,
+              ),
               nonce,
             };
-
             if (isEip1559NotSupported(chain_name)) {
-              opts.gasPrice = finalGasPrice;
-            } else {
-              opts.type = 2;
-              opts.maxFeePerGas = finalGasPrice;
-              opts.maxPriorityFeePerGas = validatePriorityFee(
-                finalMaxPriorityFee,
-                finalGasPrice,
-              );
+              delete options.type;
+              delete options.maxPriorityFeePerGas;
+              delete options.maxFeePerGas;
+              options.gasPrice = finalGasPrice;
             }
 
-            return opts;
-          };
-
-          const pendingNonce = await evmProvider.getTransactionCount(
-            from,
-            'pending',
+            const resetTrx = await tokenContract.approve.populateTransaction(
+              stakingProviderAddress,
+              0n,
+              options,
+            );
+            const approveTx = await tokenContract.approve.populateTransaction(
+              stakingProviderAddress,
+              amountInWei,
+              allowance > 0n
+                ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
+                : options,
+            );
+            return {
+              firstTrx: resetTrx,
+              secondTrx: approveTx,
+              currentAllowance: allowance,
+            };
+          },
+          null,
+        );
+        let trx1, trx2;
+        if (currentAllowance > 0n) {
+          console.log('Resetting allowance to 0...');
+          const approveHash = await createSendTransaction(
+            new ethers.Wallet(privateKey),
+            firstTrx,
           );
+          const approveTxHash = approveHash.hash || approveHash;
 
-          let txResult;
+          console.log('Approve first submitted:', approveTxHash);
+          trx1 = await EVMChain(
+            chain_name,
+            undefined,
+            customRpcUrl,
+          ).waitForConfirmation({
+            transaction: approveHash,
+            interval: 5000,
+            retries: 15,
+          });
 
-          if (allowance > 0n) {
-            console.log('Resetting allowance...');
-
-            const resetGasEstimate = await tokenContract.approve.estimateGas(
-              stakingProviderAddress,
-              0n,
-            );
-
-            const resetTx = await tokenContract.approve(
-              stakingProviderAddress,
-              0n,
-              buildOptions((resetGasEstimate * 120n) / 100n, pendingNonce),
-            );
-
-            console.log('Reset tx:', resetTx.hash);
-
-            const resetReceipt = await resetTx.wait();
-
-            console.log('Reset confirmed:', resetReceipt.hash);
-
-            console.log('Approving amount...');
-
-            txResult = await tokenContract.approve.populateTransaction(
-              stakingProviderAddress,
-              amountInWei,
-              buildOptions(finalEstimateGas, pendingNonce + 1),
-            );
-            return txResult;
-          } else {
-            console.log('Approving amount...');
-
-            txResult = await tokenContract.approve.populateTransaction(
-              stakingProviderAddress,
-              amountInWei,
-              buildOptions(finalEstimateGas, pendingNonce),
-            );
-            return txResult;
-          }
-        }, null);
-
-        return await createSendTransaction(new ethers.Wallet(privateKey), tx);
-      } catch (e) {
-        console.error('Error in approve transaction', e);
-
-        try {
-          const {reason} = await errorDecoder.decode(e);
-
-          throw new Error(reason);
-        } catch {
-          throw e;
+          console.log('Approved first confirmed', trx1);
         }
+
+        const approveHash = await createSendTransaction(
+          new ethers.Wallet(privateKey),
+          secondTrx,
+        );
+
+        const approveTxHash = approveHash.hash || approveHash;
+
+        console.log('Approve second submitted:', approveTxHash);
+        trx2 = await EVMChain(
+          chain_name,
+          undefined,
+          customRpcUrl,
+        ).waitForConfirmation({
+          transaction: approveHash,
+          interval: 5000,
+          retries: 15,
+        });
+
+        console.log('Approved second confirmed', trx2);
+        return {
+          confirmTransaction: trx2,
+          transaction1: trx1,
+          transaction2: trx2,
+        };
+      } catch (error) {
+        console.error('Error in approve transaction', error);
+        throw new Error(error);
       }
     },
-    getAllowanceEstimateFee: async ({
+    getEstimateFeForAllowanceApprove: async ({
+      isFetchNonce,
+      existingNonce,
       from,
       contractAddress,
       stakingProviderName,
       amountInWei,
       feesType,
       nonce,
+      allowance,
     }) =>
       retryFunc(async evmProvider => {
         const tokenContract = new ethers.Contract(
@@ -2612,20 +2660,54 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             contractAddress,
             stakingProviderName,
           });
-        const estimateGas = await tokenContract.approve.estimateGas(
-          stakingProviderAddress,
-          amountInWei,
-          {from},
-        );
-        return calculateTotalFees({
+        let estimateGas;
+        try {
+          estimateGas = await tokenContract.approve.estimateGas(
+            stakingProviderAddress,
+            amountInWei,
+            {from},
+          );
+        } catch (error) {
+          estimateGas = 60000n;
+        }
+
+        // When an existing non-zero allowance must be reset first, the second tx
+        // writes 0 → amountInWei (SSTORE ~20,000 gas) instead of the estimated
+        // non-zero → non-zero case (~5,000 gas), so add the difference.
+        try {
+          const currentAllowance = await tokenContract.allowance(
+            from,
+            stakingProviderAddress,
+          );
+          if (currentAllowance > 0n && currentAllowance < amountInWei) {
+            estimateGas += 20000n;
+          }
+        } catch (_) {}
+
+        const finalEstimateGas = (estimateGas * 110n) / 100n;
+        let currentNonce;
+        if (isFetchNonce || existingNonce == null) {
+          currentNonce = await EVMChain(chain_name, undefined).getNonce({
+            customRpcUrl,
+            address: from,
+          });
+        } else if (existingNonce) {
+          currentNonce = existingNonce;
+        }
+        const obj = await calculateTotalFees({
           feesType,
           evmProvider,
           fromAddress: from,
           toAddress: stakingProviderAddress,
-          estimateGas,
+          estimateGas: finalEstimateGas,
           isFetchNonce: nonce == null,
-          existingNonce: nonce,
+          existingNonce: currentNonce,
         });
+        return {
+          ...obj,
+          allowance,
+          fee: allowance ? obj.fee * 2 : obj.fee,
+        };
       }, null),
     readAllowance: async ({
       from,

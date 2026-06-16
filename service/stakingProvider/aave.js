@@ -347,7 +347,13 @@ export const aaveProvider = {
       return {token: null, amount: '0', symbol: 'AAVE', logo: null};
     }
   },
-  claimRewards: async ({from, contractAddress, privateKey, evmProvider}) => {
+  claimRewards: async ({
+    from,
+    contractAddress,
+    privateKey,
+    evmProvider,
+    options,
+  }) => {
     try {
       const dataProvider = new ethers.Contract(
         aaveDataProviderContractAddress,
@@ -366,6 +372,7 @@ export const aaveProvider = {
       return rewardsController.claimAllRewards.populateTransaction(
         [aTokenAddress],
         from,
+        options,
       );
     } catch (error) {
       console.log('[aaveProvider claimRewards] error:', error);
