@@ -2549,9 +2549,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             }
             let options = {
               type: 2,
-              // gasLimit: 100000n, // NOTE: this needs to revert before commit (for pending transaction)
-              gasLimit: finalEstimateGas, // 100000
-              // maxFeePerGas: 1n, // NOTE: this needs to revert before commit
+              gasLimit: finalEstimateGas,
               maxFeePerGas: finalGasPrice,
               maxPriorityFeePerGas: validatePriorityFee(
                 finalMaxPriorityFeePerGas,
