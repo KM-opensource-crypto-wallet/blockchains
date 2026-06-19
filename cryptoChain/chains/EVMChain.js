@@ -2637,7 +2637,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }
     },
     getEstimateFeForAllowanceApprove: async ({
-      isFetchNonce,
       existingNonce,
       from,
       contractAddress,
@@ -2673,25 +2672,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         // writes 0 → amountInWei (SSTORE ~20,000 gas) instead of the estimated
         // non-zero → non-zero case (~5,000 gas), so add the difference.
         try {
-          const currentAllowance = await tokenContract.allowance(
-            from,
-            stakingProviderAddress,
-          );
-          if (currentAllowance > 0n && currentAllowance < amountInWei) {
+          if (allowance > 0n && allowance < amountInWei) {
             estimateGas += 20000n;
           }
         } catch (_) {}
 
         const finalEstimateGas = (estimateGas * 110n) / 100n;
-        let currentNonce;
-        if (isFetchNonce || existingNonce == null) {
-          currentNonce = await EVMChain(chain_name, undefined).getNonce({
-            customRpcUrl,
-            address: from,
-          });
-        } else if (existingNonce) {
-          currentNonce = existingNonce;
-        }
         const obj = await calculateTotalFees({
           feesType,
           evmProvider,
@@ -2699,7 +2685,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           toAddress: stakingProviderAddress,
           estimateGas: finalEstimateGas,
           isFetchNonce: nonce == null,
-          existingNonce: currentNonce,
+          existingNonce: existingNonce,
         });
         return {
           ...obj,
