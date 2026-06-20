@@ -75,12 +75,6 @@ export const getCoinSnapshot = async (
       stakingBalance = stakingBalanceInfo?.stakingBalance || 0;
       energyBalance = stakingBalanceInfo?.energyBalance || 0;
       bandwidthBalance = stakingBalanceInfo?.bandwidthBalance || 0;
-    } else if (
-      coinDef?.chain_name === 'ethereum' &&
-      (coinDef?.symbol === 'USDT' || coinDef?.symbol === 'USDC')
-    ) {
-      const stakingBalanceInfo = (await nativeCoin.getStakingBalance?.()) || {};
-      stakingBalance = stakingBalanceInfo?.stakingBalance || 0;
     }
     if (isStaking && isFetchStaking) {
       staking = (await nativeCoin.getStaking?.()) || [];

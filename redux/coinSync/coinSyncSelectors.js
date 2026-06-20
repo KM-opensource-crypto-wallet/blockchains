@@ -25,7 +25,9 @@ export const selectIsBannerDismissed = state => {
   const allWallets = state.wallets?.allWallets;
   const currentWalletIndex = state.wallets?.currentWalletIndex;
   const clientId = allWallets?.[currentWalletIndex]?.clientId;
-  return (clientId && state.coinSync?.dismissedBannerClientIds?.[clientId]) || false;
+  return (
+    (clientId && state.coinSync?.dismissedBannerClientIds?.[clientId]) || false
+  );
 };
 
 export const selectIsCreatingWallets = state =>

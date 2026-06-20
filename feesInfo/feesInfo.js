@@ -13,8 +13,14 @@ let feesInfo = {
     },
   },
   multiplier: {
-    ethereum: 1.3,
-    polygon: 1.3,
+    ethereum: {
+      testnet: 1.3,
+      mainnet: 1.3,
+    },
+    polygon: {
+      testnet: 1.3,
+      mainnet: 1.3,
+    },
   },
 };
 
@@ -81,8 +87,7 @@ export const getFeesInfo = async () => {
 
 export const getFeesMultiplier = chain_name => {
   const multiplier = feesInfo?.multiplier;
-  const value = multiplier[chain_name];
-  return typeof value === 'number' ? value : 1;
+  return multiplier[chain_name] || 1;
 };
 
 export const getMaxPriorityFee = chain_name => {

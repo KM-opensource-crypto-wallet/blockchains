@@ -547,19 +547,6 @@ export const refreshCurrentCoin = createAsyncThunk(
     const symbol = currentCoin?.symbol;
     const localCurrency = currentState.settings.localCurrency || 'USD';
     const priceObj = await getPrice(symbol, localCurrency);
-    let updatedNativeCoin;
-    if (parentCoin) {
-      const parentPriceObj = await getPrice(parentCoin?.symbol, localCurrency);
-      updatedNativeCoin = await getCoinSnapshot(
-        currentState,
-        parentCoin,
-        currentWallet,
-        parentPriceObj,
-        false,
-        false,
-        false,
-      );
-    }
     const updatedCurrentCoin = await getCoinSnapshot(
       currentState,
       currentCoin,
@@ -573,6 +560,19 @@ export const refreshCurrentCoin = createAsyncThunk(
       txHash,
       isFetchDelegation,
     );
+    let updatedNativeCoin;
+    if (parentCoin) {
+      const parentPriceObj = await getPrice(parentCoin?.symbol, localCurrency);
+      updatedNativeCoin = await getCoinSnapshot(
+        currentState,
+        parentCoin,
+        currentWallet,
+        parentPriceObj,
+        false,
+        false,
+        false,
+      );
+    }
     return {updatedCurrentCoin, updatedNativeCoin};
   },
 );
