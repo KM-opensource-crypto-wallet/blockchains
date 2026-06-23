@@ -119,10 +119,6 @@ export const RippleWalletConnectSignAndSubmitTransaction = async ({
   try {
     await rippleProvider.connect();
     const publicKey = derivePublicKey(privateKey);
-    console.log(
-      'RippleWalletConnectSignAndSubmitTransaction raw params:',
-      JSON.stringify(transaction),
-    );
     const txJson = extractTxJson(transaction);
     const tx = {
       ...txJson,
