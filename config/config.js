@@ -231,6 +231,21 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'solana',
     symbol: 'SOL',
   },
+  'ton:-3': {
+    chain_display_name: 'TON',
+    chain_name: 'ton',
+    symbol: 'TON',
+  },
+  'stellar:testnet': {
+    chain_display_name: 'Stellar',
+    chain_name: 'stellar',
+    symbol: 'XLM',
+  },
+  'xrpl:1': {
+    chain_display_name: 'Ripple',
+    chain_name: 'ripple',
+    symbol: 'XRP',
+  },
 };
 
 const WalletConnectSupportedChainProduction = {
@@ -338,6 +353,21 @@ const WalletConnectSupportedChainProduction = {
     chain_display_name: 'Solana',
     chain_name: 'solana',
     symbol: 'SOL',
+  },
+  'ton:-239': {
+    chain_display_name: 'TON',
+    chain_name: 'ton',
+    symbol: 'TON',
+  },
+  'stellar:pubnet': {
+    chain_display_name: 'Stellar',
+    chain_name: 'stellar',
+    symbol: 'XLM',
+  },
+  'xrpl:0': {
+    chain_display_name: 'Ripple',
+    chain_name: 'ripple',
+    symbol: 'XRP',
   },
 };
 

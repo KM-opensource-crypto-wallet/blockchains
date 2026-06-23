@@ -4,7 +4,10 @@ import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletcon
 import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
 import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
-import {showToast} from 'utils/toast';
+import {showToast, hideToast} from 'utils/toast';
+import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tonWalletConnect';
+import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/stellarWalletConnect';
+import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/rippleWalletConnect';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -24,6 +27,12 @@ export const createWalletConnectTransaction = createAsyncThunk(
     let tx;
     try {
       dispatch(setWalletConnectTransactionSubmit(true));
+      showToast({
+        type: 'progressToast',
+        title: 'Sending transaction',
+        message: 'Please wait...',
+        autoHide: false,
+      });
       if (method?.includes('solana')) {
         tx = await solanaWalletConnectTransaction(
           method,
@@ -33,6 +42,27 @@ export const createWalletConnectTransaction = createAsyncThunk(
         );
       } else if (method?.includes('tron')) {
         tx = await tronWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('ton')) {
+        tx = await tonWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('stellar')) {
+        tx = await stellarWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('xrpl')) {
+        tx = await rippleWalletConnectTransaction(
           method,
           transactionData,
           privateKey,
@@ -57,9 +87,16 @@ export const createWalletConnectTransaction = createAsyncThunk(
         await connector.respondSessionRequest({topic, response});
       }
       dispatch(setWalletConnectTransactionSubmit(false));
+      hideToast();
+      showToast({
+        type: 'successToast',
+        title: 'Transaction submitted',
+        message: 'Your transaction was sent successfully',
+      });
     } catch (error) {
       console.error('Error in create wallet trasaction', error);
       dispatch(setWalletConnectTransactionSubmit(false));
+      hideToast();
       showToast({
         type: 'errorToast',
         title: 'Transaction failed',
