@@ -25,9 +25,10 @@ export const createWalletConnectTransaction = createAsyncThunk(
     } = payload;
     const dispatch = thunkAPI.dispatch;
     let tx;
+    let toastId;
     try {
       dispatch(setWalletConnectTransactionSubmit(true));
-      showToast({
+      toastId = showToast({
         type: 'progressToast',
         title: 'Sending transaction',
         message: 'Please wait...',
@@ -87,20 +88,20 @@ export const createWalletConnectTransaction = createAsyncThunk(
         await connector.respondSessionRequest({topic, response});
       }
       dispatch(setWalletConnectTransactionSubmit(false));
-      hideToast();
       showToast({
         type: 'successToast',
         title: 'Transaction submitted',
         message: 'Your transaction was sent successfully',
+        toastId,
       });
     } catch (error) {
       console.error('Error in create wallet trasaction', error);
       dispatch(setWalletConnectTransactionSubmit(false));
-      hideToast();
       showToast({
         type: 'errorToast',
         title: 'Transaction failed',
         message: error?.message || error,
+        toastId,
       });
       const connector = getWalletConnect();
       // if (connector[sessionId]) {
