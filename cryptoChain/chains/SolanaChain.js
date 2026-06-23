@@ -286,6 +286,32 @@ export const SolanaChain = () => {
         const validatorsResp = await StakeWiz.getListOfValidator();
         const stakingValidators = stakingResponse?.data;
         const allValidators = validatorsResp?.data;
+        // Minimum amount the user must stake = network minimum delegation +
+        // rent-exempt reserve (the entered amount funds the whole stake account
+        // and the delegatable stake = amount - rentExemptReserve must be >=
+        // minimum delegation). Wrapped in retryFunc so an RPC failure degrades
+        // gracefully to null, in which case no minimum validation is applied.
+        let minAmount = null;
+        try {
+          minAmount = await retryFunc(async solanaProvider => {
+            const [minDelegationResp, rentExemptReserve] = await Promise.all([
+              solanaProvider.getStakeMinimumDelegation(),
+              solanaProvider.getMinimumBalanceForRentExemption(
+                StakeProgram.space,
+              ),
+            ]);
+            const minDelegation = minDelegationResp?.value;
+            if (minDelegation == null) {
+              return null;
+            }
+            const totalMinAmount = new BigNumber(minDelegation).plus(
+              new BigNumber(rentExemptReserve),
+            );
+            return parseBalance(totalMinAmount.toString(), 9);
+          }, null);
+        } catch (e) {
+          minAmount = '1';
+        }
         let finalValidatorDetails = [];
         for (let item of stakingValidators) {
           const foundValidator = allValidators.find(subItem => {
@@ -299,6 +325,7 @@ export const SolanaChain = () => {
               name: foundValidator?.name,
               apy_estimate: foundValidator?.apy_estimate,
               activated_stake: foundValidator?.activated_stake,
+              minAmount, // network-wide for Solana; per-validator-ready
             });
           }
         }

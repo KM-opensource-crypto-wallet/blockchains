@@ -1,0 +1,4 @@
+[
+  "function getAllUserRewards(address[] assets, address user) view returns (address[] rewardsList, uint256[] unclaimedAmounts)",
+  "function claimAllRewards(address[] assets, address to) external returns (address[] rewardsList, uint256[] claimedAmounts)"
+]
