@@ -322,30 +322,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     const bnMultiplyGasPrice = bnGasPrice.multipliedBy(
       getFeesMultiplier(chain_name),
     );
+    const maxFeeWei =
+      feeData?.maxFeePerGas != null ? BigInt(feeData.maxFeePerGas) : 0n;
+    const floorToMaxFee = wei => (wei < maxFeeWei ? maxFeeWei : wei);
+    const recommendedWei = floorToMaxFee(BigInt(bnMultiplyGasPrice.toFixed(0)));
+    const normalWei = floorToMaxFee(BigInt(bnGasPrice.toFixed(0)));
     const feesOptions = [
       {
         title: 'Recommended',
-        gasPrice: parseBalance(bnMultiplyGasPrice.toFixed(0), 9),
+        gasPrice: parseBalance(recommendedWei.toString(), 9),
       },
       {
         title: 'Normal',
-        gasPrice: parseBalance(bnGasPrice.toFixed(0), 9),
+        gasPrice: parseBalance(normalWei.toString(), 9),
       },
     ];
-    let finalGasPrice =
-      feesType === 'normal'
-        ? BigInt(bnGasPrice.toFixed(0))
-        : BigInt(bnMultiplyGasPrice.toFixed(0));
-
-    // For EIP-1559 chains, ensure maxFeePerGas >= baseFeePerGas to avoid
-    // "max fee per gas less than block base fee" errors caused by stale fee data.
-    // ethers computes maxFeePerGas = 2 * baseFee + tip, so we can recover baseFee.
-    if (feeData?.maxFeePerGas != null) {
-      const currentMaxFee = feeData.maxFeePerGas;
-      if (finalGasPrice < currentMaxFee) {
-        finalGasPrice = currentMaxFee;
-      }
-    }
+    const finalGasPrice = feesType === 'normal' ? normalWei : recommendedWei;
 
     let maxPriorityFeePerGas =
       feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name);
@@ -664,7 +656,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       try {
         return await ethers.resolveAddress(name, evmProvider);
       } catch (e) {
-        if (e?.message?.includes('UNCONFIGURED_NAME')) {
+        if (
+          e?.message?.includes('UNCONFIGURED_NAME') ||
+          e?.code === 'INVALID_ARGUMENT'
+        ) {
           return null;
         }
         throw e;
@@ -2005,19 +2000,32 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw e;
         }
       }, 'not_found_latest_nonce'),
-    waitForConfirmation: async ({transaction, retries, interval}) =>
-      retryFunc(async evmProvider => {
+    waitForConfirmation: async ({transaction, retries, interval}) => {
+      const normalizeResult = result => {
+        if (
+          result &&
+          typeof result === 'object' &&
+          (result.status === 0 || result.status === 0n)
+        ) {
+          return {status: 'failed', hash: result.hash || null};
+        }
+        return result;
+      };
+      return retryFunc(async evmProvider => {
         if (transaction?.wait) {
           try {
             console.log('wait for transaction', transaction?.hash);
-            return await transaction?.wait(null, 60000);
+            return normalizeResult(await transaction?.wait(null, 60000));
           } catch (e) {
             if (e?.code === 'TRANSACTION_REPLACED') {
               if (e?.cancelled) {
                 throw new Error('transaction was cancelled');
               }
               // Tx was sped up (higher gas) — replacement confirmed successfully
-              return e?.receipt || 'pending';
+              return normalizeResult(e?.receipt) || 'pending';
+            }
+            if (e?.code === 'CALL_EXCEPTION' && e?.receipt) {
+              return normalizeResult(e.receipt);
             }
             const {reason} = await errorDecoder.decode(e);
             if (reason === 'wait for transaction timeout') {
@@ -2034,7 +2042,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.log('wait for transaction by hash', transaction);
           const receipt = await evmProvider.getTransactionReceipt(transaction);
           if (receipt) {
-            return receipt;
+            return normalizeResult(receipt);
           }
           // Receipt not yet indexed, treat as pending
           return 'pending';
@@ -2050,7 +2058,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 if (isValidEVMTransactionHash(txHash)) {
                   const tx = await evmProvider.getTransaction(txHash);
                   if (tx) {
-                    return await tx?.wait(null, 60000);
+                    return normalizeResult(await tx?.wait(null, 60000));
                   }
                 }
               }
@@ -2062,7 +2070,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 if (e?.cancelled) {
                   throw new Error('transaction was cancelled');
                 }
-                return e?.receipt || 'pending';
+                return normalizeResult(e?.receipt) || 'pending';
+              }
+              // Confirmed on-chain revert — return as failure, don't keep polling.
+              if (e?.code === 'CALL_EXCEPTION' && e?.receipt) {
+                return normalizeResult(e.receipt);
               }
               // Continue waiting
               if (attempts === retries - 1) {
@@ -2077,7 +2089,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             attempts++;
           }
         }
-      }, 'pending'),
+      }, 'pending');
+    },
     checkDelegation: ({address}) =>
       retryFunc(
         async evmProvider => {
@@ -2505,6 +2518,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       maxPriorityFeePerGas,
       gasFee,
       feesType,
+      allowance,
     }) => {
       try {
         const {currentAllowance, firstTrx, secondTrx} = await retryFunc(
@@ -2523,13 +2537,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 stakingProviderName,
               });
 
-            const allowance = await tokenContract.allowance(
-              from,
-              stakingProviderAddress,
-            );
-            console.log('Current allowance:', allowance.toString());
+            let finalAllowance = allowance;
+            if (!finalAllowance) {
+              finalAllowance = await tokenContract.allowance(
+                from,
+                stakingProviderAddress,
+              );
+            }
 
-            if (allowance >= amountInWei) {
+            if (finalAllowance >= amountInWei) {
               console.log('Already approved');
               return true;
             }
@@ -2572,14 +2588,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             const approveTx = await tokenContract.approve.populateTransaction(
               stakingProviderAddress,
               amountInWei,
-              allowance > 0n
+              finalAllowance > 0n
                 ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
                 : options,
             );
             return {
               firstTrx: resetTrx,
               secondTrx: approveTx,
-              currentAllowance: allowance,
+              currentAllowance: finalAllowance,
             };
           },
           null,
@@ -2668,14 +2684,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           estimateGas = 60000n;
         }
 
-        // When an existing non-zero allowance must be reset first, the second tx
-        // writes 0 → amountInWei (SSTORE ~20,000 gas) instead of the estimated
-        // non-zero → non-zero case (~5,000 gas), so add the difference.
-        try {
-          if (allowance > 0n && allowance < amountInWei) {
-            estimateGas += 20000n;
-          }
-        } catch (_) {}
+        if (allowance > 0n && allowance < amountInWei) {
+          estimateGas += 20000n;
+        }
 
         const finalEstimateGas = (estimateGas * 110n) / 100n;
         const obj = await calculateTotalFees({

@@ -1,14 +1,8 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
-import {
-  getChain,
-  getHashString,
-} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {countSelectedVotes, getSelectedVotes} from './stakingSelectors';
 import {
-  calculatePrice,
   convertToSmallAmount,
-  getExplorerTxUrl,
-  isEVMChain,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -21,11 +15,9 @@ import {ethers, formatUnits} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import BigNumber from 'bignumber.js';
 import {showToast} from 'utils/toast';
-import {MainNavigation} from 'utils/navigation';
 
 const initialState = {
   loading: true,
-  currencies: [],
   error: null,
   validators: {},
   selectedVotes: {},
@@ -81,15 +73,14 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
     )(currentState);
     const chain = getChain(chain_name, currentWallet?.phrase, customRPC);
     const decimals = currentCoin?.decimal || 18;
-    const amountInWei = BigInt(
-      convertToSmallAmount(payload.amount.toString(), decimals),
-    );
-    const allowanceData = currentState?.staking?.allowanceData;
-    const allowance =
+    const amountInWei =
       payload.allowanceType === 'unlimited'
         ? ethers.MaxUint256
-        : BigInt(allowanceData?.amountInWeiStr || '0');
-
+        : BigInt(convertToSmallAmount(payload.amount.toString(), decimals));
+    const allowanceData = currentState?.staking?.allowanceData;
+    const allowance = BigInt(
+      convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) || '0',
+    );
     const result = await chain.getEstimateFeForAllowanceApprove({
       isFetchNonce: payload.isFetchNonce,
       from: currentCoin?.address,
@@ -107,6 +98,8 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
       estimateGas: result.estimateGas?.toString() ?? null,
       nonce: result.nonce ?? null,
       transactionFee: result.fee,
+      l1Fees: result.l1Fees?.toString() ?? null,
+      needsAllowanceReset: !!result.allowance,
     };
   },
 );
@@ -232,6 +225,11 @@ export const executeApprove = createAsyncThunk(
         throw new Error('No private key available');
       }
       const allowanceData = currentState?.staking?.allowanceData;
+      const decimals = currentCoin?.decimal;
+      const allowance = BigInt(
+        convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
+          '0',
+      );
       const amountInWei =
         payload.allowanceType === 'unlimited'
           ? ethers.MaxUint256
@@ -242,6 +240,21 @@ export const executeApprove = createAsyncThunk(
           ? payload.nonce
           : await chain.getNonce({address: currentCoin?.address});
 
+      // approve() expects gasFee/maxPriorityFeePerGas as bigint (wei); the UI
+      // sends them as wei strings. Coerce here so the user's selected/custom gas
+      // price is actually used instead of being silently re-fetched. feesType is
+      // forwarded as a fallback for the (now rare) case where gasFee is absent.
+      const toWeiBigInt = value => {
+        if (value == null || value === '') {
+          return undefined;
+        }
+        try {
+          return BigInt(value);
+        } catch (e) {
+          return undefined;
+        }
+      };
+
       const {confirmTransaction} = await chain.approve({
         from: currentCoin?.address,
         contractAddress: currentCoin?.contractAddress,
@@ -249,58 +262,19 @@ export const executeApprove = createAsyncThunk(
         stakingProviderName: payload.stakingProviderName,
         amountInWei,
         nonce,
-        gasFee: payload.gasFee,
+        gasFee: toWeiBigInt(payload.gasFee),
         estimateGas: payload.estimateGas,
-        maxPriorityFeePerGas: payload.maxPriorityFeePerGas,
-        allowance: amountInWei,
+        maxPriorityFeePerGas: toWeiBigInt(payload.maxPriorityFeePerGas),
+        feesType: payload.feesType,
+        allowance,
       });
-      let tx_hash = getHashString(confirmTransaction, currentCoin?.chain_name);
-      const pendingTransaction = {
-        amount: amountInWei,
-        to: payload.stakingProviderName,
-        from: currentCoin?.address,
-        status: 'PENDING',
-        date: new Date().toISOString(),
-        link: tx_hash,
-        totalCourse:
-          payload.allowanceType === 'unlimited'
-            ? '0'
-            : calculatePrice(
-                amountInWei.toString(),
-                currentCoin?.decimal,
-                currentCoin?.currencyRate,
-              ),
-        url: getExplorerTxUrl(currentCoin?.chain_name, tx_hash),
-        currentCoin: currentCoin,
-        isNFT: false,
-        isBatchTransaction: false,
-        isCreateStaking: false,
-        isWithdrawStaking: false,
-        isDeactivateStaking: false,
-        isStakingRewards: false,
-        isCreateVote: false,
-      };
-      let toastId = showToast({
-        type: 'progressToast',
-        title: `Transaction In-progress`,
-        message: `Your transaction submitted successfully. Once the transaction completed you will be notified.`,
-        autoHide: false,
-        props: {
-          onViewTransaction: () => {
-            MainNavigation.navigate({
-              name: 'TransactionDetails',
-              params: {transaction: pendingTransaction},
-            });
-          },
-        },
-      });
+
       if (confirmTransaction === 'pending') {
         setTimeout(() => {
           showToast({
             type: 'warningToast',
             title: 'Transaction pending',
             message: 'Transaction take too long. Please check again later',
-            toastId,
           });
         }, 500);
       } else if (confirmTransaction?.status === 'failed') {
@@ -310,27 +284,10 @@ export const executeApprove = createAsyncThunk(
             title: 'Transaction Failed',
             message:
               'Your transaction failed on the network. Please try again.',
-            toastId,
           });
         }, 400);
         return thunkAPI.rejectWithValue('Transaction failed');
       } else if (confirmTransaction) {
-        showToast({
-          type: 'successToast',
-          title: 'Transaction Successful',
-          message: `Your transaction completed successfully.`,
-          toastId,
-          props: {
-            onViewTransaction: () => {
-              MainNavigation.navigate({
-                name: 'TransactionDetails',
-                params: {
-                  transaction: {...pendingTransaction, status: 'SUCCESS'},
-                },
-              });
-            },
-          },
-        });
         return {
           tx_hash: confirmTransaction?.hash || '',
         };
@@ -352,9 +309,10 @@ export const stakingSlice = createSlice({
     setSelectedVotes(state, {payload}) {
       state.selectedVotes = payload;
     },
-    updateFees(state, {payload}) {
+    updateApproveFees(state, {payload}) {
       const gasPrice = payload?.gasPrice;
       const l1Fees = state.allowanceData?.l1Fees;
+      const allowanceData = state.allowanceData;
       if (!gasPrice || !state.allowanceData) {
         return;
       }
@@ -368,20 +326,31 @@ export const stakingSlice = createSlice({
         state.allowanceData?.estimateGas || 0,
       );
       const l1FeesBn = new BigNumber(l1Fees || 0);
-      const transactionFeeBN = gasPriceBN
+      let transactionFeeBN = gasPriceBN
         .multipliedBy(estimateGasBN)
         .plus(l1FeesBn);
+      // Reset path sends two txs (reset-to-0 + approve), so the estimation
+      // doubles the fee. Match it so the local recompute stays consistent.
+      if (state.allowanceData?.needsAllowanceReset) {
+        transactionFeeBN = transactionFeeBN.multipliedBy(2);
+      }
       const transactionFee = parseBalance(
         transactionFeeBN?.toString(),
         isEVM ? 18 : 8,
       );
-      const transactionFeeEtherBN = new BigNumber(transactionFee);
-      const currencyBN = new BigNumber(state.allowanceData?.currencyRate || 0);
       state.allowanceData.gasFee = gasPriceBN.toString();
       state.allowanceData.transactionFee = transactionFee;
-      state.allowanceData.fiatEstimateFee = currencyBN
-        .multipliedBy(transactionFeeEtherBN)
-        .toFixed(2);
+      // Keep the EIP-1559 tip consistent with the new max fee: the priority fee
+      // must stay below maxFeePerGas (gasPrice), otherwise the tx is rejected.
+      // Clamp to gasPrice - 1 when the (stale) tip now exceeds the custom max fee.
+      if (isEVM && state.allowanceData?.maxPriorityFeePerGas != null) {
+        const priorityFeeBN = new BigNumber(
+          state.allowanceData.maxPriorityFeePerGas.toString(),
+        );
+        state.allowanceData.maxPriorityFeePerGas = priorityFeeBN.gte(gasPriceBN)
+          ? BigNumber.max(gasPriceBN.minus(1), 0).toFixed(0)
+          : priorityFeeBN.toFixed(0);
+      }
     },
   },
   extraReducers: builder => {
@@ -440,5 +409,5 @@ export const stakingSlice = createSlice({
   },
 });
 
-export const {setStakingLoading, setSelectedVotes, updateFees} =
+export const {setStakingLoading, setSelectedVotes, updateApproveFees} =
   stakingSlice.actions;

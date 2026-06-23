@@ -11,6 +11,7 @@ import {
   setUpdateTransactionSubmitting,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
@@ -1167,6 +1168,14 @@ export const sendFunds = createAsyncThunk(
             toastId,
           });
         } else if (confirmTransaction) {
+          if (txData?.to && isEVMChain(currentCoin?.chain_name)) {
+            thunkAPI.dispatch(
+              recordSentAddress({
+                chain_name: currentCoin?.chain_name,
+                address: txData?.to,
+              }),
+            );
+          }
           showToast({
             type: 'successToast',
             title: txData?.isExchange
@@ -2044,6 +2053,11 @@ export const walletsSlice = createSlice({
         console.warn('No selected coin found');
         return;
       }
+      const chain_name = selectedCoin?.chain_name;
+      if (!chain_name) {
+        console.warn('No chain_name found for selected coin');
+        return;
+      }
       const deriveAddresses = Array.isArray(selectedCoin?.deriveAddresses)
         ? selectedCoin?.deriveAddresses
         : [];
@@ -2058,7 +2072,22 @@ export const walletsSlice = createSlice({
         console.warn('derive address for delete not found :', payload?.address);
         return;
       }
-      selectedCoin.deriveAddresses = updateDeriveAddress;
+      // Delete the derive address from every coin on the same chain so siblings
+      // (e.g. the native coin and its tokens) stay in sync.
+      currentWallet.coins.forEach(coin => {
+        if (coin?.chain_name !== chain_name) {
+          return;
+        }
+        if (!Array.isArray(coin?.deriveAddresses)) {
+          return;
+        }
+        coin.deriveAddresses = coin.deriveAddresses.filter(
+          // Defense in depth: never delete the coin's active address.
+          item =>
+            item?.address !== payload?.address ||
+            item?.address === coin?.address,
+        );
+      });
     },
     deleteMultipleDeriveAddressesInCurrentCoin(state, {payload}) {
       const addresses = Array.isArray(payload?.addresses)
@@ -2078,6 +2107,11 @@ export const walletsSlice = createSlice({
       );
       if (!selectedCoin) {
         console.warn('No selected coin found');
+        return;
+      }
+      const chain_name = selectedCoin?.chain_name;
+      if (!chain_name) {
+        console.warn('No chain_name found for selected coin');
         return;
       }
       const deriveAddresses = Array.isArray(selectedCoin?.deriveAddresses)
@@ -2102,7 +2136,21 @@ export const walletsSlice = createSlice({
         console.warn('no derive addresses for delete found');
         return;
       }
-      selectedCoin.deriveAddresses = updateDeriveAddress;
+      // Delete the derive addresses from every coin on the same chain so siblings
+      // (e.g. the native coin and its tokens) stay in sync.
+      currentWallet.coins.forEach(coin => {
+        if (coin?.chain_name !== chain_name) {
+          return;
+        }
+        if (!Array.isArray(coin?.deriveAddresses)) {
+          return;
+        }
+        coin.deriveAddresses = coin.deriveAddresses.filter(
+          // Defense in depth: never delete the coin's active address.
+          item =>
+            !addressSet.has(item?.address) || item?.address === coin?.address,
+        );
+      });
     },
     updateIsEVMAddressesAdded: (state, action) => {
       const updateWalletIndex = action?.payload?.index;

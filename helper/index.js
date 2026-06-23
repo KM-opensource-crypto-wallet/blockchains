@@ -28,8 +28,8 @@ export const getTokenLogoUrl = contractAddress => {
 };
 
 export function getCustomizePublicAddress(str) {
-  return `${str?.substring(0, 8) || ''}...${
-    str?.substring(str.length - 7, str.length) || ''
+  return `${str?.substring(0, 10) || ''}...${
+    str?.substring(str.length - 10, str.length) || ''
   }`;
 }
 
