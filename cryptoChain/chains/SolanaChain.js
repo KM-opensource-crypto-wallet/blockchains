@@ -307,7 +307,6 @@ export const SolanaChain = () => {
             const totalMinAmount = new BigNumber(minDelegation).plus(
               new BigNumber(rentExemptReserve),
             );
-            console.log('totals', totalMinAmount.toString());
             return parseBalance(totalMinAmount.toString(), 9);
           }, null);
         } catch (e) {

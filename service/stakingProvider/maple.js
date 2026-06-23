@@ -80,7 +80,7 @@ const fetchMapleAPY = async poolAddress => {
 };
 
 export const mapleProvider = {
-  icon: 'https://s2.coinmarketcap.com/static/img/coins/200x200/33824.png',
+  icon: 'https://assets.kimlgrow.com/common/maple.png',
   name: 'Maple',
   apy: '0% APY',
   stakedAmount: '0',

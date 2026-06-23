@@ -59,7 +59,7 @@ const aaveFetchData = async ({
 };
 
 export const aaveProvider = {
-  icon: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5e9ziszHC3fEt6o0kQRkcvljRNKwcOi4-3w&s',
+  icon: 'https://assets.kimlgrow.com/common/aave.png',
   name: 'Aave',
   apy: '0% APY',
   stakedAmount: '0',

@@ -11,7 +11,7 @@ import {
   selectCurrentWallet,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
-import {ethers, formatUnits} from 'ethers';
+import {ethers} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import BigNumber from 'bignumber.js';
 import {showToast} from 'utils/toast';
@@ -49,9 +49,9 @@ export const fetchStakingAllowance = createAsyncThunk(
       amountInWei,
     });
     return {
-      allowanceFormatted: formatUnits(result.allowance, decimals),
-      requiredFormatted: formatUnits(result.required, decimals),
-      stakeAmountFormatted: formatUnits(amountInWei, decimals),
+      allowanceFormatted: parseBalance(result.allowance, decimals),
+      requiredFormatted: parseBalance(result.required, decimals),
+      stakeAmountFormatted: parseBalance(amountInWei, decimals),
       amountInWeiStr: amountInWei.toString(),
       isApproved: result.isApproved,
       needsReset: result.needsReset,
@@ -235,11 +235,6 @@ export const executeApprove = createAsyncThunk(
           ? ethers.MaxUint256
           : BigInt(allowanceData?.amountInWeiStr || '0');
 
-      const nonce =
-        payload.nonce != null
-          ? payload.nonce
-          : await chain.getNonce({address: currentCoin?.address});
-
       // approve() expects gasFee/maxPriorityFeePerGas as bigint (wei); the UI
       // sends them as wei strings. Coerce here so the user's selected/custom gas
       // price is actually used instead of being silently re-fetched. feesType is
@@ -261,7 +256,7 @@ export const executeApprove = createAsyncThunk(
         privateKey,
         stakingProviderName: payload.stakingProviderName,
         amountInWei,
-        nonce,
+        nonce: payload?.nonce,
         gasFee: toWeiBigInt(payload.gasFee),
         estimateGas: payload.estimateGas,
         maxPriorityFeePerGas: toWeiBigInt(payload.maxPriorityFeePerGas),
@@ -312,7 +307,6 @@ export const stakingSlice = createSlice({
     updateApproveFees(state, {payload}) {
       const gasPrice = payload?.gasPrice;
       const l1Fees = state.allowanceData?.l1Fees;
-      const allowanceData = state.allowanceData;
       if (!gasPrice || !state.allowanceData) {
         return;
       }

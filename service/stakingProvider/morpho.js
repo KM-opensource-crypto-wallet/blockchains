@@ -50,7 +50,7 @@ const fetchMorphoVaultAPY = async vaultAddress => {
 };
 
 export const morphoProvider = {
-  icon: 'https://image.gatedataimg.com/big_data/173210946183b5009e040969ee7b60362ad7426573.jpeg',
+  icon: 'https://assets.kimlgrow.com/common/morpho.jpeg',
   name: 'Morpho',
   apy: '0% APY',
   stakedAmount: '0',

@@ -24,7 +24,7 @@ const getTokenSymbol = contractAddress =>
   TOKEN_SYMBOL_BY_ADDRESS[contractAddress] ?? null;
 
 export const sparkProvider = {
-  icon: 'https://pbs.twimg.com/profile_images/1856332015341084672/lF5ZZXRm_400x400.jpg',
+  icon: 'https://assets.kimlgrow.com/common/spark.jpg',
   name: 'Spark',
   apy: '0% APY',
   stakedAmount: '0',

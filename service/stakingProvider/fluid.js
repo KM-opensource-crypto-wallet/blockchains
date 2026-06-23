@@ -40,7 +40,7 @@ const fetchFluidAPY = async (evmProvider, fTokenAddress) => {
 };
 
 export const fluidProvider = {
-  icon: 'https://icons.llamao.fi/icons/protocols/fluid?w=48&h=48',
+  icon: 'https://assets.kimlgrow.com/common/fluid.webp',
   name: 'Fluid',
   apy: '0% APY',
   stakedAmount: '0',

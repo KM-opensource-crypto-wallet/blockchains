@@ -18,7 +18,7 @@ const getCometAddress = contractAddress =>
   ];
 
 export const compoundProvider = {
-  icon: 'https://img.bgstatic.com/multiLang/coinPriceLogo/1x1/compound.jpg',
+  icon: 'https://assets.kimlgrow.com/common/compound.png',
   name: 'Compound',
   apy: '0% APY',
   stakedAmount: '0',
