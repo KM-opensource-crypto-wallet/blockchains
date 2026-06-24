@@ -2245,7 +2245,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           });
           const validators = providerList.map(provider => ({
             name: provider.name,
-            validatorAddress: provider.poolContractAddress,
             image: provider.icon,
             apy_estimate: parseFloat(provider.apy) || 0,
             activated_stake: parseFloat(provider.stakedAmount) || 0,
