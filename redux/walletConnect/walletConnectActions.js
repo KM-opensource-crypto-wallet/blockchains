@@ -69,6 +69,19 @@ export const createWalletConnectTransaction = createAsyncThunk(
           privateKey,
           signTypeData,
         );
+      } else if (method?.includes('wallet_sendCalls')) {
+        const results = [];
+        for (const call of transactionData.batchCalls) {
+          const txResult = await etherWalletConnectTransaction(
+            'eth_sendTransaction',
+            {...call, from: transactionData.from},
+            privateKey,
+            chain_name,
+            null,
+          );
+          results.push(txResult);
+        }
+        tx = results[results.length - 1];
       } else {
         tx = await etherWalletConnectTransaction(
           method,

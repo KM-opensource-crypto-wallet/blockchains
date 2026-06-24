@@ -122,17 +122,56 @@ export const subscribeWalletConnectEvent = () => {
           },
         });
       } else if (request?.method?.includes('wallet_getCapabilities')) {
+        const chainIds = request?.params?.[1]; // array of chainIds like ["0x1", "0x89"]
+
+        const capabilities = {};
+        (chainIds || []).forEach(chainId => {
+          capabilities[chainId] = {
+            atomicBatch: {supported: true},
+          };
+        });
+
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {id, jsonrpc: '2.0', result: capabilities},
+        });
+      } else if (request?.method?.includes('wallet_sendCalls')) {
+        const batchPayload = request?.params?.[0];
+        const requestSessionData =
+          walletConnect.engine.signClient.session.get(topic);
+        const {pairingTopic} = requestSessionData;
+        const sessionId = pairingTopic + '';
+
+        // Convert "0x1" → "eip155:1" to match item.key format used in WalletConnectTransactionModal
+        const hexChainId = batchPayload?.chainId;
+        const chainIdDecimal = parseInt(hexChainId, 16);
+        const namespaceChainId = `eip155:${chainIdDecimal}`;
+
+        store.dispatch(
+          setWalletConnectTransactionData({
+            sessionId,
+            topic,
+            id,
+            method: 'wallet_sendCalls',
+            isBatchTransaction: true,
+            batchCalls: batchPayload?.calls,
+            from: batchPayload?.from,
+            chainId: namespaceChainId, // ← use this, not batchPayload?.chainId
+            sessionData: requestSessionData,
+            peerMeta: requestSessionData?.peer?.metadata,
+          }),
+        );
+      } else if (request?.method?.includes('wallet_getCallsStatus')) {
+        const txHash = request?.params?.[0];
+        // fetch receipt using ethers provider
         await walletConnect.respondSessionRequest({
           topic,
           response: {
             id,
             jsonrpc: '2.0',
             result: {
-              [request?.params?.[0]?.chainId]: {
-                atomic: {
-                  status: 'unsupported',
-                },
-              },
+              status: 'CONFIRMED',
+              receipts: [{transactionHash: txHash, status: '0x1'}],
             },
           },
         });
