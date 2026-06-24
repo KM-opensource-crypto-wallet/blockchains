@@ -69,20 +69,34 @@ export const etherWalletConnectSendTransaction = async (
 ) =>
   retryFunc(chain_name, privateKey, async walletSigner => {
     try {
-      const transaction = await walletSigner.sendTransaction({
+      const txBase = {
         from: payload.from,
         to: payload.to,
         data: payload.data,
         nonce: payload.nonce,
         value: payload.value,
-        gasLimit: payload.gas,
-        gasPrice: payload.gasPrice,
+      };
+
+      const gasLimit = payload.gas
+        ? payload.gas
+        : await walletSigner.estimateGas(txBase);
+
+      let gasPrice = payload.gasPrice;
+      if (!gasPrice) {
+        const feeData = await walletSigner.provider.getFeeData();
+        gasPrice = feeData.gasPrice;
+      }
+
+      const transaction = await walletSigner.sendTransaction({
+        ...txBase,
+        gasLimit,
+        gasPrice,
       });
       return transaction.hash;
     } catch (e) {
       const {reason} = await errorDecoder.decode(e);
-      console.error('Error in send ether transaction', reason);
-      return Promise.reject(reason);
+      console.error('Error in send ether transaction', reason || e?.message);
+      return Promise.reject(reason || e?.message || e);
     }
   });
 
