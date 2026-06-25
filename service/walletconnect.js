@@ -134,44 +134,6 @@ export const subscribeWalletConnectEvent = () => {
           topic,
           response: {id, jsonrpc: '2.0', result: capabilities},
         });
-      } else if (request?.method?.includes('wallet_sendCalls')) {
-        const batchPayload = request?.params?.[0];
-        const requestSessionData =
-          walletConnect.engine.signClient.session.get(topic);
-        const {pairingTopic} = requestSessionData;
-        const sessionId = pairingTopic + '';
-
-        const hexChainId = batchPayload?.chainId;
-        const chainIdDecimal = parseInt(hexChainId, 16);
-        const namespaceChainId = `eip155:${chainIdDecimal}`;
-
-        store.dispatch(
-          setWalletConnectTransactionData({
-            sessionId,
-            topic,
-            id,
-            method: 'wallet_sendCalls',
-            isBatchTransaction: true,
-            batchCalls: batchPayload?.calls,
-            from: batchPayload?.from,
-            chainId: namespaceChainId,
-            sessionData: requestSessionData,
-            peerMeta: requestSessionData?.peer?.metadata,
-          }),
-        );
-      } else if (request?.method?.includes('wallet_getCallsStatus')) {
-        const txHash = request?.params?.[0];
-        await walletConnect.respondSessionRequest({
-          topic,
-          response: {
-            id,
-            jsonrpc: '2.0',
-            result: {
-              status: 'CONFIRMED',
-              receipts: [{transactionHash: txHash, status: '0x1'}],
-            },
-          },
-        });
       } else {
         const requestSessionData =
           walletConnect.engine.signClient.session.get(topic);

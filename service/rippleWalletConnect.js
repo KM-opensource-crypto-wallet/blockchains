@@ -105,7 +105,7 @@ export const RippleWalletConnectSign = async ({transaction, privateKey}) => {
     return prepared;
   } catch (e) {
     console.error('Error in RippleWalletConnectSign', e);
-    return Promise.reject(e?.message);
+    throw e;
   } finally {
     await rippleProvider.disconnect();
   }
@@ -132,7 +132,7 @@ export const RippleWalletConnectSignAndSubmitTransaction = async ({
     return {hash: result?.result?.hash ?? result?.hash};
   } catch (e) {
     console.error('Error in RippleWalletConnectSignAndSubmitTransaction', e);
-    return Promise.reject(e?.message);
+    throw e;
   } finally {
     await rippleProvider.disconnect();
   }
@@ -147,6 +147,6 @@ export const RippleWalletConnectSignMessage = async ({message, privateKey}) => {
     return signature;
   } catch (e) {
     console.error('Error in RippleWalletConnectSignMessage', e);
-    return Promise.reject(e?.message);
+    throw e;
   }
 };

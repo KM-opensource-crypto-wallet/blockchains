@@ -65,7 +65,7 @@ export const TonWalletConnectSendMessage = async ({payload, privateKey}) => {
     return {boc: transfer.toBoc().toString('base64')};
   } catch (e) {
     console.error('Error in TonWalletConnectSendMessage', e);
-    return Promise.reject(e?.message);
+    throw e;
   }
 };
 
@@ -87,7 +87,7 @@ export const TonWalletConnectSignData = async ({signTypeData, privateKey}) => {
     };
   } catch (e) {
     console.error('Error in TonWalletConnectSignData', e);
-    return Promise.reject(e?.message);
+    throw e;
   }
 };
 

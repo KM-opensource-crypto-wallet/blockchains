@@ -39,7 +39,7 @@ export const StellarWalletConnectSign = async ({xdr, privateKey}) => {
     return transaction.toEnvelope().toXDR('base64');
   } catch (e) {
     console.error('Error in stellar signXDR', e);
-    return Promise.reject(e?.message);
+    throw e;
   }
 };
 
@@ -62,8 +62,6 @@ export const StellarWalletConnectSignAndSendTransaction = async ({
       'Error in StellarWalletConnectSignAndSendTransaction',
       e?.response?.data ?? e,
     );
-    return Promise.reject(
-      e?.response?.data?.extras?.result_codes ?? e?.message,
-    );
+    throw e;
   }
 };
