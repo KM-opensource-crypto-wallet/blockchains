@@ -130,20 +130,21 @@ export const updateConsentState = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setIsUpdatingConsentState(true));
-      const {topic, address, consentState, peerAddress} = payload;
+      const {topic, address, consentState, peerInboxId} = payload;
       if (consentState !== 'denied' && consentState !== 'allowed') {
         return console.error(
           'consentState must be one of this allowed or denied  ',
         );
       }
-      let results;
       if (consentState === 'denied') {
-        results = await XMTP.blockConversation({
-          peerAddress,
+        await XMTP.blockConversation({
+          peerInboxId,
+          topic,
         });
       } else {
-        results = await XMTP.unBlockConversation({
-          peerAddress,
+        await XMTP.unBlockConversation({
+          peerInboxId,
+          topic,
         });
       }
 
@@ -286,18 +287,42 @@ export const messageSlice = createSlice({
     },
     updateConversation(state, {payload}) {
       const {topic, conversationData, address} = payload;
-      if (topic && conversationData && address) {
-        const tempConversationData = state.conversationData[address]
-          ? {...state.conversationData[address]}
+      const lowerAddress = address?.toLowerCase();
+      if (topic && conversationData && lowerAddress) {
+        const tempConversationData = state.conversationData[lowerAddress]
+          ? {...state.conversationData[lowerAddress]}
           : {};
         const previousConversationData = tempConversationData[topic];
         tempConversationData[topic] = {
           ...previousConversationData,
           ...conversationData,
         };
-        state.conversationData[address] = tempConversationData;
+        state.conversationData[lowerAddress] = tempConversationData;
       } else {
         console.warn('some payload is missing addConversations', payload);
+      }
+    },
+    addSentMessage(state, {payload}) {
+      const {topic, message, address} = payload;
+      if (topic && message) {
+        const previousMessages = state.messageData[topic]
+          ? [...state.messageData[topic]]
+          : [];
+        state.messageData[topic] = [message, ...previousMessages];
+        if (address) {
+          const lowerAddress = address.toLowerCase();
+          const tempConversationData = state.conversationData[lowerAddress]
+            ? {...state.conversationData[lowerAddress]}
+            : {};
+          const finalConvData = tempConversationData[topic]
+            ? {...tempConversationData[topic]}
+            : {};
+          finalConvData.lastMessage = message;
+          tempConversationData[topic] = finalConvData;
+          state.conversationData[lowerAddress] = tempConversationData;
+        }
+      } else {
+        console.warn('some payload is missing addSentMessage', payload);
       }
     },
     addConversationsName(state, {payload}) {
@@ -332,7 +357,7 @@ export const messageSlice = createSlice({
         if (!tempConversation) {
           continue;
         }
-        const {peerAddress, topic} = tempConversation;
+        const {topic, peerAddress} = tempConversation;
         const tempMessage = lastMessages[i];
         finalConversations[topic] = {
           ...tempConversation,
@@ -340,13 +365,14 @@ export const messageSlice = createSlice({
           name: conversationName[peerAddress] || '',
         };
       }
+      const lowerAddress = address?.toLowerCase();
       const tempMessageData = {...state.conversationData};
-      const finalConvData = tempMessageData.conversations
-        ? {...tempMessageData.conversations, finalConversations}
+      const finalConvData = tempMessageData[lowerAddress]
+        ? {...tempMessageData[lowerAddress], ...finalConversations}
         : finalConversations;
       state.conversationData = {
         ...tempMessageData,
-        [address]: finalConvData,
+        [lowerAddress]: finalConvData,
       };
       state.isFetchingConversations = false;
     });
@@ -368,4 +394,5 @@ export const {
   setSelectedConversation,
   addConversationsName,
   setIsForwardingMessage,
+  addSentMessage,
 } = messageSlice.actions;
