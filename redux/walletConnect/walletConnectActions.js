@@ -5,6 +5,13 @@ import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/
 import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
 import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
 import {showToast} from 'utils/toast';
+import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tonWalletConnect';
+import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/stellarWalletConnect';
+import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/rippleWalletConnect';
+import {
+  PolkadotWalletConnectSignMessage,
+  polkadotWalletConnectTransaction,
+} from 'dok-wallet-blockchain-networks/service/polkadotWalletConnect';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -22,8 +29,15 @@ export const createWalletConnectTransaction = createAsyncThunk(
     } = payload;
     const dispatch = thunkAPI.dispatch;
     let tx;
+    let toastId;
     try {
       dispatch(setWalletConnectTransactionSubmit(true));
+      toastId = showToast({
+        type: 'progressToast',
+        title: 'Sending transaction',
+        message: 'Please wait...',
+        autoHide: false,
+      });
       if (method?.includes('solana')) {
         tx = await solanaWalletConnectTransaction(
           method,
@@ -37,6 +51,43 @@ export const createWalletConnectTransaction = createAsyncThunk(
           transactionData,
           privateKey,
           signTypeData,
+        );
+      } else if (method?.includes('ton')) {
+        tx = await tonWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('stellar')) {
+        tx = await stellarWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('xrpl')) {
+        tx = await rippleWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('wallet_sendCalls')) {
+        tx = await etherWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          chain_name,
+          null,
+        );
+      } else if (method?.includes('polkadot')) {
+        tx = await polkadotWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          chain_name,
+          null,
         );
       } else {
         tx = await etherWalletConnectTransaction(
@@ -57,6 +108,12 @@ export const createWalletConnectTransaction = createAsyncThunk(
         await connector.respondSessionRequest({topic, response});
       }
       dispatch(setWalletConnectTransactionSubmit(false));
+      showToast({
+        type: 'successToast',
+        title: 'Transaction submitted',
+        message: 'Your transaction was sent successfully',
+        toastId,
+      });
     } catch (error) {
       console.error('Error in create wallet trasaction', error);
       dispatch(setWalletConnectTransactionSubmit(false));
@@ -64,6 +121,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
         type: 'errorToast',
         title: 'Transaction failed',
         message: error?.message || error,
+        toastId,
       });
       const connector = getWalletConnect();
       // if (connector[sessionId]) {

@@ -31,7 +31,6 @@ export const initWalletConnect = async walletConnectData => {
 
 export const createWalletConnection = async options => {
   await walletConnect.core.pairing.pair(options);
-  // await walletConnect.core.pairing.activate({topic: pairingObj.topic});
   subscribeWalletConnectEvent();
 };
 
@@ -122,19 +121,18 @@ export const subscribeWalletConnectEvent = () => {
           },
         });
       } else if (request?.method?.includes('wallet_getCapabilities')) {
+        const chainIds = request?.params?.[1];
+
+        const capabilities = {};
+        (chainIds || []).forEach(chainId => {
+          capabilities[chainId] = {
+            atomicBatch: {supported: true},
+          };
+        });
+
         await walletConnect.respondSessionRequest({
           topic,
-          response: {
-            id,
-            jsonrpc: '2.0',
-            result: {
-              [request?.params?.[0]?.chainId]: {
-                atomic: {
-                  status: 'unsupported',
-                },
-              },
-            },
-          },
+          response: {id, jsonrpc: '2.0', result: capabilities},
         });
       } else {
         const requestSessionData =
