@@ -4,10 +4,14 @@ import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletcon
 import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
 import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
-import {showToast, hideToast} from 'utils/toast';
+import {showToast} from 'utils/toast';
 import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tonWalletConnect';
 import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/stellarWalletConnect';
 import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/rippleWalletConnect';
+import {
+  PolkadotWalletConnectSignMessage,
+  polkadotWalletConnectTransaction,
+} from 'dok-wallet-blockchain-networks/service/polkadotWalletConnect';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -71,6 +75,14 @@ export const createWalletConnectTransaction = createAsyncThunk(
         );
       } else if (method?.includes('wallet_sendCalls')) {
         tx = await etherWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          chain_name,
+          null,
+        );
+      } else if (method?.includes('polkadot')) {
+        tx = await polkadotWalletConnectTransaction(
           method,
           transactionData,
           privateKey,
