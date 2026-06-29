@@ -961,6 +961,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       additionalL1Fee,
       isFetchNonce,
       existingNonce,
+      swapData,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -971,18 +972,40 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             localErc20ABI,
             walletSigner,
           );
-          const value = convertToSmallAmount(amount, decimals);
-          const estimateGas = await contract[
-            'transfer(address,uint256)'
-          ].estimateGas(toAddress, value);
+
+          let estimateGas;
+          let value;
+          let finalToAddress = toAddress;
+
+          if (swapData) {
+            const swapGasLimit = swapData.gasLimit || swapData.gas;
+            if (swapGasLimit) {
+              estimateGas = BigInt(swapGasLimit);
+            } else {
+              estimateGas = await evmProvider.estimateGas({
+                from: fromAddress,
+                to: swapData.to,
+                value: swapData.value || '0x0',
+                data: swapData.data || '0x',
+              });
+            }
+            value = swapData.value || '0x0';
+            finalToAddress = swapData.to || toAddress;
+          } else {
+            value = convertToSmallAmount(amount, decimals);
+            estimateGas = await contract[
+              'transfer(address,uint256)'
+            ].estimateGas(toAddress, value);
+          }
+
           return await calculateTotalFees({
             evmProvider,
             feesType,
             value,
             estimateGas,
             fromAddress,
-            toAddress,
-            erc20TokenContract: contract,
+            toAddress: finalToAddress,
+            erc20TokenContract: swapData ? undefined : contract,
             additionalL1Fee,
             isFetchNonce,
             existingNonce,
@@ -1075,21 +1098,40 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       additionalL1Fee,
       isFetchNonce,
       existingNonce,
+      swapData,
     }) =>
       retryFunc(async evmProvider => {
         try {
-          const value = convertToSmallAmount(amount, 18);
-          const payload = {
-            from: fromAddress,
-            to: toAddress,
-            value,
-          };
-          const estimateGas = await evmProvider.estimateGas(payload);
+          let estimateGas;
+          let value;
+          let finalToAddress = toAddress;
+          if (swapData) {
+            const swapGasLimit = swapData.gasLimit || swapData.gas;
+            if (swapGasLimit) {
+              estimateGas = BigInt(swapGasLimit);
+            } else {
+              estimateGas = await evmProvider.estimateGas({
+                from: fromAddress,
+                to: swapData.to,
+                value: swapData.value || '0x0',
+                data: swapData.data || '0x',
+              });
+            }
+            value = swapData.value || '0x0';
+            finalToAddress = swapData.to || toAddress;
+          } else {
+            value = convertToSmallAmount(amount, 18);
+            estimateGas = await evmProvider.estimateGas({
+              from: fromAddress,
+              to: toAddress,
+              value,
+            });
+          }
           return await calculateTotalFees({
             estimateGas,
             evmProvider,
             fromAddress,
-            toAddress,
+            toAddress: finalToAddress,
             value,
             feesType,
             additionalL1Fee,
@@ -1545,6 +1587,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }
     },
     send: async ({
+      swapData,
       to,
       from,
       amount,
@@ -1776,6 +1819,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }
     },
     sendToken: async ({
+      swapData,
       to,
       amount,
       privateKey,
