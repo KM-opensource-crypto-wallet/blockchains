@@ -358,6 +358,23 @@ const getBaseCoin = async (chain, wallet, coin) => {
       await chain.checkDelegation?.({address: wallet.address}),
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
+    swap: async payload =>
+      await chain.swap({
+        from: wallet.address,
+        privateKey: wallet.privateKey,
+        ...payload,
+      }),
+    getEstimateSwapFee: async payload =>
+      await chain.getEstimateSwapFee({
+        fromAddress: wallet.address,
+        ...payload,
+      }),
+    checkAndApproveSwap: async payload =>
+      await chain.checkAndApproveSwap({
+        from: wallet.address,
+        privateKey: wallet.privateKey,
+        ...payload,
+      }),
   };
 
   return coinWrapper;
@@ -578,6 +595,27 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.checkDelegation?.({address: wallet.address}),
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
+    swap: async payload =>
+      await chain.swapToken({
+        from: wallet.address,
+        privateKey: wallet.privateKey,
+        contractAddress: token.contractAddress,
+        decimal: token.decimal,
+        ...payload,
+      }),
+    getEstimateSwapFee: async payload =>
+      await chain.getEstimateSwapFee({
+        fromAddress: wallet.address,
+        contractAddress: token.contractAddress,
+        decimal: token.decimal,
+        ...payload,
+      }),
+    checkAndApproveSwap: async payload =>
+      await chain.checkAndApproveSwap({
+        from: wallet.address,
+        privateKey: wallet.privateKey,
+        ...payload,
+      }),
   };
 
   return coinWrapper;

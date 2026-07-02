@@ -140,10 +140,15 @@ export const calculateEstimateFee = createAsyncThunk(
         respData = await nativeCoin?.getEstimateFeeForStakingRewards(payload);
       } else if (payload?.isBatchTransaction) {
         respData = await nativeCoin?.getEstimateFeeForBatchTransaction(payload);
+      } else if (payload?.isSwapFee) {
+        respData = await nativeCoin?.getEstimateSwapFee({
+          ...payload,
+          swapData: transfer?.swapData,
+          additionalL1Fee: additionalL1Fee[chain_name],
+        });
       } else {
         respData = await nativeCoin?.getEstimateFee({
           selectedUTXOs: transfer?.selectedUTXOs,
-          swapData: transfer?.swapData,
           ...payload,
           feeMultiplier: multiplier[chain_name],
           additionalL1Fee: additionalL1Fee[chain_name],
