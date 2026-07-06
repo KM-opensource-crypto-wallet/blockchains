@@ -616,6 +616,18 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         privateKey: wallet.privateKey,
         ...payload,
       }),
+    readSwapAllowance: async payload =>
+      await chain.readSwapAllowance({
+        from: wallet.address,
+        tokenAddress: token.contractAddress,
+        ...payload,
+      }),
+    getEstimateFeForSwapApprove: async payload =>
+      await chain.getEstimateFeForSwapApprove({
+        from: wallet.address,
+        tokenAddress: token.contractAddress,
+        ...payload,
+      }),
   };
 
   return coinWrapper;

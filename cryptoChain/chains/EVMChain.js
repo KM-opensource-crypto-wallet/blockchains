@@ -2018,11 +2018,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contractAddress,
       from,
       privateKey,
+      amountInWei,
     }) => {
       try {
         let currentNonce;
         let approvalSent = false;
         const isPermit2Flow = Boolean(swapData?.permit_abi);
+        // Swap calldata is pre-built server-side with its own exact wei amount, which
+        // can differ slightly from our client-computed amountInWei (re-quoting, decimal
+        // round-tripping). A small buffer absorbs that drift without approving unlimited.
+        const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
 
         await retryFunc(async evmProvider => {
           const walletSigner = new ethers.Wallet(privateKey, evmProvider);
@@ -2045,25 +2050,27 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               from,
               swapData.spender,
             );
-            if (tokenToPermit2Allowance === 0n) {
-              // USDT reverts when changing non-zero → non-zero; always reset first.
-              const resetOverrides =
-                currentNonce != null ? {nonce: currentNonce} : {};
-              const resetTx = await tokenContract.approve(
-                swapData.spender,
-                0n,
-                resetOverrides,
-              );
-              await resetTx.wait();
-              if (currentNonce != null) {
-                currentNonce++;
+            if (tokenToPermit2Allowance < amountInWei) {
+              if (tokenToPermit2Allowance > 0n) {
+                // USDT reverts when changing non-zero → non-zero; always reset first.
+                const resetOverrides =
+                  currentNonce != null ? {nonce: currentNonce} : {};
+                const resetTx = await tokenContract.approve(
+                  swapData.spender,
+                  0n,
+                  resetOverrides,
+                );
+                await resetTx.wait();
+                if (currentNonce != null) {
+                  currentNonce++;
+                }
               }
 
               const approveOverrides =
                 currentNonce != null ? {nonce: currentNonce} : {};
               const approveTx = await tokenContract.approve(
                 swapData.spender,
-                ethers.MaxUint256,
+                approveAmount,
                 approveOverrides,
               );
               await approveTx.wait();
@@ -2082,8 +2089,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                   swapData.to,
                 );
               const nowSecs = BigInt(Math.floor(Date.now() / 1000));
-              if (permit2Amount === 0n || permit2Expiration < nowSecs) {
-                const MAX_UINT160 = 2n ** 160n - 1n;
+              if (permit2Amount < amountInWei || permit2Expiration < nowSecs) {
                 const thirtyDaysSecs = BigInt(
                   Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
                 );
@@ -2092,7 +2098,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 const permit2Tx = await permit2Contract.approve(
                   contractAddress,
                   swapData.to,
-                  MAX_UINT160,
+                  approveAmount,
                   thirtyDaysSecs,
                   permit2Overrides,
                 );
@@ -2108,12 +2114,27 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               from,
               swapData.spender,
             );
-            if (currentAllowance === 0n) {
+            if (currentAllowance < amountInWei) {
+              if (currentAllowance > 0n) {
+                // USDT reverts when changing non-zero → non-zero; always reset first.
+                const resetOverrides =
+                  currentNonce != null ? {nonce: currentNonce} : {};
+                const resetTx = await tokenContract.approve(
+                  swapData.spender,
+                  0n,
+                  resetOverrides,
+                );
+                await resetTx.wait();
+                if (currentNonce != null) {
+                  currentNonce++;
+                }
+              }
+
               const approveOverrides =
                 currentNonce != null ? {nonce: currentNonce} : {};
               const approveTx = await tokenContract.approve(
                 swapData.spender,
-                ethers.MaxUint256,
+                approveAmount,
                 approveOverrides,
               );
               await approveTx.wait();
@@ -2132,6 +2153,78 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         throw new Error(reason);
       }
     },
+    readSwapAllowance: async ({
+      from,
+      contractAddress,
+      tokenAddress,
+      amountInWei,
+    }) =>
+      retryFunc(async evmProvider => {
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          erc20Abi,
+          evmProvider,
+        );
+        // contractAddress here is the swap spender (router/Permit2), not the token.
+        const allowance = await tokenContract.allowance(from, contractAddress);
+        const isApproved = allowance >= amountInWei;
+        const needsReset = !isApproved && allowance > 0n;
+        const required = isApproved ? 0n : amountInWei - allowance;
+        return {
+          allowance,
+          isApproved,
+          needsReset,
+          required,
+        };
+      }, null),
+    getEstimateFeForSwapApprove: async ({
+      existingNonce,
+      from,
+      contractAddress,
+      tokenAddress,
+      amountInWei,
+      feesType,
+      nonce,
+      allowance,
+    }) =>
+      retryFunc(async evmProvider => {
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          erc20Abi,
+          evmProvider,
+        );
+        // contractAddress here is the swap spender (router/Permit2), not the token.
+        let estimateGas;
+        try {
+          estimateGas = await tokenContract.approve.estimateGas(
+            contractAddress,
+            amountInWei,
+            {from},
+          );
+        } catch (error) {
+          estimateGas = 60000n;
+        }
+
+        if (allowance > 0n && allowance < amountInWei) {
+          estimateGas += 20000n;
+        }
+
+        const finalEstimateGas = (estimateGas * 110n) / 100n;
+        const obj = await calculateTotalFees({
+          feesType,
+          evmProvider,
+          fromAddress: from,
+          toAddress: contractAddress,
+          estimateGas: finalEstimateGas,
+          isFetchNonce: nonce == null,
+          existingNonce: existingNonce,
+        });
+        return {
+          ...obj,
+          allowance,
+          fee: allowance ? obj.fee * 2 : obj.fee,
+        };
+      }, null),
     sendNFT: async ({
       to,
       from,

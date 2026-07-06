@@ -14,6 +14,8 @@ import {
   isPendingTransactionSupportedChain,
   createPendingTransactionKey,
   getExplorerTxUrl,
+  convertToSmallAmount,
+  parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {showToast} from 'utils/toast';
 import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
@@ -41,7 +43,10 @@ const initialState = {
   exchangeToAddress: '',
   exchangeToName: '',
   availableProviders: [],
-  slippage: '0.5',
+  slippage: '',
+  allowanceData: null,
+  allowanceLoading: false,
+  approveLoading: false,
 };
 
 export const calculateExchange = createAsyncThunk(
@@ -107,7 +112,7 @@ export const calculateExchange = createAsyncThunk(
         refundAddress: selectedFromAsset?.address,
         extraData,
         providerName: selectedExchangeChain?.providerName,
-        slippage: Number(slippage) || 0.5,
+        slippage: slippage ? Number(slippage) : undefined,
       };
       const resp = await createExchange(payload);
       if (resp?.status === 201 || resp?.status === 200) {
@@ -127,7 +132,7 @@ export const calculateExchange = createAsyncThunk(
               swapData: data?.swapData,
               memo: data?.memo || null,
               currentCoin: selectedFromAsset,
-              amount: amountFrom,
+              amount: data?.amount + '',
               isSendFunds: false,
             }),
           );
@@ -136,7 +141,7 @@ export const calculateExchange = createAsyncThunk(
               isFetchNonce: true,
               fromAddress: selectedFromAsset?.address,
               toAddress: data?.depositAddress,
-              amount: amountFrom,
+              amount: data?.amount + '',
               contractAddress: selectedFromAsset?.contractAddress,
               selectedWallet: selectedFromWallet,
               selectedCoin: selectedFromAsset,
@@ -162,6 +167,156 @@ export const calculateExchange = createAsyncThunk(
   },
 );
 
+export const fetchExchangeAllowance = createAsyncThunk(
+  'exchange/fetchExchangeAllowance',
+  async (_, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      dispatch(setExchangeFields({allowanceLoading: true}));
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const spenderAddress = transferData?.swapData?.spender;
+      const decimals = selectedFromAsset?.decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+      const result = await nativeCoin.readSwapAllowance({
+        from: selectedFromAsset?.address,
+        contractAddress: spenderAddress,
+        tokenAddress: selectedFromAsset?.contractAddress,
+        amountInWei,
+      });
+      const allowanceData = {
+        allowanceFormatted: parseBalance(result.allowance, decimals),
+        requiredFormatted: parseBalance(result.required, decimals),
+        amountFormatted: parseBalance(amountInWei, decimals),
+        isApproved: result.isApproved,
+        needsReset: result.needsReset,
+        decimal: selectedFromAsset?.decimal,
+      };
+      dispatch(
+        setExchangeFields({
+          allowanceLoading: false,
+          allowanceData,
+        }),
+      );
+      return allowanceData;
+    } catch (error) {
+      console.error('Error in fetchExchangeAllowance', error);
+      dispatch(
+        setExchangeFields({allowanceLoading: false, allowanceData: null}),
+      );
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
+export const fetchExchangeApproveEstimationFee = createAsyncThunk(
+  'exchange/fetchExchangeApproveEstimationFee',
+  async (payload, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const spenderAddress = transferData?.swapData?.spender;
+      const decimals = selectedFromAsset?.decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const allowanceData = currentState?.exchange?.allowanceData;
+      const allowance = BigInt(
+        convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
+          '0',
+      );
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+      const result = await nativeCoin.getEstimateFeForSwapApprove({
+        from: selectedFromAsset?.address,
+        contractAddress: spenderAddress,
+        tokenAddress: selectedFromAsset?.contractAddress,
+        amountInWei,
+        feesType: payload?.feesType,
+        allowance,
+      });
+      dispatch(
+        setExchangeFields({
+          allowanceData: {
+            ...allowanceData,
+            transactionFee: result.fee,
+          },
+        }),
+      );
+    } catch (error) {
+      console.error('Error in fetchExchangeApproveEstimationFee', error);
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
+export const approveSwapAllowance = createAsyncThunk(
+  'exchange/approveSwapAllowance',
+  async (_, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      dispatch(setExchangeFields({approveLoading: true}));
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const swapData = transferData?.swapData;
+
+      if (!isEVMChain(selectedFromAsset?.chain_name)) {
+        throw new Error('approveSwapAllowance only supports EVM chains');
+      }
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+      const decimals = selectedFromAsset?.decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const result = await nativeCoin.checkAndApproveSwap({
+        swapData,
+        contractAddress: selectedFromAsset?.contractAddress,
+        amountInWei,
+      });
+      dispatch(setExchangeFields({approveLoading: false}));
+      return result;
+    } catch (error) {
+      console.error('Error in approveSwapAllowance', error);
+      dispatch(setExchangeFields({approveLoading: false}));
+      showToast({
+        type: 'errorToast',
+        title: error?.message || 'Approval failed',
+      });
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
 export const sendSwap = createAsyncThunk(
   'exchange/sendSwap',
   async (txData, thunkAPI) => {
@@ -170,15 +325,8 @@ export const sendSwap = createAsyncThunk(
       const currentState = thunkAPI.getState();
       thunkAPI.dispatch(setExchangeLoading(true));
 
-      const {
-        selectedFromAsset,
-        selectedFromWallet,
-        selectedToAsset,
-        amountFrom,
-        selectedExchangeChain,
-        extraData,
-        slippage,
-      } = getExchange(currentState);
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
       const transferData = getTransferData(currentState);
       const navigation = txData?.navigation;
       const router = txData?.router;
@@ -196,48 +344,8 @@ export const sendSwap = createAsyncThunk(
         throw new Error('Failed to get native coin');
       }
 
-      let swapData = transferData?.swapData;
-      const spenderAddress = swapData?.spender;
-      const originalNonce = txData?.nonce ?? transferData?.nonce;
-      let swapNonce = originalNonce;
-
-      if (spenderAddress && selectedFromAsset?.contractAddress) {
-        const approveResult = await nativeCoin.checkAndApproveSwap({
-          swapData,
-          contractAddress: selectedFromAsset.contractAddress,
-        });
-        const {nextNonce, approvalSent} = approveResult || {};
-
-        if (nextNonce !== undefined) {
-          swapNonce = nextNonce;
-        }
-
-        if (approvalSent) {
-          const refreshResp = await createExchange({
-            coinFrom: selectedFromAsset?.symbol,
-            coinTo: selectedToAsset?.symbol,
-            networkFrom: selectedFromAsset?.chain_symbol,
-            networkTo: selectedToAsset?.chain_symbol,
-            fromChainName: selectedFromAsset?.chain_name,
-            toChainName: selectedToAsset?.chain_name,
-            fromContractAddress: selectedFromAsset?.contractAddress,
-            toContractAddress: selectedToAsset?.contractAddress,
-            amount: Number(amountFrom),
-            rateType: 'fixed',
-            withdrawalAddress: transferData?.toAddress,
-            refundAddress: selectedFromAsset?.address,
-            extraData,
-            providerName: selectedExchangeChain?.providerName,
-            slippage: Number(slippage) || 0.5,
-          });
-          if (
-            (refreshResp?.status === 200 || refreshResp?.status === 201) &&
-            refreshResp?.data?.swapData
-          ) {
-            swapData = refreshResp.data.swapData;
-          }
-        }
-      }
+      const swapData = transferData?.swapData;
+      const swapNonce = txData?.nonce ?? transferData?.nonce;
 
       const res = await nativeCoin.swap({
         swapData,
