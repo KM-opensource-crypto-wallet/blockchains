@@ -10,6 +10,15 @@ export const selectAllWallets = state => {
   return state.wallets?.allWallets;
 };
 
+export const isWalletHiddenAndLocked = wallet =>
+  !wallet?.walletName ||
+  (!!wallet?.hideSettings?.isHidden && !wallet?.hideSettings?.isRevealed);
+
+export const selectVisibleWallets = state => {
+  const allWallets = state.wallets?.allWallets || [];
+  return allWallets.filter(wallet => !isWalletHiddenAndLocked(wallet));
+};
+
 export const selectAllWalletName = state => {
   const allWallets = state.wallets?.allWallets;
   return allWallets.map(item => item?.walletName);

@@ -80,6 +80,7 @@ import {
 import {APP_VERSION} from 'utils/common';
 import {showToast} from 'utils/toast';
 import {MainNavigation} from 'utils/navigation';
+import {verifySecretCode} from 'utils/hideWallet';
 import {v4} from 'uuid';
 import {
   setIsAddingGroup,
@@ -148,6 +149,29 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
     }
   });
   return chainWallets;
+};
+
+export const RELOCK_OPTIONS = {
+  RELAUNCH: 'RELAUNCH',
+  BACKGROUND: 'BACKGROUND',
+  MANUAL: 'MANUAL',
+};
+
+const isWalletHiddenAndLocked = wallet =>
+  !wallet?.walletName ||
+  (!!wallet?.hideSettings?.isHidden && !wallet?.hideSettings?.isRevealed);
+
+const reassignCurrentWalletIndexIfHidden = state => {
+  const allWallets = state.allWallets;
+  if (!isWalletHiddenAndLocked(allWallets[state.currentWalletIndex])) {
+    return;
+  }
+  const firstVisibleIndex = allWallets.findIndex(
+    item => !isWalletHiddenAndLocked(item),
+  );
+  if (firstVisibleIndex !== -1) {
+    state.currentWalletIndex = firstVisibleIndex;
+  }
 };
 
 const refreshCoinData = (dispatch, currentCoin, txHash = null) => {
@@ -1739,6 +1763,49 @@ export const searchCoinFromCurrency = createAsyncThunk(
   },
 );
 
+export const findHiddenWalletByCode = (state, code) => {
+  const allWallets = selectAllWallets(state) || [];
+  const matchIndex = allWallets.findIndex(wallet => {
+    const hideSettings = wallet?.hideSettings;
+    if (!hideSettings?.isHidden) {
+      return false;
+    }
+    return verifySecretCode(
+      code,
+      hideSettings.secretCodeSalt,
+      hideSettings.secretCodeIterations,
+      hideSettings.secretCodeHash,
+    );
+  });
+  if (matchIndex === -1) {
+    return {matched: false, walletIndex: null, walletName: null};
+  }
+  return {
+    matched: true,
+    walletIndex: matchIndex,
+    walletName: allWallets[matchIndex].walletName,
+  };
+};
+
+export const isSecretCodeInUseByOtherWallet = (state, code, walletIndex) => {
+  const allWallets = selectAllWallets(state) || [];
+  return allWallets.some((wallet, index) => {
+    if (index === Number(walletIndex)) {
+      return false;
+    }
+    const hideSettings = wallet?.hideSettings;
+    if (!hideSettings?.isHidden) {
+      return false;
+    }
+    return verifySecretCode(
+      code,
+      hideSettings.secretCodeSalt,
+      hideSettings.secretCodeIterations,
+      hideSettings.secretCodeHash,
+    );
+  });
+};
+
 export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
@@ -1805,16 +1872,43 @@ export const walletsSlice = createSlice({
       const newWallets = payload?.allWallets;
       const newCurrentWalletIndex = validateNumber(payload?.currentWalletIndex);
       const previousAllWallets = state.allWallets;
-      if (previousAllWallets.length === newWallets.length) {
-        state.allWallets = newWallets;
-        if (
-          newCurrentWalletIndex !== null &&
-          newCurrentWalletIndex >= 0 &&
-          newCurrentWalletIndex < previousAllWallets.length
-        ) {
-          state.currentWalletIndex = newCurrentWalletIndex;
-        }
+      if (
+        !Array.isArray(newWallets) ||
+        previousAllWallets.length !== newWallets.length ||
+        newWallets.some(wallet => !wallet || !wallet.walletName)
+      ) {
+        console.warn(
+          'rearrangeWallet: rejected malformed wallet order',
+          newWallets,
+        );
+        return;
       }
+      state.allWallets = newWallets;
+      if (
+        newCurrentWalletIndex !== null &&
+        newCurrentWalletIndex >= 0 &&
+        newCurrentWalletIndex < previousAllWallets.length
+      ) {
+        state.currentWalletIndex = newCurrentWalletIndex;
+      }
+    },
+    removeInvalidWallets: state => {
+      const allWallets = state.allWallets;
+      const cleaned = allWallets.filter(
+        wallet => !!wallet && !!wallet.walletName,
+      );
+      if (cleaned.length === allWallets.length) {
+        return;
+      }
+      const previousCurrentWallet = allWallets[state.currentWalletIndex];
+      state.allWallets = cleaned;
+      const newCurrentWalletIndex = cleaned.findIndex(
+        wallet =>
+          (wallet?.clientId || wallet?.id) ===
+          (previousCurrentWallet?.clientId || previousCurrentWallet?.id),
+      );
+      state.currentWalletIndex =
+        newCurrentWalletIndex !== -1 ? newCurrentWalletIndex : 0;
     },
     setBackedUp: state => {
       const currentWallet = state.allWallets[state.currentWalletIndex];
@@ -1867,6 +1961,15 @@ export const walletsSlice = createSlice({
           `setCurrentWalletIndex: missing or invalid action payload: ${index}`,
         );
       }
+      state.allWallets.forEach((wallet, walletIndex) => {
+        if (
+          walletIndex !== Number(index) &&
+          wallet?.hideSettings?.isRevealed &&
+          wallet?.hideSettings?.relockOption !== RELOCK_OPTIONS.MANUAL
+        ) {
+          wallet.hideSettings.isRevealed = false;
+        }
+      });
       state.currentWalletIndex = index;
     },
     deleteWallet: (state, action) => {
@@ -2356,6 +2459,61 @@ export const walletsSlice = createSlice({
       } else {
         console.warn('No wallet found for privacy mode');
       }
+    },
+    setWalletHideSettings: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const allWallets = state.allWallets;
+      const currentWallet = allWallets[walletIndex];
+      if (!currentWallet) {
+        throw new Error('setWalletHideSettings: wallet not found');
+      }
+      const {
+        secretCodeSalt,
+        secretCodeHash,
+        secretCodeIterations,
+        relockOption,
+      } = payload || {};
+      if (!secretCodeSalt || !secretCodeHash) {
+        throw new Error('setWalletHideSettings: missing secret code hash/salt');
+      }
+      currentWallet.hideSettings = {
+        isHidden: true,
+        secretCodeSalt,
+        secretCodeHash,
+        secretCodeIterations,
+        relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
+        isRevealed: false,
+      };
+      reassignCurrentWalletIndexIfHidden(state);
+    },
+    clearWalletHideSettings: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const currentWallet = state.allWallets[walletIndex];
+      if (currentWallet) {
+        currentWallet.hideSettings = undefined;
+      }
+    },
+    setWalletRevealed: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const isRevealed = !!payload?.isRevealed;
+      const currentWallet = state.allWallets[walletIndex];
+      if (currentWallet?.hideSettings) {
+        currentWallet.hideSettings.isRevealed = isRevealed;
+        if (!isRevealed) {
+          reassignCurrentWalletIndexIfHidden(state);
+        }
+      }
+    },
+    rehideWalletsOnBackground: state => {
+      state.allWallets.forEach(item => {
+        if (item?.hideSettings?.relockOption === RELOCK_OPTIONS.BACKGROUND) {
+          item.hideSettings.isRevealed = false;
+        }
+      });
+      reassignCurrentWalletIndexIfHidden(state);
+    },
+    reassignCurrentWalletIfHidden: state => {
+      reassignCurrentWalletIndexIfHidden(state);
     },
     resetCoinsToDefaultAddressForPrivacyMode: (state, {payload}) => {
       const allWallets = Array.isArray(state.allWallets)
@@ -2891,6 +3049,7 @@ export const {
   updateContractAddress,
   setWalletPosition,
   rearrangeWallet,
+  removeInvalidWallets,
   addPendingTransactions,
   setPendingTransactions,
   removePendingTransactions,
@@ -2900,6 +3059,11 @@ export const {
   setCurrentWalletCoinsPosition,
   sortWallets,
   togglePrivacyMode,
+  setWalletHideSettings,
+  clearWalletHideSettings,
+  setWalletRevealed,
+  rehideWalletsOnBackground,
+  reassignCurrentWalletIfHidden,
   resetCoinsToDefaultAddressForPrivacyMode,
   setMasterClientId,
   resetIsAdding50MoreAddresses,
