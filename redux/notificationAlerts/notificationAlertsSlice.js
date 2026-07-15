@@ -125,14 +125,23 @@ export const fetchSubscriptionsThunk = createAsyncThunk(
 
 /**
  * Soft-delete a subscription on the backend and remove from local state.
+ * Rejects if the backend call fails, so the alert stays in local state
+ * and callers can surface the failure instead of silently pretending it
+ * was removed.
  */
 export const deleteAlertThunk = createAsyncThunk(
   'notificationAlerts/deleteAlert',
-  async ({item}) => {
+  async ({item}, {rejectWithValue}) => {
     if (item.backendId) {
-      await deleteSubscription(item.backendId).catch(err =>
-        console.error('deleteAlertThunk error:', err?.message),
-      );
+      try {
+        await deleteSubscription(item.backendId);
+      } catch (err) {
+        const message =
+          err?.response?.data?.message ||
+          err?.message ||
+          'Failed to delete alert';
+        return rejectWithValue(message);
+      }
     }
     return item;
   },
