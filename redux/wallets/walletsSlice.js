@@ -31,6 +31,7 @@ import {
   getCurrentWalletIndex,
   getMasterClientId,
   getSelectedNftData,
+  isWalletHiddenAndLocked,
   selectAllCoins,
   selectAllCoinSymbol,
   selectAllWalletName,
@@ -156,10 +157,6 @@ export const RELOCK_OPTIONS = {
   BACKGROUND: 'BACKGROUND',
   MANUAL: 'MANUAL',
 };
-
-const isWalletHiddenAndLocked = wallet =>
-  !wallet?.walletName ||
-  (!!wallet?.hideSettings?.isHidden && !wallet?.hideSettings?.isRevealed);
 
 const reassignCurrentWalletIndexIfHidden = state => {
   const allWallets = state.allWallets;
@@ -1767,7 +1764,7 @@ export const findHiddenWalletByCode = (state, code) => {
   const allWallets = selectAllWallets(state) || [];
   const matchIndex = allWallets.findIndex(wallet => {
     const hideSettings = wallet?.hideSettings;
-    if (!hideSettings?.isHidden) {
+    if (!hideSettings) {
       return false;
     }
     return verifySecretCode(
@@ -1794,7 +1791,7 @@ export const isSecretCodeInUseByOtherWallet = (state, code, walletIndex) => {
       return false;
     }
     const hideSettings = wallet?.hideSettings;
-    if (!hideSettings?.isHidden) {
+    if (!hideSettings) {
       return false;
     }
     return verifySecretCode(
@@ -1964,10 +1961,11 @@ export const walletsSlice = createSlice({
       state.allWallets.forEach((wallet, walletIndex) => {
         if (
           walletIndex !== Number(index) &&
-          wallet?.hideSettings?.isRevealed &&
-          wallet?.hideSettings?.relockOption !== RELOCK_OPTIONS.MANUAL
+          wallet?.hideSettings &&
+          !wallet.hideSettings.isHidden &&
+          wallet.hideSettings.relockOption !== RELOCK_OPTIONS.MANUAL
         ) {
-          wallet.hideSettings.isRevealed = false;
+          wallet.hideSettings.isHidden = true;
         }
       });
       state.currentWalletIndex = index;
@@ -2483,7 +2481,6 @@ export const walletsSlice = createSlice({
         secretCodeHash,
         secretCodeIterations,
         relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
-        isRevealed: false,
         hideNotification: hideNotification ?? true,
       };
       reassignCurrentWalletIndexIfHidden(state);
@@ -2497,11 +2494,11 @@ export const walletsSlice = createSlice({
     },
     setWalletRevealed: (state, {payload}) => {
       const walletIndex = payload?.walletIndex;
-      const isRevealed = !!payload?.isRevealed;
+      const isHidden = !!payload?.isHidden;
       const currentWallet = state.allWallets[walletIndex];
       if (currentWallet?.hideSettings) {
-        currentWallet.hideSettings.isRevealed = isRevealed;
-        if (!isRevealed) {
+        currentWallet.hideSettings.isHidden = isHidden;
+        if (isHidden) {
           reassignCurrentWalletIndexIfHidden(state);
         }
       }
@@ -2509,7 +2506,7 @@ export const walletsSlice = createSlice({
     rehideWalletsOnBackground: state => {
       state.allWallets.forEach(item => {
         if (item?.hideSettings?.relockOption === RELOCK_OPTIONS.BACKGROUND) {
-          item.hideSettings.isRevealed = false;
+          item.hideSettings.isHidden = true;
         }
       });
       reassignCurrentWalletIndexIfHidden(state);

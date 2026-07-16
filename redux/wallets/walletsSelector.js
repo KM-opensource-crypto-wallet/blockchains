@@ -11,12 +11,18 @@ export const selectAllWallets = state => {
 };
 
 export const isWalletHiddenAndLocked = wallet =>
-  !wallet?.walletName ||
-  (!!wallet?.hideSettings?.isHidden && !wallet?.hideSettings?.isRevealed);
+  !wallet?.walletName || !!wallet?.hideSettings?.isHidden;
 
 export const selectVisibleWallets = state => {
   const allWallets = state.wallets?.allWallets || [];
   return allWallets.filter(wallet => !isWalletHiddenAndLocked(wallet));
+};
+
+export const selectVisibleWalletsWithIndex = state => {
+  const allWallets = state.wallets?.allWallets || [];
+  return allWallets
+    .map((wallet, index) => ({wallet, index}))
+    .filter(({wallet}) => !isWalletHiddenAndLocked(wallet));
 };
 
 export const selectAllWalletName = state => {
