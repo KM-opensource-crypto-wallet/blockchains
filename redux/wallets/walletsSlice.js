@@ -1760,47 +1760,55 @@ export const searchCoinFromCurrency = createAsyncThunk(
   },
 );
 
-export const findHiddenWalletByCode = (state, code) => {
+export const findHiddenWalletByCode = async (state, code) => {
   const allWallets = selectAllWallets(state) || [];
-  const matchIndex = allWallets.findIndex(wallet => {
-    const hideSettings = wallet?.hideSettings;
+  for (let index = 0; index < allWallets.length; index++) {
+    const hideSettings = allWallets[index]?.hideSettings;
     if (!hideSettings) {
-      return false;
+      continue;
     }
-    return verifySecretCode(
+    const matched = await verifySecretCode(
       code,
       hideSettings.secretCodeSalt,
       hideSettings.secretCodeIterations,
       hideSettings.secretCodeHash,
     );
-  });
-  if (matchIndex === -1) {
-    return {matched: false, walletIndex: null, walletName: null};
+    if (matched) {
+      return {
+        matched: true,
+        walletIndex: index,
+        walletName: allWallets[index].walletName,
+      };
+    }
   }
-  return {
-    matched: true,
-    walletIndex: matchIndex,
-    walletName: allWallets[matchIndex].walletName,
-  };
+  return {matched: false, walletIndex: null, walletName: null};
 };
 
-export const isSecretCodeInUseByOtherWallet = (state, code, walletIndex) => {
+export const isSecretCodeInUseByOtherWallet = async (
+  state,
+  code,
+  walletIndex,
+) => {
   const allWallets = selectAllWallets(state) || [];
-  return allWallets.some((wallet, index) => {
+  for (let index = 0; index < allWallets.length; index++) {
     if (index === Number(walletIndex)) {
-      return false;
+      continue;
     }
-    const hideSettings = wallet?.hideSettings;
+    const hideSettings = allWallets[index]?.hideSettings;
     if (!hideSettings) {
-      return false;
+      continue;
     }
-    return verifySecretCode(
+    const matched = await verifySecretCode(
       code,
       hideSettings.secretCodeSalt,
       hideSettings.secretCodeIterations,
       hideSettings.secretCodeHash,
     );
-  });
+    if (matched) {
+      return true;
+    }
+  }
+  return false;
 };
 
 export const walletsSlice = createSlice({
