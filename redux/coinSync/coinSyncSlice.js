@@ -109,6 +109,9 @@ export const syncAllCoins = createAsyncThunk(
     let coinsToCheck = allCoins.filter(
       coin => !existingKeys.has(generateUniqueKeyForChain(coin)),
     );
+    coinsToCheck = coinsToCheck.filter(coin =>
+      validateSupportedChain(coin?.chain_name),
+    );
 
     // For private key wallets, filter to compatible chains only
     if (isPrivateKeyWallet) {
