@@ -2689,8 +2689,24 @@ export const walletsSlice = createSlice({
       const wallet = allWallets[walletIndex];
       if (!wallet) {
         console.warn('wallet not found', walletIndex);
+        return;
       }
       wallet.lastCoinsScanTimestamp = new Date().toISOString();
+    },
+    dismissCoinSyncBanner: (state, action) => {
+      const clientId = action?.payload?.clientId;
+      if (!clientId) {
+        console.warn('clientId is required to dismiss coin sync banner');
+        return;
+      }
+      const wallet = state.allWallets?.find(
+        item => item?.clientId === clientId,
+      );
+      if (!wallet) {
+        console.warn('wallet not found for clientId', clientId);
+        return;
+      }
+      wallet.isCoinSyncBannerDismissed = true;
     },
   },
   extraReducers: builder => {
@@ -2867,6 +2883,7 @@ export const walletsSlice = createSlice({
         payload?.isImportWalletWithPrivateKey;
       newStoreWallet.updateTimestamp = Date.now();
       newStoreWallet.isBackedup = isFromImportWallet;
+      newStoreWallet.isImported = isFromImportWallet;
       newStoreWallet.isImportWalletWithPrivateKey =
         isImportWalletWithPrivateKey;
       newStoreWallet.privateKey = privateKey;
@@ -3080,6 +3097,7 @@ export const {
   removeUnClaimedLightningBTC,
   addCoinsToWallet,
   addLastCoinScanData,
+  dismissCoinSyncBanner,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators

@@ -397,8 +397,21 @@ export const getLastCoinsScanTimestamp = state => {
   return currentWallet?.lastCoinsScanTimestamp;
 };
 
-export const isCoinsScanTimestampValid = state => {
-  const timestamp = getLastCoinsScanTimestamp(state);
+export const isCoinScanAvailableForTimestamp = timestamp => {
   if (timestamp === null || timestamp === undefined) return true;
   return dayjs().diff(dayjs(timestamp), 'hour') >= 24;
+};
+
+export const isCoinsScanTimestampValid = state =>
+  isCoinScanAvailableForTimestamp(getLastCoinsScanTimestamp(state));
+
+// One-time banner: only imported wallets that have never been scanned and
+// never dismissed the banner (both flags persist on the wallet object).
+export const selectShouldShowCoinSyncBanner = state => {
+  const wallet = selectCurrentWallet(state);
+  return (
+    !!wallet?.isImported &&
+    !wallet?.isCoinSyncBannerDismissed &&
+    !wallet?.lastCoinsScanTimestamp
+  );
 };

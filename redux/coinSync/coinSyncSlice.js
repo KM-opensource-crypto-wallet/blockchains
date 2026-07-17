@@ -1,9 +1,8 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
-  selectCurrentWallet,
-  selectUserCoins,
-  selectCoinsForCurrentWallet,
+  selectAllWallets,
   _currentWalletIndexSelector,
+  isCoinScanAvailableForTimestamp,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {
@@ -44,9 +43,6 @@ const initialState = {
 
   // Error
   error: null,
-
-  // Banner dismissed per wallet clientId: { [clientId]: true }
-  dismissedBannerClientIds: {},
 };
 
 // Get unique chain keys from coins (EVM chains share 'ethereum' key)
@@ -80,21 +76,32 @@ const getExistingChainWallet = (walletCoins, chainKey) => {
 // Main sync thunk - seamless real-time flow
 export const syncAllCoins = createAsyncThunk(
   'coinSync/syncAllCoins',
-  async (_, thunkAPI) => {
+  async (args, thunkAPI) => {
     const state = thunkAPI.getState();
-    const currentWallet = selectCurrentWallet(state);
-    const currentWalletIndex = _currentWalletIndexSelector(state);
-    const walletCoins = selectCoinsForCurrentWallet(state);
-    const userCoins = selectUserCoins(state);
-    const isPrivateKeyWallet = !!currentWallet?.isImportWalletWithPrivateKey;
+    // Scan the requested wallet (may differ from the active one), falling
+    // back to the current wallet when no walletIndex is provided.
+    const rawWalletIndex = args?.walletIndex;
+    const targetWalletIndex =
+      rawWalletIndex !== null &&
+      rawWalletIndex !== undefined &&
+      !isNaN(Number(rawWalletIndex))
+        ? Number(rawWalletIndex)
+        : _currentWalletIndexSelector(state);
+    const targetWallet = selectAllWallets(state)?.[targetWalletIndex];
+    if (!targetWallet) {
+      return thunkAPI.rejectWithValue('Wallet not found');
+    }
+    const walletCoins = targetWallet?.coins || [];
+    const userCoins = walletCoins.filter(coin => coin?.isInWallet);
+    const isPrivateKeyWallet = !!targetWallet?.isImportWalletWithPrivateKey;
 
     // Get existing chain wallets stored in the wallet
-    const existingChainWallets = currentWallet?.chain_existing_coin || {};
+    const existingChainWallets = targetWallet?.chain_existing_coin || {};
 
     // Step 1: Fetch all supported coins
     thunkAPI.dispatch(setStatus('fetching'));
-    thunkAPI.dispatch(setSyncingWalletIndex(currentWalletIndex));
-    thunkAPI.dispatch(setSyncingWalletName(currentWallet?.walletName || null));
+    thunkAPI.dispatch(setSyncingWalletIndex(targetWalletIndex));
+    thunkAPI.dispatch(setSyncingWalletName(targetWallet?.walletName || null));
     const resp = await fetchCurrenciesAPI({status: false, ignoreLimit: true});
     const allCoins = Array.isArray(resp?.data?.data) ? resp.data.data : [];
 
@@ -117,7 +124,7 @@ export const syncAllCoins = createAsyncThunk(
     if (isPrivateKeyWallet) {
       coinsToCheck = coinsToCheck.filter(coin =>
         checkValidChainForWalletImportWithPrivateKey({
-          currentWallet,
+          currentWallet: targetWallet,
           currentCoin: coin,
         }),
       );
@@ -152,20 +159,20 @@ export const syncAllCoins = createAsyncThunk(
       try {
         if (isPrivateKeyWallet) {
           const isCompatible = checkValidChainForWalletImportWithPrivateKey({
-            currentWallet,
+            currentWallet: targetWallet,
             currentCoin: {chain_name: chainKey},
           });
           if (!isCompatible) continue;
         }
         const customRPC = selectCustomRpcUrlByChainAndWallet(
           chainKey,
-          currentWallet?.clientId,
+          targetWallet?.clientId,
         )(state);
 
         const {wallet} = await createWalletForChain(
-          currentWallet.phrase,
+          targetWallet.phrase,
           {chain_name: chainKey},
-          currentWallet,
+          targetWallet,
           customRPC,
         );
 
@@ -186,14 +193,16 @@ export const syncAllCoins = createAsyncThunk(
     // Store wallets in the specific wallet's state for reuse
     thunkAPI.dispatch(
       setWalletChainExistingCoin({
-        walletIndex: currentWalletIndex,
+        walletIndex: targetWalletIndex,
         chainWallets,
       }),
     );
-    const currentUpdatedWallet = state?.allWallets?.[currentWalletIndex];
-    if (currentUpdatedWallet && chainWallets) {
-      currentUpdatedWallet.chain_existing_coin = chainWallets;
-    }
+    // Pass the target wallet explicitly to getCoinSnapshot (it falls back to
+    // the CURRENT wallet when given null, which would scan the wrong wallet).
+    const targetWalletWithChains = {
+      ...targetWallet,
+      chain_existing_coin: chainWallets,
+    };
 
     // Step 4: Check balances for all coins (real-time updates)
     thunkAPI.dispatch(setStatus('syncing'));
@@ -231,7 +240,7 @@ export const syncAllCoins = createAsyncThunk(
         const result = await getCoinSnapshot(
           state,
           coin,
-          currentUpdatedWallet,
+          targetWalletWithChains,
           priceObj,
           false,
           false,
@@ -260,19 +269,33 @@ export const syncAllCoins = createAsyncThunk(
       return {success: false, cancelled: true};
     }
 
-    thunkAPI.dispatch(addLastCoinScanData({walletIndex: currentWalletIndex}));
+    thunkAPI.dispatch(addLastCoinScanData({walletIndex: targetWalletIndex}));
 
     return {success: true};
   },
   {
-    condition: (_, {getState}) => {
-      const syncStatus = getState().coinSync?.status;
+    condition: (args, {getState}) => {
+      const state = getState();
+      const syncStatus = state.coinSync?.status;
       // Prevent concurrent scans
       if (
         syncStatus === 'syncing' ||
         syncStatus === 'fetching' ||
         syncStatus === 'creating_wallets'
       ) {
+        return false;
+      }
+      // Enforce 1 scan per 24 hours per wallet
+      const rawWalletIndex = args?.walletIndex;
+      const walletIndex =
+        rawWalletIndex !== null &&
+        rawWalletIndex !== undefined &&
+        !isNaN(Number(rawWalletIndex))
+          ? Number(rawWalletIndex)
+          : state.wallets?.currentWalletIndex;
+      const lastScanTimestamp =
+        state.wallets?.allWallets?.[walletIndex]?.lastCoinsScanTimestamp;
+      if (!isCoinScanAvailableForTimestamp(lastScanTimestamp)) {
         return false;
       }
     },
@@ -328,11 +351,10 @@ export const coinSyncSlice = createSlice({
         coin.isSelected = false;
       });
     },
-    dismissBanner: (state, action) => {
-      const clientId = action.payload;
-      if (clientId) {
-        state.dismissedBannerClientIds[clientId] = true;
-      }
+    // Persistent per-wallet dismissal lives on the wallet object
+    // (wallets slice, dismissCoinSyncBanner) - this only resets a finished
+    // scan's status so the banner stops showing the result.
+    dismissBanner: state => {
       if (state.status === 'completed' || state.status === 'error') {
         state.status = 'idle';
       }
