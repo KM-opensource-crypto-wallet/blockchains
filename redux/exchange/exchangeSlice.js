@@ -298,7 +298,7 @@ export const approveSwapAllowance = createAsyncThunk(
       const amountInWei = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
-      const result = await nativeCoin.checkAndApproveSwap({
+      const result = await nativeCoin.approve({
         swapData,
         contractAddress: selectedFromAsset?.contractAddress,
         amountInWei,

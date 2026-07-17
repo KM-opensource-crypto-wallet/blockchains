@@ -375,6 +375,12 @@ const getBaseCoin = async (chain, wallet, coin) => {
         privateKey: wallet.privateKey,
         ...payload,
       }),
+    approve: async payload =>
+      await chain.approve({
+        from: wallet.address,
+        privateKey: wallet.privateKey,
+        ...payload,
+      }),
   };
 
   return coinWrapper;
@@ -616,17 +622,25 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
         privateKey: wallet.privateKey,
         ...payload,
       }),
-    readSwapAllowance: async payload =>
-      await chain.readSwapAllowance({
+    approve: async payload =>
+      await chain.approve({
         from: wallet.address,
-        tokenAddress: token.contractAddress,
+        privateKey: wallet.privateKey,
         ...payload,
       }),
-    getEstimateFeForSwapApprove: async payload =>
-      await chain.getEstimateFeForSwapApprove({
+    readSwapAllowance: async payload =>
+      await chain.readAllowance({
         from: wallet.address,
-        tokenAddress: token.contractAddress,
         ...payload,
+        contractAddress: payload.tokenAddress || token.contractAddress,
+        spenderAddress: payload.contractAddress,
+      }),
+    getEstimateFeForSwapApprove: async payload =>
+      await chain.getEstimateFeForAllowanceApprove({
+        from: wallet.address,
+        ...payload,
+        contractAddress: payload.tokenAddress || token.contractAddress,
+        spenderAddress: payload.contractAddress,
       }),
   };
 

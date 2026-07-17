@@ -13,6 +13,7 @@ import {
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {ethers} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 import BigNumber from 'bignumber.js';
 import {showToast} from 'utils/toast';
 
@@ -42,10 +43,16 @@ export const fetchStakingAllowance = createAsyncThunk(
     const amountInWei = BigInt(
       convertToSmallAmount(payload.amount.toString(), decimals),
     );
+    const {stakingProviderAddress} = await EvmStakingProvider.getStakingAddress(
+      {
+        contractAddress: currentCoin?.contractAddress,
+        stakingProviderName: payload.stakingProviderName,
+      },
+    );
     const result = await chain.readAllowance({
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderName: payload.stakingProviderName,
+      stakingProviderAddress,
       amountInWei,
     });
     return {
@@ -81,11 +88,17 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
     const allowance = BigInt(
       convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) || '0',
     );
+    const {stakingProviderAddress} = await EvmStakingProvider.getStakingAddress(
+      {
+        contractAddress: currentCoin?.contractAddress,
+        stakingProviderName: payload.stakingProviderName,
+      },
+    );
     const result = await chain.getEstimateFeForAllowanceApprove({
       isFetchNonce: payload.isFetchNonce,
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderName: payload.stakingProviderName,
+      stakingProviderAddress,
       amountInWei,
       feesType: payload.feesType,
       nonce: payload.nonce,
