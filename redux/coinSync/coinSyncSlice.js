@@ -43,6 +43,11 @@ const initialState = {
 
   // Error
   error: null,
+
+  // requestId of the scan instance that owns this state. Stale thunk
+  // instances (cancelled, then superseded by a new scan) check this and
+  // stop touching the state.
+  activeRequestId: null,
 };
 
 // Get unique chain keys from coins (EVM chains share 'ethereum' key)
@@ -91,6 +96,16 @@ export const syncAllCoins = createAsyncThunk(
     if (!targetWallet) {
       return thunkAPI.rejectWithValue('Wallet not found');
     }
+
+    // True once this scan was cancelled or superseded by a newer scan -
+    // checked after every await so a stale instance stops touching state.
+    const isScanAborted = () => {
+      const currentState = thunkAPI.getState();
+      return (
+        currentState.coinSync.status === 'idle' ||
+        currentState.coinSync.activeRequestId !== thunkAPI.requestId
+      );
+    };
     const walletCoins = targetWallet?.coins || [];
     const userCoins = walletCoins.filter(coin => coin?.isInWallet);
     const isPrivateKeyWallet = !!targetWallet?.isImportWalletWithPrivateKey;
@@ -103,6 +118,9 @@ export const syncAllCoins = createAsyncThunk(
     thunkAPI.dispatch(setSyncingWalletIndex(targetWalletIndex));
     thunkAPI.dispatch(setSyncingWalletName(targetWallet?.walletName || null));
     const resp = await fetchCurrenciesAPI({status: false, ignoreLimit: true});
+    if (isScanAborted()) {
+      return {success: false, cancelled: true};
+    }
     const allCoins = Array.isArray(resp?.data?.data) ? resp.data.data : [];
 
     if (allCoins.length === 0) {
@@ -190,6 +208,10 @@ export const syncAllCoins = createAsyncThunk(
       }
     }
 
+    if (isScanAborted()) {
+      return {success: false, cancelled: true};
+    }
+
     // Store wallets in the specific wallet's state for reuse
     thunkAPI.dispatch(
       setWalletChainExistingCoin({
@@ -219,9 +241,8 @@ export const syncAllCoins = createAsyncThunk(
 
     let cancelled = false;
     for (let i = 0; i < coinsToCheck.length; i++) {
-      // Check if cancelled
-      const currentState = thunkAPI.getState();
-      if (currentState.coinSync.status === 'idle') {
+      // Check if cancelled or superseded by a newer scan
+      if (isScanAborted()) {
         cancelled = true;
         break;
       }
@@ -247,6 +268,13 @@ export const syncAllCoins = createAsyncThunk(
           false,
           false,
         );
+
+        // Re-check after the await: a cancel/new scan may have happened
+        // while this coin's balance was being fetched.
+        if (isScanAborted()) {
+          cancelled = true;
+          break;
+        }
 
         if (
           new BigNumber(result?.totalBalance || 0).isGreaterThan(
@@ -310,8 +338,20 @@ export const coinSyncSlice = createSlice({
       Object.assign(state, initialState);
     },
     cancelSync: state => {
-      state.status = 'idle';
+      // Abort signal: nulling the requestId makes the running thunk
+      // instance stop (isScanAborted checks the mismatch) without
+      // relying on status being 'idle'.
+      state.activeRequestId = null;
       state.currentSyncingCoin = null;
+      if (state.coinsWithBalance.length > 0) {
+        // Keep partial results so the user can still add the coins that
+        // were already found; 'completed' shows the selection UI.
+        state.status = 'completed';
+      } else {
+        // Nothing found - full reset so no stale data leaks into
+        // another wallet's scan screen.
+        Object.assign(state, initialState);
+      }
     },
     setStatus: (state, action) => {
       state.status = action.payload;
@@ -362,7 +402,7 @@ export const coinSyncSlice = createSlice({
   },
   extraReducers: builder => {
     builder
-      .addCase(syncAllCoins.pending, state => {
+      .addCase(syncAllCoins.pending, (state, action) => {
         state.status = 'fetching';
         state.error = null;
         state.coinsWithBalance = [];
@@ -370,12 +410,27 @@ export const coinSyncSlice = createSlice({
         state.scannedCoins = 0;
         state.currentSyncingCoin = null;
         state.syncingWalletName = null;
+        state.activeRequestId = action.meta.requestId;
       })
-      .addCase(syncAllCoins.fulfilled, state => {
+      .addCase(syncAllCoins.fulfilled, (state, action) => {
+        if (state.activeRequestId !== action.meta.requestId) {
+          // Stale instance: a newer scan owns the state now
+          return;
+        }
+        if (action.payload?.cancelled) {
+          // Cancelled scans must not resurface as 'completed'. This also
+          // wipes any coins that trickled in from the in-flight snapshot
+          // await after cancelSync fired.
+          Object.assign(state, initialState);
+          return;
+        }
         state.status = 'completed';
         state.currentSyncingCoin = null;
       })
       .addCase(syncAllCoins.rejected, (state, action) => {
+        if (state.activeRequestId !== action.meta.requestId) {
+          return;
+        }
         state.status = 'error';
         state.error = action.error.message;
         state.currentSyncingCoin = null;
