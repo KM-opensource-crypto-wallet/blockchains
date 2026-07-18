@@ -97,6 +97,13 @@ export const syncAllCoins = createAsyncThunk(
       return thunkAPI.rejectWithValue('Wallet not found');
     }
 
+    // Every successful exit must record the scan timestamp so the 24-hour
+    // cooldown arms even when a scan finds nothing new to check.
+    const finishScanSuccess = () => {
+      thunkAPI.dispatch(addLastCoinScanData({walletIndex: targetWalletIndex}));
+      return {success: true};
+    };
+
     // True once this scan was cancelled or superseded by a newer scan -
     // checked after every await so a stale instance stops touching state.
     const isScanAborted = () => {
@@ -124,7 +131,7 @@ export const syncAllCoins = createAsyncThunk(
     const allCoins = Array.isArray(resp?.data?.data) ? resp.data.data : [];
 
     if (allCoins.length === 0) {
-      return {success: true};
+      return finishScanSuccess();
     }
 
     // Step 2: Filter out coins already in wallet
@@ -149,7 +156,7 @@ export const syncAllCoins = createAsyncThunk(
     }
 
     if (coinsToCheck.length === 0) {
-      return {success: true};
+      return finishScanSuccess();
     }
 
     // Set total coins for progress tracking
@@ -297,9 +304,7 @@ export const syncAllCoins = createAsyncThunk(
       return {success: false, cancelled: true};
     }
 
-    thunkAPI.dispatch(addLastCoinScanData({walletIndex: targetWalletIndex}));
-
-    return {success: true};
+    return finishScanSuccess();
   },
   {
     condition: (args, {getState}) => {
