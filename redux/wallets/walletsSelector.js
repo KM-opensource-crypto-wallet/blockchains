@@ -13,17 +13,21 @@ export const selectAllWallets = state => {
 export const isWalletHiddenAndLocked = wallet =>
   !wallet?.walletName || !!wallet?.hideSettings?.isHidden;
 
-export const selectVisibleWallets = state => {
-  const allWallets = state.wallets?.allWallets || [];
-  return allWallets.filter(wallet => !isWalletHiddenAndLocked(wallet));
-};
+// Memoized: these build new arrays, so without createSelector every call
+// returns a fresh reference and useSelector re-renders on unrelated updates.
+export const selectVisibleWallets = createSelector(
+  [selectAllWallets],
+  allWallets =>
+    (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
+);
 
-export const selectVisibleWalletsWithIndex = state => {
-  const allWallets = state.wallets?.allWallets || [];
-  return allWallets
-    .map((wallet, index) => ({wallet, index}))
-    .filter(({wallet}) => !isWalletHiddenAndLocked(wallet));
-};
+export const selectVisibleWalletsWithIndex = createSelector(
+  [selectAllWallets],
+  allWallets =>
+    (allWallets || [])
+      .map((wallet, index) => ({wallet, index}))
+      .filter(({wallet}) => !isWalletHiddenAndLocked(wallet)),
+);
 
 export const selectAllWalletName = state => {
   const allWallets = state.wallets?.allWallets;

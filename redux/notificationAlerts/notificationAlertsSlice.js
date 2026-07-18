@@ -3,9 +3,14 @@ import {
   createSubscription,
   updateSubscription,
   deleteSubscription,
+  deleteSubscriptionsBulk,
   getSubscriptionsByUser,
 } from '../../service/dokApi';
-import {getMasterClientId, selectAllWallets} from '../wallets/walletsSelector';
+import {
+  getMasterClientId,
+  isWalletHiddenAndLocked,
+  selectAllWallets,
+} from '../wallets/walletsSelector';
 import {toDirection} from 'dok-wallet-blockchain-networks/helper';
 
 /**
@@ -85,7 +90,10 @@ export const fetchSubscriptionsThunk = createAsyncThunk(
         .filter(sub => !localBackendIds.has(sub._id))
         .reduce((acc, sub) => {
           const wallet = wallets.find(w => w.clientId === sub.walletId);
-          if (!wallet) {
+          // Skip hidden (locked) wallets: importing their subscriptions
+          // would put their walletName back into local state, leaking them
+          // in the alerts list. Once revealed, the next fetch imports them.
+          if (!wallet || isWalletHiddenAndLocked(wallet)) {
             return acc;
           }
           const coin = wallet.coins?.find(
@@ -147,6 +155,59 @@ export const deleteAlertThunk = createAsyncThunk(
   },
 );
 
+/**
+ * Delete ALL of a wallet's subscriptions in one backend call (by wallet
+ * clientId) instead of looping deleteAlertThunk per alert. Also removes
+ * the wallet's alerts from local state on success. Used when a wallet is
+ * deleted or hidden with notifications suppressed.
+ */
+export const deleteAlertsForWalletThunk = createAsyncThunk(
+  'notificationAlerts/deleteAlertsForWallet',
+  async ({walletClientId}, {rejectWithValue}) => {
+    if (!walletClientId) {
+      return rejectWithValue('walletClientId is required');
+    }
+    try {
+      const result = await deleteSubscriptionsBulk({walletId: walletClientId});
+      return {
+        walletClientId,
+        deletedCount: result?.data?.deletedCount ?? 0,
+      };
+    } catch (err) {
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to delete alerts';
+      return rejectWithValue(message);
+    }
+  },
+);
+
+/**
+ * Delete ALL of the user's subscriptions in one backend call (by master
+ * client id) and clear local alerts. Used when the whole account/wallet
+ * set is reset.
+ */
+export const deleteAlertsForUserThunk = createAsyncThunk(
+  'notificationAlerts/deleteAlertsForUser',
+  async (_, {getState, rejectWithValue}) => {
+    const userId = getMasterClientId(getState());
+    if (!userId) {
+      return {deletedCount: 0};
+    }
+    try {
+      const result = await deleteSubscriptionsBulk({userId});
+      return {deletedCount: result?.data?.deletedCount ?? 0};
+    } catch (err) {
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to delete alerts';
+      return rejectWithValue(message);
+    }
+  },
+);
+
 const initialState = {
   notificationAlerts: [],
 };
@@ -183,6 +244,17 @@ export const notificationAlertsSlice = createSlice({
         state.notificationAlerts = state.notificationAlerts.filter(
           obj => obj.id !== payload?.id,
         );
+      })
+      .addCase(deleteAlertsForWalletThunk.fulfilled, (state, {payload}) => {
+        const walletClientId = payload?.walletClientId;
+        state.notificationAlerts = state.notificationAlerts.filter(
+          obj =>
+            obj.walletClientId !== walletClientId &&
+            obj.walletId !== walletClientId,
+        );
+      })
+      .addCase(deleteAlertsForUserThunk.fulfilled, state => {
+        state.notificationAlerts = [];
       })
       .addCase(fetchSubscriptionsThunk.fulfilled, (state, {payload}) => {
         const {subs, missingAlerts} = payload;
