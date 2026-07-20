@@ -10,6 +10,25 @@ export const selectAllWallets = state => {
   return state.wallets?.allWallets;
 };
 
+export const isWalletHiddenAndLocked = wallet =>
+  !wallet?.walletName || !!wallet?.hideSettings?.isHidden;
+
+// Memoized: these build new arrays, so without createSelector every call
+// returns a fresh reference and useSelector re-renders on unrelated updates.
+export const selectVisibleWallets = createSelector(
+  [selectAllWallets],
+  allWallets =>
+    (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
+);
+
+export const selectVisibleWalletsWithIndex = createSelector(
+  [selectAllWallets],
+  allWallets =>
+    (allWallets || [])
+      .map((wallet, index) => ({wallet, index}))
+      .filter(({wallet}) => !isWalletHiddenAndLocked(wallet)),
+);
+
 export const selectAllWalletName = state => {
   const allWallets = state.wallets?.allWallets;
   return allWallets.map(item => item?.walletName);
@@ -382,8 +401,21 @@ export const getLastCoinsScanTimestamp = state => {
   return currentWallet?.lastCoinsScanTimestamp;
 };
 
-export const isCoinsScanTimestampValid = state => {
-  const timestamp = getLastCoinsScanTimestamp(state);
+export const isCoinScanAvailableForTimestamp = timestamp => {
   if (timestamp === null || timestamp === undefined) return true;
   return dayjs().diff(dayjs(timestamp), 'hour') >= 24;
+};
+
+export const isCoinsScanTimestampValid = state =>
+  isCoinScanAvailableForTimestamp(getLastCoinsScanTimestamp(state));
+
+// One-time banner: only imported wallets that have never been scanned and
+// never dismissed the banner (both flags persist on the wallet object).
+export const selectShouldShowCoinSyncBanner = state => {
+  const wallet = selectCurrentWallet(state);
+  return (
+    !!wallet?.isImported &&
+    !wallet?.isCoinSyncBannerDismissed &&
+    !wallet?.lastCoinsScanTimestamp
+  );
 };
