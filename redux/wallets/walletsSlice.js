@@ -1897,24 +1897,6 @@ export const walletsSlice = createSlice({
         state.currentWalletIndex = newCurrentWalletIndex;
       }
     },
-    removeInvalidWallets: state => {
-      const allWallets = state.allWallets;
-      const cleaned = allWallets.filter(
-        wallet => !!wallet && !!wallet.walletName,
-      );
-      if (cleaned.length === allWallets.length) {
-        return;
-      }
-      const previousCurrentWallet = allWallets[state.currentWalletIndex];
-      state.allWallets = cleaned;
-      const newCurrentWalletIndex = cleaned.findIndex(
-        wallet =>
-          (wallet?.clientId || wallet?.id) ===
-          (previousCurrentWallet?.clientId || previousCurrentWallet?.id),
-      );
-      state.currentWalletIndex =
-        newCurrentWalletIndex !== -1 ? newCurrentWalletIndex : 0;
-    },
     setBackedUp: state => {
       const currentWallet = state.allWallets[state.currentWalletIndex];
       currentWallet.isBackedup = true;
@@ -1951,10 +1933,14 @@ export const walletsSlice = createSlice({
     resetWallet: () => initialState,
     updateWalletName: (state, action) => {
       const updateWalletIndex = action?.payload?.index;
-      const updateWalletName = action?.payload?.walletName;
+      const updateWalletName = action?.payload?.walletName?.trim?.();
       const allWallets = state.allWallets;
       if (!allWallets[updateWalletIndex]) {
         throw new Error('cannot update name because invalid index.js');
+      }
+      if (!updateWalletName) {
+        console.warn('updateWalletName: rejected empty wallet name');
+        return;
       }
       const currentWallet = allWallets[updateWalletIndex];
       currentWallet.walletName = updateWalletName;
@@ -3073,7 +3059,6 @@ export const {
   updateContractAddress,
   setWalletPosition,
   rearrangeWallet,
-  removeInvalidWallets,
   addPendingTransactions,
   setPendingTransactions,
   removePendingTransactions,
