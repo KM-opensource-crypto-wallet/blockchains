@@ -18,6 +18,7 @@ import {
   setWalletChainExistingCoin,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getCoinSnapshot} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {selectIsSyncing} from 'dok-wallet-blockchain-networks/redux/coinSync/coinSyncSelectors';
 import BigNumber from 'bignumber.js';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
@@ -334,6 +335,26 @@ export const syncAllCoins = createAsyncThunk(
     },
   },
 );
+
+// Cancel the running scan AND arm the 24h cooldown for the wallet being
+// scanned, so start/cancel loops can't burn RPC resources. Reads the wallet
+// index before cancelSync because cancelling may reset the slice state.
+// Only arms the cooldown while a scan is actually running: a completed scan
+// already recorded its timestamp (finishScanSuccess), and syncingWalletIndex
+// survives completion/retained partial results, so re-arming here would
+// extend the cooldown window.
+export const cancelSyncWithCooldown = () => (dispatch, getState) => {
+  const state = getState();
+  const walletIndex = state.coinSync?.syncingWalletIndex;
+  if (
+    walletIndex !== null &&
+    walletIndex !== undefined &&
+    selectIsSyncing(state)
+  ) {
+    dispatch(addLastCoinScanData({walletIndex}));
+  }
+  dispatch(cancelSync());
+};
 
 export const coinSyncSlice = createSlice({
   name: 'coinSync',
