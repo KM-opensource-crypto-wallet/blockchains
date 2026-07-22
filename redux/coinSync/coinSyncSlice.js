@@ -335,6 +335,17 @@ export const syncAllCoins = createAsyncThunk(
   },
 );
 
+// Cancel the running scan AND arm the 24h cooldown for the wallet being
+// scanned, so start/cancel loops can't burn RPC resources. Reads the wallet
+// index before cancelSync because cancelling may reset the slice state.
+export const cancelSyncWithCooldown = () => (dispatch, getState) => {
+  const walletIndex = getState().coinSync?.syncingWalletIndex;
+  if (walletIndex !== null && walletIndex !== undefined) {
+    dispatch(addLastCoinScanData({walletIndex}));
+  }
+  dispatch(cancelSync());
+};
+
 export const coinSyncSlice = createSlice({
   name: 'coinSync',
   initialState,

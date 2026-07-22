@@ -401,9 +401,13 @@ export const getLastCoinsScanTimestamp = state => {
   return currentWallet?.lastCoinsScanTimestamp;
 };
 
+// One scan allowed per wallet within this window (also used by
+// useCoinScanCooldown in the app for the countdown label).
+export const COIN_SCAN_COOLDOWN_HOURS = 24;
+
 export const isCoinScanAvailableForTimestamp = timestamp => {
   if (timestamp === null || timestamp === undefined) return true;
-  return dayjs().diff(dayjs(timestamp), 'hour') >= 24;
+  return dayjs().diff(dayjs(timestamp), 'hour') >= COIN_SCAN_COOLDOWN_HOURS;
 };
 
 export const isCoinsScanTimestampValid = state =>
