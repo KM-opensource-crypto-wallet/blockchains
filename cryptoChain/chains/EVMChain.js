@@ -980,7 +980,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           if (swapData) {
             const swapGasLimit = swapData.gasLimit || swapData.gas;
             if (swapGasLimit) {
-              estimateGas = BigInt(swapGasLimit);
+              // Provider-quoted gas limits can be too tight for the actual
+              // executed route, causing on-chain out-of-gas reverts (surfaced
+              // as misleading errors like TRANSFER_FROM_FAILED). Buffer it.
+              estimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
             } else {
               estimateGas = await evmProvider.estimateGas({
                 from: fromAddress,
@@ -1141,7 +1144,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           if (swapData) {
             const swapGasLimit = swapData.gasLimit || swapData.gas;
             if (swapGasLimit) {
-              estimateGas = BigInt(swapGasLimit);
+              // Keep in sync with the buffer applied when the swap is
+              // actually sent, so the displayed fee matches the real tx.
+              estimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
             } else {
               estimateGas = await evmProvider.estimateGas({
                 from: fromAddress,
@@ -2842,7 +2847,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           if (swapData) {
             const swapGasLimit = swapData.gasLimit || swapData.gas;
             if (swapGasLimit) {
-              finalEstimateGas = BigInt(swapGasLimit);
+              // Provider-quoted gas limits can be too tight for the actual
+              // executed route, causing on-chain out-of-gas reverts (surfaced
+              // as misleading errors like TRANSFER_FROM_FAILED). Buffer it.
+              finalEstimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
             } else if (typeof finalEstimateGas !== 'bigint') {
               finalEstimateGas = await evmProvider.estimateGas({
                 from: from,
