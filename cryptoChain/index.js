@@ -34,7 +34,7 @@ const chains = {
   bitcoin_legacy: BitcoinChain,
   bitcoin_segwit: BitcoinChain,
   bitcoin_lightning: BitcoinLightningChain,
-  // bitcoin_taproot: BitcoinChain,
+  bitcoin_taproot: BitcoinChain,
   solana: SolanaChain,
   polygon: EVMChain,
   base: EVMChain,

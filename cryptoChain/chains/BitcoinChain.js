@@ -98,6 +98,11 @@ export const BitcoinChain = () => {
           pubkey: keyPair.publicKey,
           network: customNetwork,
         });
+      } else if (chain_name === 'bitcoin_taproot') {
+        data = bitcoin.payments.p2tr({
+          internalPubkey: toXOnly(keyPair.publicKey),
+          network: customNetwork,
+        });
       }
       return {
         address: data.address,
@@ -721,6 +726,8 @@ const getDeriveAddressByChain = chain_name => {
     ? "m/84'/0'/0'/0/0"
     : chain_name === 'bitcoin_segwit'
     ? "m/49'/0'/0'/0/0"
+    : chain_name === 'bitcoin_taproot'
+    ? "m/86'/0'/0'/0/0"
     : "m/44'/0'/0'/0/0";
 };
 
@@ -749,6 +756,8 @@ const getNetworkByChainName = chain_name => {
     ? Object.assign({}, bitcoin.networks.bitcoin, {
         bip32: mainNetworkKeys.bitcoin_segwit,
       })
+    : chain_name === 'bitcoin_taproot'
+    ? config.BITCOIN_NETWORK_STRING
     : '';
 };
 

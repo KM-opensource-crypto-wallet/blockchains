@@ -142,7 +142,7 @@ const supportedChain = [
   'bitcoin_cash',
   'cardano',
   'filecoin',
-  // 'bitcoin_taproot'
+  'bitcoin_taproot',
   'bitcoin_lightning',
 ];
 
@@ -306,7 +306,7 @@ const BITCOIN_CHAINS = [
   'bitcoin',
   'bitcoin_segwit',
   'bitcoin_legacy',
-  // 'bitcoin_taproot',
+  'bitcoin_taproot',
 ];
 
 export const isBitcoinChain = chain_name => BITCOIN_CHAINS.includes(chain_name);
