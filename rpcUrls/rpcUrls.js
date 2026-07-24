@@ -246,6 +246,13 @@ const allFreeRpcUrl = {
     ],
     testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
   },
+  robinhood: {
+    mainnet: ['https://rpc.mainnet.chain.robinhood.com'],
+    testnet: [
+      'https://rpc.testnet.chain.robinhood.com',
+      'https://robinhood-testnet.drpc.org',
+    ],
+  },
 };
 
 let rpcUrls = {
