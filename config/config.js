@@ -79,6 +79,7 @@ const SANDBOX_CHAIN_ID = {
   ink: 763373,
   sei: 1328,
   hyperliquid: 998,
+  robinhood: 46630,
 };
 
 const PRODUCTION_CHAIN_ID = {
@@ -101,6 +102,7 @@ const PRODUCTION_CHAIN_ID = {
   ink: 57073,
   sei: 1329,
   hyperliquid: 999,
+  robinhood: 4663,
 };
 
 export const CHAIN_ID = IS_SANDBOX ? SANDBOX_CHAIN_ID : PRODUCTION_CHAIN_ID;
@@ -221,6 +223,11 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'hyperliquid',
     symbol: 'HYPE',
   },
+  'eip155:46630': {
+    chain_display_name: 'Robinhood',
+    chain_name: 'robinhood',
+    symbol: 'ETH',
+  },
   'tron:0xcd8690dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -329,6 +336,11 @@ const WalletConnectSupportedChainProduction = {
     chain_name: 'hyperliquid',
     symbol: 'HYPE',
   },
+  'eip155:4663': {
+    chain_display_name: 'Robinhood',
+    chain_name: 'robinhood',
+    symbol: 'ETH',
+  },
   'tron:0x2b6653dc': {
     chain_display_name: 'Tron',
     chain_name: 'tron',
@@ -358,9 +370,7 @@ export const config = {
   ETHEREUM_SCAN_BASE_URL: 'https://api.etherscan.io/v2',
   ETHEREUM_SCAN_API_KEY_1: ETHER_API_KEYS[0],
   ETHEREUM_SCAN_API_KEY_2: ETHER_API_KEYS[1],
-  POLYGON_BLOCKSCOUT_BASE_URL: IS_SANDBOX
-    ? 'https://api-testnet.polygonscan.com'
-    : 'https://polygon.blockscout.com',
+  BLOCKSCOUT_BASE_URL: 'https://api.blockscout.com',
   INK_BLOCK_EXPLORER_BASE_URL: IS_SANDBOX
     ? 'https://explorer-sepolia.inkonchain.com'
     : 'https://explorer.inkonchain.com',
@@ -589,6 +599,12 @@ export const SCAN_URL = {
   },
   hyperliquid: {
     baseUrl: 'https://hyperevmscan.io/',
+    txPath: 'tx',
+  },
+  robinhood: {
+    baseUrl: IS_SANDBOX
+      ? 'https://explorer.testnet.chain.robinhood.com'
+      : 'https://robinhoodchain.blockscout.com',
     txPath: 'tx',
   },
   // Non-EVM chains

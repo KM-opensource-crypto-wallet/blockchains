@@ -64,6 +64,7 @@ const chains = {
   hedera: HederaChain,
   ink: EVMChain,
   sei: EVMChain,
+  robinhood: EVMChain,
   cardano: CardanoChain,
   filecoin: FilecoinChain,
 };
@@ -619,6 +620,7 @@ const hashObject = {
   hedera: 'transactionHash',
   ink: 'hash',
   sei: 'hash',
+  robinhood: 'hash',
   cardano: '',
   filecoin: '',
 };
