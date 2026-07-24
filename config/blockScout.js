@@ -6,5 +6,8 @@ export const BlockScoutAPI = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  params: {
+    apikey: config.BLOCKSCOUT_API_KEY,
+  },
   timeout: 30000,
 });

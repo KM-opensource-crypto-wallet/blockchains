@@ -371,6 +371,7 @@ export const config = {
   ETHEREUM_SCAN_API_KEY_1: ETHER_API_KEYS[0],
   ETHEREUM_SCAN_API_KEY_2: ETHER_API_KEYS[1],
   BLOCKSCOUT_BASE_URL: 'https://api.blockscout.com',
+  BLOCKSCOUT_API_KEY: process.env.BLOCKSCOUT_API_KEY,
   INK_BLOCK_EXPLORER_BASE_URL: IS_SANDBOX
     ? 'https://explorer-sepolia.inkonchain.com'
     : 'https://explorer.inkonchain.com',
