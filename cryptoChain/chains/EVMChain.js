@@ -1146,7 +1146,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             if (swapGasLimit) {
               // Keep in sync with the buffer applied when the swap is
               // actually sent, so the displayed fee matches the real tx.
-              estimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
+              estimateGas = BigInt(swapGasLimit);
             } else {
               estimateGas = await evmProvider.estimateGas({
                 from: fromAddress,
@@ -2590,10 +2590,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         null,
       ),
     approve: async ({
+      swapApproveAmount,
+      spenderAddress,
       from,
       contractAddress,
       privateKey,
-      stakingProviderName,
+      stakingProviderAddress,
       swapData,
       amountInWei,
       nonce,
@@ -2603,20 +2605,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       feesType,
       allowance,
     }) => {
+      swapApproveAmount = amountInWei;
+      let currentNonce;
+      let approvalSent = false;
       try {
-        if (swapData) {
-          return EVMChain(
-            chain_name,
-            undefined,
-            customRpcUrl,
-          ).checkAndApproveSwap({
-            swapData,
-            contractAddress,
-            from,
-            privateKey,
-            amountInWei,
-          });
-        }
         const {currentAllowance, firstTrx, secondTrx} = await retryFunc(
           async evmProvider => {
             const walletSigner = new ethers.Wallet(privateKey, evmProvider);
@@ -2627,76 +2619,112 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               walletSigner,
             );
 
-            const {stakingProviderAddress} =
-              await EvmStakingProvider.getStakingAddress({
-                contractAddress,
-                stakingProviderName,
-              });
-
+            const finalSpenderAddress =
+              stakingProviderAddress || spenderAddress;
             let finalAllowance = allowance;
-            if (!finalAllowance) {
-              finalAllowance = await tokenContract.allowance(
-                from,
-                stakingProviderAddress,
+
+            if (swapData?.spender) {
+              if (finalAllowance < amountInWei) {
+                if (finalAllowance > 0n) {
+                  // USDT reverts when changing non-zero → non-zero; always reset first.
+                  const resetOverrides =
+                    currentNonce != null ? {nonce: currentNonce} : {};
+                  const resetTx = await tokenContract.approve(
+                    swapData.spender,
+                    0n,
+                    resetOverrides,
+                  );
+                  await resetTx.wait();
+                  if (currentNonce != null) {
+                    currentNonce++;
+                  }
+                }
+
+                const approveOverrides =
+                  currentNonce != null ? {nonce: currentNonce} : {};
+                const approveTx = await tokenContract.approve(
+                  swapData.spender,
+                  swapApproveAmount,
+                  approveOverrides,
+                );
+                await approveTx.wait();
+                if (currentNonce != null) {
+                  currentNonce++;
+                }
+                approvalSent = true;
+              }
+              return {nextNonce: currentNonce, approvalSent};
+            } else {
+              // ============= Check allowance if not provided =============
+
+              if (!finalAllowance) {
+                finalAllowance = await tokenContract.allowance(
+                  from,
+                  finalSpenderAddress,
+                );
+              }
+
+              if (finalAllowance >= amountInWei) {
+                console.log('Already approved');
+                return true;
+              }
+
+              let finalEstimateGas = BigInt(estimateGas);
+              if (typeof finalEstimateGas !== 'bigint') {
+                finalEstimateGas = await tokenContract[
+                  'transfer(address,uint256)'
+                ].estimateGas(stakingProviderAddress, amountInWei);
+              }
+              let finalGasPrice = gasFee;
+              let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
+              if (typeof finalGasPrice !== 'bigint') {
+                const gasFeeData = await getEtherGasPrice(
+                  feesType,
+                  evmProvider,
+                );
+                finalGasPrice = gasFeeData?.gasPrice;
+                finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
+              }
+              let options = {
+                type: 2,
+                gasLimit: finalEstimateGas,
+                maxFeePerGas: finalGasPrice,
+                maxPriorityFeePerGas: validatePriorityFee(
+                  finalMaxPriorityFeePerGas,
+                  finalGasPrice,
+                ),
+                nonce,
+              };
+              if (isEip1559NotSupported(chain_name)) {
+                delete options.type;
+                delete options.maxPriorityFeePerGas;
+                delete options.maxFeePerGas;
+                options.gasPrice = finalGasPrice;
+              }
+
+              const resetTrx = await tokenContract.approve.populateTransaction(
+                finalSpenderAddress,
+                0n,
+                options,
               );
+              const approveTx = await tokenContract.approve.populateTransaction(
+                finalSpenderAddress,
+                amountInWei,
+                finalAllowance > 0n
+                  ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
+                  : options,
+              );
+              return {
+                firstTrx: resetTrx,
+                secondTrx: approveTx,
+                currentAllowance: finalAllowance,
+              };
             }
-
-            if (finalAllowance >= amountInWei) {
-              console.log('Already approved');
-              return true;
-            }
-
-            let finalEstimateGas = BigInt(estimateGas);
-            if (typeof finalEstimateGas !== 'bigint') {
-              finalEstimateGas = await tokenContract[
-                'transfer(address,uint256)'
-              ].estimateGas(stakingProviderAddress, amountInWei);
-            }
-            let finalGasPrice = gasFee;
-            let finalMaxPriorityFeePerGas = maxPriorityFeePerGas;
-            if (typeof finalGasPrice !== 'bigint') {
-              const gasFeeData = await getEtherGasPrice(feesType, evmProvider);
-              finalGasPrice = gasFeeData?.gasPrice;
-              finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
-            }
-            let options = {
-              type: 2,
-              gasLimit: finalEstimateGas,
-              maxFeePerGas: finalGasPrice,
-              maxPriorityFeePerGas: validatePriorityFee(
-                finalMaxPriorityFeePerGas,
-                finalGasPrice,
-              ),
-              nonce,
-            };
-            if (isEip1559NotSupported(chain_name)) {
-              delete options.type;
-              delete options.maxPriorityFeePerGas;
-              delete options.maxFeePerGas;
-              options.gasPrice = finalGasPrice;
-            }
-
-            const resetTrx = await tokenContract.approve.populateTransaction(
-              stakingProviderAddress,
-              0n,
-              options,
-            );
-            const approveTx = await tokenContract.approve.populateTransaction(
-              stakingProviderAddress,
-              amountInWei,
-              finalAllowance > 0n
-                ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
-                : options,
-            );
-            return {
-              firstTrx: resetTrx,
-              secondTrx: approveTx,
-              currentAllowance: finalAllowance,
-            };
           },
           null,
         );
         let trx1, trx2;
+        if (approvalSent) return;
         if (currentAllowance > 0n) {
           console.log('Resetting allowance to 0...');
           const approveHash = await createSendTransaction(
@@ -2799,10 +2827,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }, null),
     readAllowance: async ({
       from,
+      isPermit2Flow,
+      permitAbi,
+      spenderAddress,
+      swapTo,
       contractAddress,
       stakingProviderAddress,
-      spenderAddress,
       amountInWei,
+      privateKey,
     }) =>
       retryFunc(async evmProvider => {
         const tokenContract = new ethers.Contract(
@@ -2811,8 +2843,23 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           evmProvider,
         );
         let allowance;
+        let permit2Amount;
+        let permit2Expiration;
         const finalSpenderAddress = stakingProviderAddress || spenderAddress;
         allowance = await tokenContract.allowance(from, finalSpenderAddress);
+        if (isPermit2Flow) {
+          const walletSigner = new ethers.Wallet(privateKey, evmProvider);
+          const permit2Contract = new ethers.Contract(
+            finalSpenderAddress,
+            permitAbi,
+            walletSigner,
+          );
+          [permit2Amount, permit2Expiration] = await permit2Contract.allowance(
+            from,
+            contractAddress,
+            swapTo,
+          );
+        }
         const isApproved = allowance >= amountInWei;
         const needsReset = !isApproved && allowance > 0n;
         const required = isApproved ? 0n : amountInWei - allowance;
@@ -2821,9 +2868,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           isApproved,
           needsReset,
           required,
+          permit2Amount,
+          permit2Expiration,
         };
       }, null),
-    // ========= Swap, swapToken, checkAndApproveSwap ========
     swap: async ({
       swapData,
       to,
@@ -2850,7 +2898,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               // Provider-quoted gas limits can be too tight for the actual
               // executed route, causing on-chain out-of-gas reverts (surfaced
               // as misleading errors like TRANSFER_FROM_FAILED). Buffer it.
-              finalEstimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
+              finalEstimateGas = BigInt(swapGasLimit);
             } else if (typeof finalEstimateGas !== 'bigint') {
               finalEstimateGas = await evmProvider.estimateGas({
                 from: from,
@@ -2909,154 +2957,59 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         throw new Error(reason);
       }
     },
-    swapToken: async ({swapData, privateKey}) => {
+    swapToken: async ({
+      contractAddress,
+      isPermit2Flow,
+      swapData,
+      privateKey,
+      amountInWei,
+      swapApproveAmount,
+      permit2Amount,
+      permit2Expiration,
+      swapTo,
+      nonce,
+    }) => {
+      const finalSpenderAddress = swapData?.spender;
+      const permitAbi = swapData?.permit_abi;
       try {
+        let finalNonce = nonce;
+        if (isPermit2Flow) {
+          const nowSecs = BigInt(Math.floor(Date.now() / 1000));
+          if (permit2Amount < amountInWei || permit2Expiration < nowSecs) {
+            await retryFunc(async evmProvider => {
+              const walletSigner = new ethers.Wallet(privateKey, evmProvider);
+              const permit2Contract = new ethers.Contract(
+                finalSpenderAddress,
+                permitAbi,
+                walletSigner,
+              );
+              const thirtyDaysSecs = BigInt(
+                Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+              );
+              const permit2Overrides =
+                finalNonce != null ? {nonce: finalNonce} : {};
+              const permit2Tx = await permit2Contract.approve(
+                contractAddress,
+                swapTo,
+                swapApproveAmount,
+                thirtyDaysSecs,
+                permit2Overrides,
+              );
+              console.log('permit2Tx hash:', permit2Tx.hash);
+              await permit2Tx.wait();
+            });
+            if (finalNonce != null) {
+              finalNonce++;
+            }
+          }
+        }
+
         return await createSendTransaction(
           new ethers.Wallet(privateKey),
-          swapData,
+          finalNonce != null ? {...swapData, nonce: finalNonce} : swapData,
         );
       } catch (e) {
         console.error('Error in swap token transaction', e);
-        const {reason} = await errorDecoder.decode(e);
-        throw new Error(reason);
-      }
-    },
-    checkAndApproveSwap: async ({
-      swapData,
-      contractAddress,
-      from,
-      privateKey,
-      amountInWei,
-    }) => {
-      try {
-        let currentNonce;
-        let approvalSent = false;
-        const isPermit2Flow = Boolean(swapData?.permit_abi);
-        // Swap calldata is pre-built server-side with its own exact wei amount, which
-        // can differ slightly from our client-computed amountInWei (re-quoting, decimal
-        // round-tripping). A small buffer absorbs that drift without approving unlimited.
-        const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
-
-        await retryFunc(async evmProvider => {
-          const walletSigner = new ethers.Wallet(privateKey, evmProvider);
-          currentNonce = await evmProvider.getTransactionCount(from, 'pending');
-          const tokenContract = new ethers.Contract(
-            contractAddress,
-            erc20Abi,
-            walletSigner,
-          );
-
-          if (isPermit2Flow) {
-            const permit2Contract = new ethers.Contract(
-              swapData.spender,
-              swapData.permit_abi,
-              walletSigner,
-            );
-
-            // Step 1: Token → Permit2 approval
-            const tokenToPermit2Allowance = await tokenContract.allowance(
-              from,
-              swapData.spender,
-            );
-            if (tokenToPermit2Allowance < amountInWei) {
-              if (tokenToPermit2Allowance > 0n) {
-                // USDT reverts when changing non-zero → non-zero; always reset first.
-                const resetOverrides =
-                  currentNonce != null ? {nonce: currentNonce} : {};
-                const resetTx = await tokenContract.approve(
-                  swapData.spender,
-                  0n,
-                  resetOverrides,
-                );
-                await resetTx.wait();
-                if (currentNonce != null) {
-                  currentNonce++;
-                }
-              }
-
-              const approveOverrides =
-                currentNonce != null ? {nonce: currentNonce} : {};
-              const approveTx = await tokenContract.approve(
-                swapData.spender,
-                approveAmount,
-                approveOverrides,
-              );
-              await approveTx.wait();
-              if (currentNonce != null) {
-                currentNonce++;
-              }
-              approvalSent = true;
-            }
-
-            // Step 2: Permit2 → router allowance
-            if (swapData.to) {
-              const [permit2Amount, permit2Expiration] =
-                await permit2Contract.allowance(
-                  from,
-                  contractAddress,
-                  swapData.to,
-                );
-              const nowSecs = BigInt(Math.floor(Date.now() / 1000));
-              if (permit2Amount < amountInWei || permit2Expiration < nowSecs) {
-                const thirtyDaysSecs = BigInt(
-                  Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
-                );
-                const permit2Overrides =
-                  currentNonce != null ? {nonce: currentNonce} : {};
-                const permit2Tx = await permit2Contract.approve(
-                  contractAddress,
-                  swapData.to,
-                  approveAmount,
-                  thirtyDaysSecs,
-                  permit2Overrides,
-                );
-                await permit2Tx.wait();
-                if (currentNonce != null) {
-                  currentNonce++;
-                }
-                approvalSent = true;
-              }
-            }
-          } else if (swapData?.spender) {
-            const currentAllowance = await tokenContract.allowance(
-              from,
-              swapData.spender,
-            );
-            if (currentAllowance < amountInWei) {
-              if (currentAllowance > 0n) {
-                // USDT reverts when changing non-zero → non-zero; always reset first.
-                const resetOverrides =
-                  currentNonce != null ? {nonce: currentNonce} : {};
-                const resetTx = await tokenContract.approve(
-                  swapData.spender,
-                  0n,
-                  resetOverrides,
-                );
-                await resetTx.wait();
-                if (currentNonce != null) {
-                  currentNonce++;
-                }
-              }
-
-              const approveOverrides =
-                currentNonce != null ? {nonce: currentNonce} : {};
-              const approveTx = await tokenContract.approve(
-                swapData.spender,
-                approveAmount,
-                approveOverrides,
-              );
-              await approveTx.wait();
-              if (currentNonce != null) {
-                currentNonce++;
-              }
-              approvalSent = true;
-            }
-          }
-        });
-
-        return {nextNonce: currentNonce, approvalSent};
-      } catch (e) {
-        console.error('Error in checkAndApproveSwap', e);
         const {reason} = await errorDecoder.decode(e);
         throw new Error(reason);
       }

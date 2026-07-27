@@ -263,11 +263,17 @@ export const executeApprove = createAsyncThunk(
         }
       };
 
+      const {stakingProviderAddress} =
+        await EvmStakingProvider.getStakingAddress({
+          contractAddress: currentCoin?.contractAddress,
+          stakingProviderName: payload.stakingProviderName,
+        });
+
       const {confirmTransaction} = await chain.approve({
         from: currentCoin?.address,
         contractAddress: currentCoin?.contractAddress,
         privateKey,
-        stakingProviderName: payload.stakingProviderName,
+        stakingProviderAddress,
         amountInWei,
         nonce: payload?.nonce,
         gasFee: toWeiBigInt(payload.gasFee),

@@ -22,6 +22,7 @@ import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
+import {ethers} from 'ethers';
 
 const initialState = {
   amountFrom: '',
@@ -177,7 +178,7 @@ export const fetchExchangeAllowance = createAsyncThunk(
       const {selectedFromAsset, selectedFromWallet, amountFrom} =
         getExchange(currentState);
       const transferData = getTransferData(currentState);
-      const spenderAddress = transferData?.swapData?.spender;
+      const swapData = transferData?.swapData;
       const decimals = selectedFromAsset?.decimal || 18;
       const amountInWei = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
@@ -190,10 +191,13 @@ export const fetchExchangeAllowance = createAsyncThunk(
       if (!nativeCoin) {
         throw new Error('Failed to get native coin');
       }
-      const result = await nativeCoin.readSwapAllowance({
+      const result = await nativeCoin.readAllowance({
         from: selectedFromAsset?.address,
-        contractAddress: spenderAddress,
-        tokenAddress: selectedFromAsset?.contractAddress,
+        isPermit2Flow: Boolean(swapData?.permit_abi),
+        permitAbi: swapData?.permit_abi,
+        spenderAddress: swapData?.spender,
+        swapTo: swapData?.to,
+        contractAddress: selectedFromAsset?.contractAddress,
         amountInWei,
       });
       const allowanceData = {
@@ -203,6 +207,8 @@ export const fetchExchangeAllowance = createAsyncThunk(
         isApproved: result.isApproved,
         needsReset: result.needsReset,
         decimal: selectedFromAsset?.decimal,
+        permit2Amount: result.permit2Amount,
+        permit2Expiration: result.permit2Expiration,
       };
       dispatch(
         setExchangeFields({
@@ -248,12 +254,13 @@ export const fetchExchangeApproveEstimationFee = createAsyncThunk(
       if (!nativeCoin) {
         throw new Error('Failed to get native coin');
       }
-      const result = await nativeCoin.getEstimateFeForSwapApprove({
+      const result = await nativeCoin.getEstimateFeForAllowanceApprove({
         from: selectedFromAsset?.address,
-        contractAddress: spenderAddress,
-        tokenAddress: selectedFromAsset?.contractAddress,
+        contractAddress: selectedFromAsset?.contractAddress,
+        spenderAddress: spenderAddress,
         amountInWei,
         feesType: payload?.feesType,
+        nonce: payload?.nonce,
         allowance,
       });
       dispatch(
@@ -273,7 +280,7 @@ export const fetchExchangeApproveEstimationFee = createAsyncThunk(
 
 export const approveSwapAllowance = createAsyncThunk(
   'exchange/approveSwapAllowance',
-  async (_, thunkAPI) => {
+  async (payload, thunkAPI) => {
     const dispatch = thunkAPI.dispatch;
     try {
       dispatch(setExchangeFields({approveLoading: true}));
@@ -281,8 +288,13 @@ export const approveSwapAllowance = createAsyncThunk(
       const {selectedFromAsset, selectedFromWallet, amountFrom} =
         getExchange(currentState);
       const transferData = getTransferData(currentState);
+      const decimals = selectedFromAsset?.decimal || 18;
       const swapData = transferData?.swapData;
-
+      const allowanceData = currentState?.exchange?.allowanceData;
+      const allowance = BigInt(
+        convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
+          '0',
+      );
       if (!isEVMChain(selectedFromAsset?.chain_name)) {
         throw new Error('approveSwapAllowance only supports EVM chains');
       }
@@ -294,14 +306,26 @@ export const approveSwapAllowance = createAsyncThunk(
       if (!nativeCoin) {
         throw new Error('Failed to get native coin');
       }
-      const decimals = selectedFromAsset?.decimal || 18;
-      const amountInWei = BigInt(
+
+      const amountInWei1 = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
+      const amountInWei =
+        payload.allowanceType === 'unlimited'
+          ? ethers.MaxUint256
+          : amountInWei1;
+
+      const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
       const result = await nativeCoin.approve({
         swapData,
+        permitAbi: swapData?.permit_abi,
+        isPermit2Flow: Boolean(swapData?.permit_abi),
+        swapApproveAmount: approveAmount,
+        spenderAddress: swapData?.spender,
+        swapTo: swapData?.to,
         contractAddress: selectedFromAsset?.contractAddress,
         amountInWei,
+        allowance,
       });
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
@@ -346,11 +370,27 @@ export const sendSwap = createAsyncThunk(
 
       const swapData = transferData?.swapData;
       const swapNonce = txData?.nonce ?? transferData?.nonce;
-
+      const decimals = selectedFromAsset?.decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
+      const allowanceData = currentState?.exchange?.allowanceData;
+      const permit2Amount = allowanceData?.permit2Amount;
+      const permit2Expiration = allowanceData?.permit2Expiration;
       const res = await nativeCoin.swap({
         swapData,
         to: transferData?.toAddress,
         from: selectedFromAsset?.address,
+        permitAbi: swapData?.permit_abi,
+        isPermit2Flow: Boolean(swapData?.permit_abi),
+        permit2Amount: permit2Amount,
+        permit2Expiration: permit2Expiration,
+        amountInWei: amountInWei,
+        swapApproveAmount: approveAmount,
+        spenderAddress: swapData?.spender,
+        swapTo: swapData?.to,
+        contractAddress: selectedFromAsset?.contractAddress,
         amount: amountFrom,
         estimateGas: transferData?.estimateGas,
         gasFee: transferData?.gasFee,
