@@ -24,6 +24,11 @@ import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.servi
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {ethers} from 'ethers';
 
+// Permit2's IAllowanceTransfer.approve(token, spender, uint160 amount, uint48 expiration)
+// caps amount at uint160 max, so "unlimited" must use that ceiling on the permit2
+// path instead of ethers.MaxUint256 (uint256 max), which would overflow that call.
+const MAX_UINT160 = 2n ** 160n - 1n;
+
 const initialState = {
   amountFrom: '',
   amountTo: '',
@@ -48,6 +53,9 @@ const initialState = {
   allowanceData: null,
   allowanceLoading: false,
   approveLoading: false,
+  permitAllowanceData: null,
+  permitAllowanceLoading: false,
+  permitApproveLoading: false,
 };
 
 export const calculateExchange = createAsyncThunk(
@@ -179,7 +187,9 @@ export const fetchExchangeAllowance = createAsyncThunk(
         getExchange(currentState);
       const transferData = getTransferData(currentState);
       const swapData = transferData?.swapData;
-      const decimals = selectedFromAsset?.decimal || 18;
+      const {permit_abi, to, spender} = swapData;
+      const {address, contractAddress, decimal} = selectedFromAsset;
+      const decimals = decimal || 18;
       const amountInWei = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
@@ -192,12 +202,12 @@ export const fetchExchangeAllowance = createAsyncThunk(
         throw new Error('Failed to get native coin');
       }
       const result = await nativeCoin.readAllowance({
-        from: selectedFromAsset?.address,
-        isPermit2Flow: Boolean(swapData?.permit_abi),
-        permitAbi: swapData?.permit_abi,
-        spenderAddress: swapData?.spender,
-        swapTo: swapData?.to,
-        contractAddress: selectedFromAsset?.contractAddress,
+        from: address,
+        isPermit2Flow: Boolean(permit_abi),
+        permitAbi: permit_abi,
+        spenderAddress: spender,
+        swapTo: to,
+        contractAddress: contractAddress,
         amountInWei,
       });
       const allowanceData = {
@@ -263,14 +273,16 @@ export const fetchExchangeApproveEstimationFee = createAsyncThunk(
         nonce: payload?.nonce,
         allowance,
       });
-      dispatch(
-        setExchangeFields({
-          allowanceData: {
-            ...allowanceData,
-            transactionFee: result.fee,
-          },
-        }),
-      );
+      const finalAllowanceData = {
+        ...allowanceData,
+        gasFee: result.gasFee?.toString() ?? null,
+        maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
+        feesOptions: result.feesOptions ?? null,
+        estimateGas: result.estimateGas?.toString() ?? null,
+        nonce: result.nonce ?? null,
+        transactionFee: result.fee,
+      };
+      dispatch(setExchangeFields({allowanceData: finalAllowanceData}));
     } catch (error) {
       console.error('Error in fetchExchangeApproveEstimationFee', error);
       return thunkAPI.rejectWithValue(error?.message);
@@ -288,14 +300,18 @@ export const approveSwapAllowance = createAsyncThunk(
       const {selectedFromAsset, selectedFromWallet, amountFrom} =
         getExchange(currentState);
       const transferData = getTransferData(currentState);
-      const decimals = selectedFromAsset?.decimal || 18;
       const swapData = transferData?.swapData;
+      const {spender} = swapData;
+      const {contractAddress, decimal, chain_name} = selectedFromAsset;
+      const {type, nonce, estimateGas, gasFee, maxPriorityFeePerGas, feesType} =
+        payload;
+      const decimals = decimal || 18;
       const allowanceData = currentState?.exchange?.allowanceData;
       const allowance = BigInt(
         convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
           '0',
       );
-      if (!isEVMChain(selectedFromAsset?.chain_name)) {
+      if (!isEVMChain(chain_name)) {
         throw new Error('approveSwapAllowance only supports EVM chains');
       }
       const nativeCoin = await getNativeCoin(
@@ -310,23 +326,25 @@ export const approveSwapAllowance = createAsyncThunk(
       const amountInWei1 = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
-      const amountInWei =
-        payload.allowanceType === 'unlimited'
-          ? ethers.MaxUint256
-          : amountInWei1;
 
-      const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
+      const amountInWei =
+        type === 'unlimited' ? ethers.MaxUint256 : amountInWei1;
+
       const result = await nativeCoin.approve({
-        swapData,
-        permitAbi: swapData?.permit_abi,
-        isPermit2Flow: Boolean(swapData?.permit_abi),
-        swapApproveAmount: approveAmount,
-        spenderAddress: swapData?.spender,
-        swapTo: swapData?.to,
-        contractAddress: selectedFromAsset?.contractAddress,
+        spenderAddress: spender,
+        contractAddress: contractAddress,
         amountInWei,
         allowance,
+        nonce: nonce,
+        estimateGas: estimateGas,
+        gasFee: gasFee,
+        maxPriorityFeePerGas: maxPriorityFeePerGas,
+        feesType: feesType,
       });
+      if (result?.nonce != null) {
+        dispatch(setCurrentTransferData({nonce: result.nonce}));
+      }
+
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
     } catch (error) {
@@ -341,6 +359,196 @@ export const approveSwapAllowance = createAsyncThunk(
   },
 );
 
+export const fetchExchangePermitAllowance = createAsyncThunk(
+  'exchange/fetchExchangePermitAllowance',
+  async (_, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      dispatch(setExchangeFields({permitAllowanceLoading: true}));
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const swapData = transferData?.swapData;
+      const decimals = selectedFromAsset?.decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+      const result = await nativeCoin.readPermitAllowance({
+        from: selectedFromAsset?.address,
+        permitAbi: swapData?.permit_abi,
+        spenderAddress: swapData?.spender,
+        swapTo: swapData?.to,
+        contractAddress: selectedFromAsset?.contractAddress,
+        amountInWei,
+      });
+      const permitAllowanceData = {
+        permit2AmountFormatted: parseBalance(result.permit2Amount, decimals),
+        requiredFormatted: parseBalance(result.required, decimals),
+        amountFormatted: parseBalance(amountInWei, decimals),
+        isApproved: result.isApproved,
+        needsReset: result.needsReset,
+        decimal: selectedFromAsset?.decimal,
+        permit2Amount: result.permit2Amount,
+        permit2Expiration: result.permit2Expiration,
+      };
+      dispatch(
+        setExchangeFields({
+          permitAllowanceLoading: false,
+          permitAllowanceData,
+        }),
+      );
+      return permitAllowanceData;
+    } catch (error) {
+      console.error('Error in fetchExchangePermitAllowance', error);
+      dispatch(
+        setExchangeFields({
+          permitAllowanceLoading: false,
+          permitAllowanceData: null,
+        }),
+      );
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
+export const fetchExchangePermitApproveEstimationFee = createAsyncThunk(
+  'exchange/fetchExchangePermitApproveEstimationFee',
+  async (payload, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const swapData = transferData?.swapData;
+      const {permit_abi, to, spender} = swapData;
+      const {address, contractAddress, decimal} = selectedFromAsset;
+      const {nonce, feesType} = payload;
+      const decimals = decimal || 18;
+      const amountInWei = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const permitAllowanceData = currentState?.exchange?.permitAllowanceData;
+      const permit2Amount = BigInt(
+        convertToSmallAmount(
+          permitAllowanceData?.permit2AmountFormatted,
+          decimals,
+        ) || '0',
+      );
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+      const result = await nativeCoin.getEstimateFeeForPermitApprove({
+        from: address,
+        contractAddress: contractAddress,
+        spenderAddress: spender,
+        swapTo: to,
+        permitAbi: permit_abi,
+        amountInWei,
+        feesType: feesType,
+        nonce: nonce,
+        permit2Amount,
+      });
+      const finalPermitAllowanceData = {
+        ...permitAllowanceData,
+        gasFee: result.gasFee?.toString() ?? null,
+        maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
+        feesOptions: result.feesOptions ?? null,
+        estimateGas: result.estimateGas?.toString() ?? null,
+        nonce: result.nonce ?? null,
+        transactionFee: result.fee,
+      };
+      dispatch(
+        setExchangeFields({permitAllowanceData: finalPermitAllowanceData}),
+      );
+    } catch (error) {
+      console.error('Error in fetchExchangePermitApproveEstimationFee', error);
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
+export const approveExchangePermit2 = createAsyncThunk(
+  'exchange/approveExchangePermit2',
+  async (payload, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      dispatch(setExchangeFields({permitApproveLoading: true}));
+      const currentState = thunkAPI.getState();
+      const {selectedFromAsset, selectedFromWallet, amountFrom} =
+        getExchange(currentState);
+      const transferData = getTransferData(currentState);
+      const swapData = transferData?.swapData;
+      const {permit_abi, to, spender} = swapData;
+      const {address, contractAddress, chain_name, decimal} = selectedFromAsset;
+      const decimals = decimal || 18;
+      const {type, nonce, estimateGas, gasFee, maxPriorityFeePerGas, feesType} =
+        payload;
+      if (!isEVMChain(chain_name)) {
+        throw new Error('approveExchangePermit2 only supports EVM chains');
+      }
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        selectedFromAsset,
+        selectedFromWallet,
+      );
+      if (!nativeCoin) {
+        throw new Error('Failed to get native coin');
+      }
+
+      const amountInWei1 = BigInt(
+        convertToSmallAmount(amountFrom.toString(), decimals),
+      );
+      const amountInWei =
+        type === 'unlimited'
+          ? MAX_UINT160
+          : amountInWei1 + (amountInWei1 * 200n) / 10000n;
+
+      const result = await nativeCoin.approvePermit2({
+        permitAbi: permit_abi,
+        swapTo: to,
+        from: address,
+        contractAddress: contractAddress,
+        spenderAddress: spender,
+        amountInWei,
+        nonce: nonce,
+        estimateGas: estimateGas,
+        gasFee: gasFee,
+        maxPriorityFeePerGas: maxPriorityFeePerGas,
+        feesType: feesType,
+      });
+      if (result?.nonce != null) {
+        dispatch(setCurrentTransferData({nonce: result.nonce}));
+      }
+
+      dispatch(setExchangeFields({permitApproveLoading: false}));
+      return result;
+    } catch (error) {
+      console.error('Error in approveExchangePermit2', error);
+      dispatch(setExchangeFields({permitApproveLoading: false}));
+      showToast({
+        type: 'errorToast',
+        title: error?.message || 'Permit approval failed',
+      });
+      return thunkAPI.rejectWithValue(error?.message);
+    }
+  },
+);
+
 export const sendSwap = createAsyncThunk(
   'exchange/sendSwap',
   async (txData, thunkAPI) => {
@@ -348,13 +556,13 @@ export const sendSwap = createAsyncThunk(
     try {
       const currentState = thunkAPI.getState();
       thunkAPI.dispatch(setExchangeLoading(true));
-
       const {selectedFromAsset, selectedFromWallet, amountFrom} =
         getExchange(currentState);
       const transferData = getTransferData(currentState);
+      const {swapData, estimateGas, gasFee, maxPriorityFeePerGas, isMax} =
+        transferData;
       const navigation = txData?.navigation;
       const router = txData?.router;
-
       if (!isEVMChain(selectedFromAsset?.chain_name)) {
         throw new Error('sendSwap only supports EVM chains');
       }
@@ -367,36 +575,13 @@ export const sendSwap = createAsyncThunk(
       if (!nativeCoin) {
         throw new Error('Failed to get native coin');
       }
-
-      const swapData = transferData?.swapData;
-      const swapNonce = txData?.nonce ?? transferData?.nonce;
-      const decimals = selectedFromAsset?.decimal || 18;
-      const amountInWei = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
-      const approveAmount = amountInWei + (amountInWei * 200n) / 10000n;
-      const allowanceData = currentState?.exchange?.allowanceData;
-      const permit2Amount = allowanceData?.permit2Amount;
-      const permit2Expiration = allowanceData?.permit2Expiration;
       const res = await nativeCoin.swap({
         swapData,
-        to: transferData?.toAddress,
-        from: selectedFromAsset?.address,
-        permitAbi: swapData?.permit_abi,
-        isPermit2Flow: Boolean(swapData?.permit_abi),
-        permit2Amount: permit2Amount,
-        permit2Expiration: permit2Expiration,
-        amountInWei: amountInWei,
-        swapApproveAmount: approveAmount,
-        spenderAddress: swapData?.spender,
-        swapTo: swapData?.to,
-        contractAddress: selectedFromAsset?.contractAddress,
-        amount: amountFrom,
-        estimateGas: transferData?.estimateGas,
-        gasFee: transferData?.gasFee,
-        maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
-        isMax: transferData?.isMax,
-        nonce: swapNonce,
+        estimateGas: estimateGas,
+        gasFee: gasFee,
+        maxPriorityFeePerGas: maxPriorityFeePerGas,
+        isMax: isMax,
+        nonce: txData?.nonce ?? transferData?.nonce,
       });
 
       if (res) {
