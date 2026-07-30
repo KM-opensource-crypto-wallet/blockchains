@@ -94,6 +94,69 @@ const STAKING_CONTRACTS = {
   },
 };
 
+function isApproveRevertError(err) {
+  if (err?.code === 'CALL_EXCEPTION') return true;
+  // L2 RPCs that omit `data` land here as UNKNOWN_ERROR
+  const msg =
+    err?.info?.error?.message ??
+    err?.error?.message ??
+    err?.shortMessage ??
+    err?.message ??
+    '';
+  return /execution reverted|always failing transaction/i.test(msg);
+}
+
+// Some tokens (e.g. mainnet USDT) revert approve(spender, amount) when the
+// current allowance is already non-zero, requiring approve(spender, 0) first.
+// Detected empirically per-token via simulation rather than hardcoding addresses,
+// since forks/other chains' USDT-likes vary.
+async function needsAllowanceReset({
+  evmProvider,
+  contractAddress,
+  from,
+  spenderAddress,
+  amountInWei,
+}) {
+  if (amountInWei === 0n) return false;
+
+  const blockTag = await evmProvider.getBlockNumber();
+  const tokenContract = new ethers.Contract(
+    contractAddress,
+    erc20Abi,
+    evmProvider,
+  );
+  const currentAllowance = await tokenContract.allowance(from, spenderAddress, {
+    blockTag,
+  });
+  if (currentAllowance === 0n) return false;
+
+  const erc20Iface = new ethers.Interface(erc20Abi);
+  const simulate = value =>
+    evmProvider.call({
+      from,
+      to: contractAddress,
+      data: erc20Iface.encodeFunctionData('approve', [spenderAddress, value]),
+      blockTag,
+    });
+
+  let ret;
+  try {
+    ret = await simulate(amountInWei);
+  } catch (err) {
+    if (!isApproveRevertError(err)) throw err;
+    await simulate(0n); // throws if approve(0) also reverts — surfaced to caller
+    return true;
+  }
+
+  if (!ret || ret === '0x') return false; // void approve (non-conforming token)
+  try {
+    const [ok] = erc20Iface.decodeFunctionResult('approve', ret);
+    return ok === false; // returns false without reverting
+  } catch {
+    return false; // non-conforming returndata, treat as void
+  }
+}
+
 function getEVMTransactionType(item, isBatch, chainName) {
   if (isBatch) {
     return 'batch';
@@ -2605,7 +2668,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       feesType,
     }) => {
       try {
-        const {currentAllowance, firstTrx, secondTrx} = await retryFunc(
+        const {firstTrx, secondTrx, needsReset} = await retryFunc(
           async evmProvider => {
             const walletSigner = new ethers.Wallet(privateKey, evmProvider);
 
@@ -2630,6 +2693,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               console.log('Already approved');
               return true;
             }
+
+            const needsReset =
+              finalAllowance > 0n &&
+              (await needsAllowanceReset({
+                evmProvider,
+                contractAddress,
+                from,
+                spenderAddress: finalSpenderAddress,
+                amountInWei,
+              }));
 
             let finalEstimateGas =
               estimateGas != null ? BigInt(estimateGas) : undefined;
@@ -2665,28 +2738,30 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               options.gasPrice = finalGasPrice;
             }
 
-            const resetTrx = await tokenContract.approve.populateTransaction(
-              finalSpenderAddress,
-              0n,
-              options,
-            );
+            const resetTrx = needsReset
+              ? await tokenContract.approve.populateTransaction(
+                  finalSpenderAddress,
+                  0n,
+                  options,
+                )
+              : undefined;
             const approveTx = await tokenContract.approve.populateTransaction(
               finalSpenderAddress,
               amountInWei,
-              finalAllowance > 0n
+              needsReset
                 ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
                 : options,
             );
             return {
               firstTrx: resetTrx,
               secondTrx: approveTx,
-              currentAllowance: finalAllowance,
+              needsReset,
             };
           },
           null,
         );
         let trx1, trx2;
-        if (currentAllowance > 0n) {
+        if (needsReset) {
           console.log('Resetting allowance to 0...');
           const approveHash = await createSendTransaction(
             new ethers.Wallet(privateKey),
@@ -2727,17 +2802,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         });
 
         console.log('Approved second confirmed', trx2);
-        // This step sends the approve tx alone, or a reset-to-0 tx followed by
-        // it when there was a pre-existing non-zero allowance — each consumes
-        // one nonce. Surface the next usable nonce so callers (e.g. the swap
-        // sent right after) don't resubmit an already-used one.
-        const nextNonce =
-          nonce != null ? nonce + (currentAllowance > 0n ? 2 : 1) : undefined;
         return {
           confirmTransaction: trx2,
           transaction1: trx1,
           transaction2: trx2,
-          nonce: nextNonce,
         };
       } catch (error) {
         console.error('Error in approve transaction', error);
@@ -2810,7 +2878,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         const finalSpenderAddress = stakingProviderAddress || spenderAddress;
         allowance = await tokenContract.allowance(from, finalSpenderAddress);
         const isApproved = allowance >= amountInWei;
-        const needsReset = !isApproved && allowance > 0n;
+        const needsReset =
+          !isApproved &&
+          allowance > 0n &&
+          (await needsAllowanceReset({
+            evmProvider,
+            contractAddress,
+            from,
+            spenderAddress: finalSpenderAddress,
+            amountInWei,
+          }));
         const required = isApproved ? 0n : amountInWei - allowance;
         return {
           allowance,
@@ -3130,9 +3207,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         interval: 5000,
         retries: 15,
       });
-      const nextNonce = nonce != null ? nonce + 1 : undefined;
       return {
-        nonce: nextNonce,
         permit2Hash,
       };
     },

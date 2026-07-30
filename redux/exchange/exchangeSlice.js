@@ -21,6 +21,7 @@ import {showToast} from 'utils/toast';
 import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {refreshCoins} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {ethers} from 'ethers';
 
@@ -341,9 +342,22 @@ export const approveSwapAllowance = createAsyncThunk(
         maxPriorityFeePerGas: maxPriorityFeePerGas,
         feesType: feesType,
       });
-      if (result?.nonce != null) {
-        dispatch(setCurrentTransferData({nonce: result.nonce}));
-      }
+
+      // The approve tx just consumed a nonce on-chain. Re-fetch the next
+      // nonce from the node (same as the staking flow does after its
+      // approve) instead of trusting the caller-computed nonce+1.
+      await dispatch(
+        calculateEstimateFee({
+          isFetchNonce: true,
+          fromAddress: selectedFromAsset?.address,
+          toAddress: transferData?.toAddress,
+          amount: amountFrom + '',
+          contractAddress,
+          selectedWallet: selectedFromWallet,
+          selectedCoin: selectedFromAsset,
+          isSwapFee: true,
+        }),
+      ).unwrap();
 
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
@@ -531,9 +545,22 @@ export const approveExchangePermit2 = createAsyncThunk(
         maxPriorityFeePerGas: maxPriorityFeePerGas,
         feesType: feesType,
       });
-      if (result?.nonce != null) {
-        dispatch(setCurrentTransferData({nonce: result.nonce}));
-      }
+
+      // The permit2 approve tx just consumed a nonce on-chain. Re-fetch the
+      // next nonce from the node instead of trusting the caller-computed
+      // nonce+1, same as approveSwapAllowance above.
+      await dispatch(
+        calculateEstimateFee({
+          isFetchNonce: true,
+          fromAddress: address,
+          toAddress: transferData?.toAddress,
+          amount: amountFrom + '',
+          contractAddress,
+          selectedWallet: selectedFromWallet,
+          selectedCoin: selectedFromAsset,
+          isSwapFee: true,
+        }),
+      ).unwrap();
 
       dispatch(setExchangeFields({permitApproveLoading: false}));
       return result;
@@ -646,6 +673,7 @@ export const sendSwap = createAsyncThunk(
             message: `Your transaction completed successfully. You just exchanged: ${amountFrom} ${selectedFromAsset?.symbol}`,
             toastId,
           });
+          thunkAPI.dispatch(refreshCoins());
         }
 
         return {
