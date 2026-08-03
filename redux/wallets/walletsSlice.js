@@ -31,6 +31,7 @@ import {
   getCurrentWalletIndex,
   getMasterClientId,
   getSelectedNftData,
+  isWalletHiddenAndLocked,
   selectAllCoins,
   selectAllCoinSymbol,
   selectAllWalletName,
@@ -80,6 +81,7 @@ import {
 import {APP_VERSION} from 'utils/common';
 import {showToast} from 'utils/toast';
 import {MainNavigation} from 'utils/navigation';
+import {verifySecretCode} from 'utils/hideWallet';
 import {v4} from 'uuid';
 import {
   setIsAddingGroup,
@@ -148,6 +150,25 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
     }
   });
   return chainWallets;
+};
+
+export const RELOCK_OPTIONS = {
+  RELAUNCH: 'RELAUNCH',
+  BACKGROUND: 'BACKGROUND',
+  MANUAL: 'MANUAL',
+};
+
+const reassignCurrentWalletIndexIfHidden = state => {
+  const allWallets = state.allWallets;
+  if (!isWalletHiddenAndLocked(allWallets[state.currentWalletIndex])) {
+    return;
+  }
+  const firstVisibleIndex = allWallets.findIndex(
+    item => !isWalletHiddenAndLocked(item),
+  );
+  if (firstVisibleIndex !== -1) {
+    state.currentWalletIndex = firstVisibleIndex;
+  }
 };
 
 const refreshCoinData = (dispatch, currentCoin, txHash = null) => {
@@ -1751,6 +1772,57 @@ export const searchCoinFromCurrency = createAsyncThunk(
   },
 );
 
+export const findHiddenWalletByCode = async (state, code) => {
+  const allWallets = selectAllWallets(state) || [];
+  for (let index = 0; index < allWallets.length; index++) {
+    const hideSettings = allWallets[index]?.hideSettings;
+    if (!hideSettings) {
+      continue;
+    }
+    const matched = await verifySecretCode(
+      code,
+      hideSettings.secretCodeSalt,
+      hideSettings.secretCodeIterations,
+      hideSettings.secretCodeHash,
+    );
+    if (matched) {
+      return {
+        matched: true,
+        walletIndex: index,
+        walletName: allWallets[index].walletName,
+      };
+    }
+  }
+  return {matched: false, walletIndex: null, walletName: null};
+};
+
+export const isSecretCodeInUseByOtherWallet = async (
+  state,
+  code,
+  walletIndex,
+) => {
+  const allWallets = selectAllWallets(state) || [];
+  for (let index = 0; index < allWallets.length; index++) {
+    if (index === Number(walletIndex)) {
+      continue;
+    }
+    const hideSettings = allWallets[index]?.hideSettings;
+    if (!hideSettings) {
+      continue;
+    }
+    const matched = await verifySecretCode(
+      code,
+      hideSettings.secretCodeSalt,
+      hideSettings.secretCodeIterations,
+      hideSettings.secretCodeHash,
+    );
+    if (matched) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
@@ -1817,15 +1889,24 @@ export const walletsSlice = createSlice({
       const newWallets = payload?.allWallets;
       const newCurrentWalletIndex = validateNumber(payload?.currentWalletIndex);
       const previousAllWallets = state.allWallets;
-      if (previousAllWallets.length === newWallets.length) {
-        state.allWallets = newWallets;
-        if (
-          newCurrentWalletIndex !== null &&
-          newCurrentWalletIndex >= 0 &&
-          newCurrentWalletIndex < previousAllWallets.length
-        ) {
-          state.currentWalletIndex = newCurrentWalletIndex;
-        }
+      if (
+        !Array.isArray(newWallets) ||
+        previousAllWallets.length !== newWallets.length ||
+        newWallets.some(wallet => !wallet || !wallet.walletName)
+      ) {
+        console.warn(
+          'rearrangeWallet: rejected malformed wallet order',
+          newWallets,
+        );
+        return;
+      }
+      state.allWallets = newWallets;
+      if (
+        newCurrentWalletIndex !== null &&
+        newCurrentWalletIndex >= 0 &&
+        newCurrentWalletIndex < previousAllWallets.length
+      ) {
+        state.currentWalletIndex = newCurrentWalletIndex;
       }
     },
     setBackedUp: state => {
@@ -1864,10 +1945,14 @@ export const walletsSlice = createSlice({
     resetWallet: () => initialState,
     updateWalletName: (state, action) => {
       const updateWalletIndex = action?.payload?.index;
-      const updateWalletName = action?.payload?.walletName;
+      const updateWalletName = action?.payload?.walletName?.trim?.();
       const allWallets = state.allWallets;
       if (!allWallets[updateWalletIndex]) {
         throw new Error('cannot update name because invalid index.js');
+      }
+      if (!updateWalletName) {
+        console.warn('updateWalletName: rejected empty wallet name');
+        return;
       }
       const currentWallet = allWallets[updateWalletIndex];
       currentWallet.walletName = updateWalletName;
@@ -1879,6 +1964,16 @@ export const walletsSlice = createSlice({
           `setCurrentWalletIndex: missing or invalid action payload: ${index}`,
         );
       }
+      state.allWallets.forEach((wallet, walletIndex) => {
+        if (
+          walletIndex !== Number(index) &&
+          wallet?.hideSettings &&
+          !wallet.hideSettings.isHidden &&
+          wallet.hideSettings.relockOption !== RELOCK_OPTIONS.MANUAL
+        ) {
+          wallet.hideSettings.isHidden = true;
+        }
+      });
       state.currentWalletIndex = index;
     },
     deleteWallet: (state, action) => {
@@ -2369,6 +2464,62 @@ export const walletsSlice = createSlice({
         console.warn('No wallet found for privacy mode');
       }
     },
+    setWalletHideSettings: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const allWallets = state.allWallets;
+      const currentWallet = allWallets[walletIndex];
+      if (!currentWallet) {
+        throw new Error('setWalletHideSettings: wallet not found');
+      }
+      const {
+        secretCodeSalt,
+        secretCodeHash,
+        secretCodeIterations,
+        relockOption,
+        hideNotification,
+      } = payload || {};
+      if (!secretCodeSalt || !secretCodeHash) {
+        throw new Error('setWalletHideSettings: missing secret code hash/salt');
+      }
+      currentWallet.hideSettings = {
+        isHidden: true,
+        secretCodeSalt,
+        secretCodeHash,
+        secretCodeIterations,
+        relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
+        hideNotification: hideNotification ?? true,
+      };
+      reassignCurrentWalletIndexIfHidden(state);
+    },
+    clearWalletHideSettings: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const currentWallet = state.allWallets[walletIndex];
+      if (currentWallet) {
+        currentWallet.hideSettings = undefined;
+      }
+    },
+    setWalletRevealed: (state, {payload}) => {
+      const walletIndex = payload?.walletIndex;
+      const isHidden = !!payload?.isHidden;
+      const currentWallet = state.allWallets[walletIndex];
+      if (currentWallet?.hideSettings) {
+        currentWallet.hideSettings.isHidden = isHidden;
+        if (isHidden) {
+          reassignCurrentWalletIndexIfHidden(state);
+        }
+      }
+    },
+    rehideWalletsOnBackground: state => {
+      state.allWallets.forEach(item => {
+        if (item?.hideSettings?.relockOption === RELOCK_OPTIONS.BACKGROUND) {
+          item.hideSettings.isHidden = true;
+        }
+      });
+      reassignCurrentWalletIndexIfHidden(state);
+    },
+    reassignCurrentWalletIfHidden: state => {
+      reassignCurrentWalletIndexIfHidden(state);
+    },
     resetCoinsToDefaultAddressForPrivacyMode: (state, {payload}) => {
       const allWallets = Array.isArray(state.allWallets)
         ? [...state.allWallets]
@@ -2536,8 +2687,24 @@ export const walletsSlice = createSlice({
       const wallet = allWallets[walletIndex];
       if (!wallet) {
         console.warn('wallet not found', walletIndex);
+        return;
       }
       wallet.lastCoinsScanTimestamp = new Date().toISOString();
+    },
+    dismissCoinSyncBanner: (state, action) => {
+      const clientId = action?.payload?.clientId;
+      if (!clientId) {
+        console.warn('clientId is required to dismiss coin sync banner');
+        return;
+      }
+      const wallet = state.allWallets?.find(
+        item => item?.clientId === clientId,
+      );
+      if (!wallet) {
+        console.warn('wallet not found for clientId', clientId);
+        return;
+      }
+      wallet.isCoinSyncBannerDismissed = true;
     },
   },
   extraReducers: builder => {
@@ -2714,6 +2881,7 @@ export const walletsSlice = createSlice({
         payload?.isImportWalletWithPrivateKey;
       newStoreWallet.updateTimestamp = Date.now();
       newStoreWallet.isBackedup = isFromImportWallet;
+      newStoreWallet.isImported = isFromImportWallet;
       newStoreWallet.isImportWalletWithPrivateKey =
         isImportWalletWithPrivateKey;
       newStoreWallet.privateKey = privateKey;
@@ -2912,6 +3080,11 @@ export const {
   setCurrentWalletCoinsPosition,
   sortWallets,
   togglePrivacyMode,
+  setWalletHideSettings,
+  clearWalletHideSettings,
+  setWalletRevealed,
+  rehideWalletsOnBackground,
+  reassignCurrentWalletIfHidden,
   resetCoinsToDefaultAddressForPrivacyMode,
   setMasterClientId,
   resetIsAdding50MoreAddresses,
@@ -2921,6 +3094,7 @@ export const {
   removeUnClaimedLightningBTC,
   addCoinsToWallet,
   addLastCoinScanData,
+  dismissCoinSyncBanner,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators

@@ -4,6 +4,7 @@ import {EthereumClassicScan} from 'dok-wallet-blockchain-networks/service/Ethere
 import {EthereumPowScan} from 'dok-wallet-blockchain-networks/service/ethereumPowScan';
 import {PolygonService} from 'dok-wallet-blockchain-networks/service/polygonService';
 import {InkBlockExplorer} from 'dok-wallet-blockchain-networks/service/inkBlockExpolorer';
+import {BlockScout} from 'dok-wallet-blockchain-networks/service/blockScout';
 
 export const EvmServices = {
   ethereum: EtherScan,
@@ -24,4 +25,5 @@ export const EvmServices = {
   ink: InkBlockExplorer,
   sei: EtherScan,
   hyperliquid: EtherScan,
+  robinhood: BlockScout,
 };

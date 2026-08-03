@@ -1,9 +1,8 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
-  selectCurrentWallet,
-  selectUserCoins,
-  selectCoinsForCurrentWallet,
+  selectAllWallets,
   _currentWalletIndexSelector,
+  isCoinScanAvailableForTimestamp,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {
@@ -19,6 +18,7 @@ import {
   setWalletChainExistingCoin,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getCoinSnapshot} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {selectIsSyncing} from 'dok-wallet-blockchain-networks/redux/coinSync/coinSyncSelectors';
 import BigNumber from 'bignumber.js';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
@@ -45,8 +45,10 @@ const initialState = {
   // Error
   error: null,
 
-  // Banner dismissed per wallet clientId: { [clientId]: true }
-  dismissedBannerClientIds: {},
+  // requestId of the scan instance that owns this state. Stale thunk
+  // instances (cancelled, then superseded by a new scan) check this and
+  // stop touching the state.
+  activeRequestId: null,
 };
 
 // Get unique chain keys from coins (EVM chains share 'ethereum' key)
@@ -80,26 +82,57 @@ const getExistingChainWallet = (walletCoins, chainKey) => {
 // Main sync thunk - seamless real-time flow
 export const syncAllCoins = createAsyncThunk(
   'coinSync/syncAllCoins',
-  async (_, thunkAPI) => {
+  async (args, thunkAPI) => {
     const state = thunkAPI.getState();
-    const currentWallet = selectCurrentWallet(state);
-    const currentWalletIndex = _currentWalletIndexSelector(state);
-    const walletCoins = selectCoinsForCurrentWallet(state);
-    const userCoins = selectUserCoins(state);
-    const isPrivateKeyWallet = !!currentWallet?.isImportWalletWithPrivateKey;
+    // Scan the requested wallet (may differ from the active one), falling
+    // back to the current wallet when no walletIndex is provided.
+    const rawWalletIndex = args?.walletIndex;
+    const targetWalletIndex =
+      rawWalletIndex !== null &&
+      rawWalletIndex !== undefined &&
+      !isNaN(Number(rawWalletIndex))
+        ? Number(rawWalletIndex)
+        : _currentWalletIndexSelector(state);
+    const targetWallet = selectAllWallets(state)?.[targetWalletIndex];
+    if (!targetWallet) {
+      return thunkAPI.rejectWithValue('Wallet not found');
+    }
+
+    // Every successful exit must record the scan timestamp so the 24-hour
+    // cooldown arms even when a scan finds nothing new to check.
+    const finishScanSuccess = () => {
+      thunkAPI.dispatch(addLastCoinScanData({walletIndex: targetWalletIndex}));
+      return {success: true};
+    };
+
+    // True once this scan was cancelled or superseded by a newer scan -
+    // checked after every await so a stale instance stops touching state.
+    const isScanAborted = () => {
+      const currentState = thunkAPI.getState();
+      return (
+        currentState.coinSync.status === 'idle' ||
+        currentState.coinSync.activeRequestId !== thunkAPI.requestId
+      );
+    };
+    const walletCoins = targetWallet?.coins || [];
+    const userCoins = walletCoins.filter(coin => coin?.isInWallet);
+    const isPrivateKeyWallet = !!targetWallet?.isImportWalletWithPrivateKey;
 
     // Get existing chain wallets stored in the wallet
-    const existingChainWallets = currentWallet?.chain_existing_coin || {};
+    const existingChainWallets = targetWallet?.chain_existing_coin || {};
 
     // Step 1: Fetch all supported coins
     thunkAPI.dispatch(setStatus('fetching'));
-    thunkAPI.dispatch(setSyncingWalletIndex(currentWalletIndex));
-    thunkAPI.dispatch(setSyncingWalletName(currentWallet?.walletName || null));
+    thunkAPI.dispatch(setSyncingWalletIndex(targetWalletIndex));
+    thunkAPI.dispatch(setSyncingWalletName(targetWallet?.walletName || null));
     const resp = await fetchCurrenciesAPI({status: false, ignoreLimit: true});
+    if (isScanAborted()) {
+      return {success: false, cancelled: true};
+    }
     const allCoins = Array.isArray(resp?.data?.data) ? resp.data.data : [];
 
     if (allCoins.length === 0) {
-      return {success: true};
+      return finishScanSuccess();
     }
 
     // Step 2: Filter out coins already in wallet
@@ -109,19 +142,22 @@ export const syncAllCoins = createAsyncThunk(
     let coinsToCheck = allCoins.filter(
       coin => !existingKeys.has(generateUniqueKeyForChain(coin)),
     );
+    coinsToCheck = coinsToCheck.filter(coin =>
+      validateSupportedChain(coin?.chain_name),
+    );
 
     // For private key wallets, filter to compatible chains only
     if (isPrivateKeyWallet) {
       coinsToCheck = coinsToCheck.filter(coin =>
         checkValidChainForWalletImportWithPrivateKey({
-          currentWallet,
+          currentWallet: targetWallet,
           currentCoin: coin,
         }),
       );
     }
 
     if (coinsToCheck.length === 0) {
-      return {success: true};
+      return finishScanSuccess();
     }
 
     // Set total coins for progress tracking
@@ -149,20 +185,20 @@ export const syncAllCoins = createAsyncThunk(
       try {
         if (isPrivateKeyWallet) {
           const isCompatible = checkValidChainForWalletImportWithPrivateKey({
-            currentWallet,
+            currentWallet: targetWallet,
             currentCoin: {chain_name: chainKey},
           });
           if (!isCompatible) continue;
         }
         const customRPC = selectCustomRpcUrlByChainAndWallet(
           chainKey,
-          currentWallet?.clientId,
+          targetWallet?.clientId,
         )(state);
 
         const {wallet} = await createWalletForChain(
-          currentWallet.phrase,
+          targetWallet.phrase,
           {chain_name: chainKey},
-          currentWallet,
+          targetWallet,
           customRPC,
         );
 
@@ -180,17 +216,23 @@ export const syncAllCoins = createAsyncThunk(
       }
     }
 
+    if (isScanAborted()) {
+      return {success: false, cancelled: true};
+    }
+
     // Store wallets in the specific wallet's state for reuse
     thunkAPI.dispatch(
       setWalletChainExistingCoin({
-        walletIndex: currentWalletIndex,
+        walletIndex: targetWalletIndex,
         chainWallets,
       }),
     );
-    const currentUpdatedWallet = state?.allWallets?.[currentWalletIndex];
-    if (currentUpdatedWallet && chainWallets) {
-      currentUpdatedWallet.chain_existing_coin = chainWallets;
-    }
+    // Pass the target wallet explicitly to getCoinSnapshot (it falls back to
+    // the CURRENT wallet when given null, which would scan the wrong wallet).
+    const targetWalletWithChains = {
+      ...targetWallet,
+      chain_existing_coin: chainWallets,
+    };
 
     // Step 4: Check balances for all coins (real-time updates)
     thunkAPI.dispatch(setStatus('syncing'));
@@ -207,9 +249,8 @@ export const syncAllCoins = createAsyncThunk(
 
     let cancelled = false;
     for (let i = 0; i < coinsToCheck.length; i++) {
-      // Check if cancelled
-      const currentState = thunkAPI.getState();
-      if (currentState.coinSync.status === 'idle') {
+      // Check if cancelled or superseded by a newer scan
+      if (isScanAborted()) {
         cancelled = true;
         break;
       }
@@ -228,13 +269,20 @@ export const syncAllCoins = createAsyncThunk(
         const result = await getCoinSnapshot(
           state,
           coin,
-          currentUpdatedWallet,
+          targetWalletWithChains,
           priceObj,
           false,
           false,
           false,
           false,
         );
+
+        // Re-check after the await: a cancel/new scan may have happened
+        // while this coin's balance was being fetched.
+        if (isScanAborted()) {
+          cancelled = true;
+          break;
+        }
 
         if (
           new BigNumber(result?.totalBalance || 0).isGreaterThan(
@@ -257,13 +305,12 @@ export const syncAllCoins = createAsyncThunk(
       return {success: false, cancelled: true};
     }
 
-    thunkAPI.dispatch(addLastCoinScanData({walletIndex: currentWalletIndex}));
-
-    return {success: true};
+    return finishScanSuccess();
   },
   {
-    condition: (_, {getState}) => {
-      const syncStatus = getState().coinSync?.status;
+    condition: (args, {getState}) => {
+      const state = getState();
+      const syncStatus = state.coinSync?.status;
       // Prevent concurrent scans
       if (
         syncStatus === 'syncing' ||
@@ -272,9 +319,42 @@ export const syncAllCoins = createAsyncThunk(
       ) {
         return false;
       }
+      // Enforce 1 scan per 24 hours per wallet
+      const rawWalletIndex = args?.walletIndex;
+      const walletIndex =
+        rawWalletIndex !== null &&
+        rawWalletIndex !== undefined &&
+        !isNaN(Number(rawWalletIndex))
+          ? Number(rawWalletIndex)
+          : state.wallets?.currentWalletIndex;
+      const lastScanTimestamp =
+        state.wallets?.allWallets?.[walletIndex]?.lastCoinsScanTimestamp;
+      if (!isCoinScanAvailableForTimestamp(lastScanTimestamp)) {
+        return false;
+      }
     },
   },
 );
+
+// Cancel the running scan AND arm the 24h cooldown for the wallet being
+// scanned, so start/cancel loops can't burn RPC resources. Reads the wallet
+// index before cancelSync because cancelling may reset the slice state.
+// Only arms the cooldown while a scan is actually running: a completed scan
+// already recorded its timestamp (finishScanSuccess), and syncingWalletIndex
+// survives completion/retained partial results, so re-arming here would
+// extend the cooldown window.
+export const cancelSyncWithCooldown = () => (dispatch, getState) => {
+  const state = getState();
+  const walletIndex = state.coinSync?.syncingWalletIndex;
+  if (
+    walletIndex !== null &&
+    walletIndex !== undefined &&
+    selectIsSyncing(state)
+  ) {
+    dispatch(addLastCoinScanData({walletIndex}));
+  }
+  dispatch(cancelSync());
+};
 
 export const coinSyncSlice = createSlice({
   name: 'coinSync',
@@ -284,8 +364,20 @@ export const coinSyncSlice = createSlice({
       Object.assign(state, initialState);
     },
     cancelSync: state => {
-      state.status = 'idle';
+      // Abort signal: nulling the requestId makes the running thunk
+      // instance stop (isScanAborted checks the mismatch) without
+      // relying on status being 'idle'.
+      state.activeRequestId = null;
       state.currentSyncingCoin = null;
+      if (state.coinsWithBalance.length > 0) {
+        // Keep partial results so the user can still add the coins that
+        // were already found; 'completed' shows the selection UI.
+        state.status = 'completed';
+      } else {
+        // Nothing found - full reset so no stale data leaks into
+        // another wallet's scan screen.
+        Object.assign(state, initialState);
+      }
     },
     setStatus: (state, action) => {
       state.status = action.payload;
@@ -325,11 +417,10 @@ export const coinSyncSlice = createSlice({
         coin.isSelected = false;
       });
     },
-    dismissBanner: (state, action) => {
-      const clientId = action.payload;
-      if (clientId) {
-        state.dismissedBannerClientIds[clientId] = true;
-      }
+    // Persistent per-wallet dismissal lives on the wallet object
+    // (wallets slice, dismissCoinSyncBanner) - this only resets a finished
+    // scan's status so the banner stops showing the result.
+    dismissBanner: state => {
       if (state.status === 'completed' || state.status === 'error') {
         state.status = 'idle';
       }
@@ -337,7 +428,7 @@ export const coinSyncSlice = createSlice({
   },
   extraReducers: builder => {
     builder
-      .addCase(syncAllCoins.pending, state => {
+      .addCase(syncAllCoins.pending, (state, action) => {
         state.status = 'fetching';
         state.error = null;
         state.coinsWithBalance = [];
@@ -345,12 +436,27 @@ export const coinSyncSlice = createSlice({
         state.scannedCoins = 0;
         state.currentSyncingCoin = null;
         state.syncingWalletName = null;
+        state.activeRequestId = action.meta.requestId;
       })
-      .addCase(syncAllCoins.fulfilled, state => {
+      .addCase(syncAllCoins.fulfilled, (state, action) => {
+        if (state.activeRequestId !== action.meta.requestId) {
+          // Stale instance: a newer scan owns the state now
+          return;
+        }
+        if (action.payload?.cancelled) {
+          // Cancelled scans must not resurface as 'completed'. This also
+          // wipes any coins that trickled in from the in-flight snapshot
+          // await after cancelSync fired.
+          Object.assign(state, initialState);
+          return;
+        }
         state.status = 'completed';
         state.currentSyncingCoin = null;
       })
       .addCase(syncAllCoins.rejected, (state, action) => {
+        if (state.activeRequestId !== action.meta.requestId) {
+          return;
+        }
         state.status = 'error';
         state.error = action.error.message;
         state.currentSyncingCoin = null;

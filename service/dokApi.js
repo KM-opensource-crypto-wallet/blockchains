@@ -431,6 +431,31 @@ export const deleteSubscription = async id => {
   }
 };
 
+/**
+ * Bulk soft-delete of subscriptions by userId (master client id) and/or
+ * walletId (wallet client id) in a single call. A 404 means the filter
+ * matched nothing on an older backend - treated as "nothing to delete".
+ */
+export const deleteSubscriptionsBulk = async ({userId, walletId}) => {
+  try {
+    const params = {};
+    if (userId) {
+      params.userId = userId;
+    }
+    if (walletId) {
+      params.walletId = walletId;
+    }
+    const resp = await DokApi.delete('/notification-subscriptions', {params});
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    if (e?.response?.status === 404) {
+      return {status: 200, data: {deletedCount: 0}};
+    }
+    console.error('Error in deleteSubscriptionsBulk', JSON.stringify(e));
+    throw e;
+  }
+};
+
 export const getSubscriptionsByUser = async userId => {
   try {
     const resp = await DokApi.get(`/notification-subscriptions/${userId}`);
