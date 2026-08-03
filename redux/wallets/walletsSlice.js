@@ -27,8 +27,6 @@ import {
   getSingleTransaction,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
-  _currentWalletIndexSelector,
-  getCurrentWalletIndex,
   getMasterClientId,
   getSelectedNftData,
   isWalletHiddenAndLocked,
@@ -39,6 +37,7 @@ import {
   selectCoinsForCurrentWallet,
   selectCurrentCoin,
   selectCurrentWallet,
+  selectCurrentWalletClientId,
   selectUserCoins,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
@@ -158,16 +157,22 @@ export const RELOCK_OPTIONS = {
   MANUAL: 'MANUAL',
 };
 
-const reassignCurrentWalletIndexIfHidden = state => {
-  const allWallets = state.allWallets;
-  if (!isWalletHiddenAndLocked(allWallets[state.currentWalletIndex])) {
+const getWalletByClientId = (state, clientId) =>
+  state.allWallets.find(wallet => wallet?.clientId === clientId);
+
+const getCurrentWallet = state =>
+  getWalletByClientId(state, state.currentWalletClientId);
+
+const reassignCurrentWalletIfHiddenState = state => {
+  const currentWallet = getCurrentWallet(state);
+  if (!isWalletHiddenAndLocked(currentWallet)) {
     return;
   }
-  const firstVisibleIndex = allWallets.findIndex(
+  const firstVisibleWallet = state.allWallets.find(
     item => !isWalletHiddenAndLocked(item),
   );
-  if (firstVisibleIndex !== -1) {
-    state.currentWalletIndex = firstVisibleIndex;
+  if (firstVisibleWallet) {
+    state.currentWalletClientId = firstVisibleWallet.clientId;
   }
 };
 
@@ -517,7 +522,7 @@ export const refreshCoins = createAsyncThunk(
     try {
       const currentState = thunkAPI.getState();
       const currentWallet = selectCurrentWallet(currentState);
-      const currentWalletIndex = _currentWalletIndexSelector(currentState);
+      const currentWalletClientId = selectCurrentWalletClientId(currentState);
       const oldCoins = selectAllCoins(currentState);
       const filterCoins = oldCoins.filter(
         item => !!validateSupportedChain(item?.chain_name),
@@ -538,7 +543,7 @@ export const refreshCoins = createAsyncThunk(
           );
         }),
       );
-      return {coinData: resp, currentWalletIndex};
+      return {coinData: resp, currentWalletClientId};
     } catch (e) {
       console.error('Error in refreshCoins', e);
       return thunkAPI.rejectWithValue('Something went wrong refreshCoins');
@@ -746,7 +751,7 @@ export const addCoinGroup = createAsyncThunk(
       const currentState = thunkAPI.getState();
       const allCoins = selectCoinsForCurrentWallet(currentState);
       const currentWallet = selectCurrentWallet(currentState);
-      const currentWalletIndex = getCurrentWalletIndex(currentState);
+      const currentWalletClientId = selectCurrentWalletClientId(currentState);
       const allCoinsForAdd = Array.isArray(payload?.coins)
         ? payload?.coins
         : [];
@@ -792,7 +797,7 @@ export const addCoinGroup = createAsyncThunk(
         }
       }
       dispatch(setIsRemovingGroup(payload?._id));
-      return {newCoins, existingCoins, currentWalletIndex};
+      return {newCoins, existingCoins, currentWalletClientId};
     } catch (e) {
       console.error('Error in add coins', e);
       showToast({
@@ -866,7 +871,8 @@ export const handleUnclaimedData = createAsyncThunk(
       const currentWallet = selectCurrentWallet(currentState);
       const currentCoin =
         payload?.currentCoin || selectCurrentCoin(currentState);
-      const existingCurrentWalletIndex = getCurrentWalletIndex(currentState);
+      const existingCurrentWalletClientId =
+        selectCurrentWalletClientId(currentState);
       const existingCoinId = currentCoin?._id;
       const walletPhrase = currentWallet?.phrase;
       if (!walletPhrase) {
@@ -891,7 +897,7 @@ export const handleUnclaimedData = createAsyncThunk(
         await delay(2000);
         const removeData = {
           txData,
-          existingCurrentWalletIndex,
+          existingCurrentWalletClientId,
           existingCoinId,
         };
         thunkAPI.dispatch(removeUnClaimedLightningBTC(removeData));
@@ -1480,7 +1486,7 @@ export const sendPendingTransactions = createAsyncThunk(
 
 const initialState = {
   allWallets: [],
-  currentWalletIndex: 0,
+  currentWalletClientId: null,
   pendingTransactions: {},
   masterClientId: null,
   failedTransaction: null,
@@ -1502,7 +1508,7 @@ export const fetchNft = createAsyncThunk(
   'wallets/fetchNft',
   async (payload, thunkAPI) => {
     const currentState = thunkAPI.getState();
-    const currentWalletIndex = _currentWalletIndexSelector(currentState);
+    const currentWalletClientId = selectCurrentWalletClientId(currentState);
     const {selectedNftChain, cursor: previousCursor} = payload;
     const dispatch = thunkAPI.dispatch;
     try {
@@ -1513,7 +1519,11 @@ export const fetchNft = createAsyncThunk(
       const currentWallet = selectCurrentWallet(currentState);
       const previousNftData = getSelectedNftData(currentState);
       dispatch(
-        setNftLoading({selectedNftChain, isLoading: true, currentWalletIndex}),
+        setNftLoading({
+          selectedNftChain,
+          isLoading: true,
+          clientId: currentWalletClientId,
+        }),
       );
       const our_chain = MORALIS_CHAIN_TO_CHAIN[selectedNftChain];
       const foundCoin = currentWallet?.coins?.find(
@@ -1544,12 +1554,21 @@ export const fetchNft = createAsyncThunk(
         data = [...previousNftData, ...data];
       }
       dispatch(
-        setNft({currentWalletIndex, data, selectedNftChain, available: cursor}),
+        setNft({
+          clientId: currentWalletClientId,
+          data,
+          selectedNftChain,
+          available: cursor,
+        }),
       );
     } catch (e) {
       console.error('Error in fetch nft', e);
       dispatch(
-        setNftLoading({selectedNftChain, isLoading: false, currentWalletIndex}),
+        setNftLoading({
+          selectedNftChain,
+          isLoading: false,
+          clientId: currentWalletClientId,
+        }),
       );
     }
   },
@@ -1563,10 +1582,13 @@ export const addEVMAndTronDeriveAddresses = createAsyncThunk(
     try {
       dispatch(setIsAddMoreAddressPopupHidden(true));
       const currentState = thunkAPI.getState();
-      const currentWalletIndex =
-        payload?.index ?? _currentWalletIndexSelector(currentState);
+      const currentWalletClientId =
+        payload?.clientId ?? selectCurrentWalletClientId(currentState);
       dispatch(
-        updateIsEVMAddressesAdded({index: currentWalletIndex, value: true}),
+        updateIsEVMAddressesAdded({
+          clientId: currentWalletClientId,
+          value: true,
+        }),
       );
       const wallet = payload?.wallet || selectCurrentWallet(currentState);
       toastId = showToast({
@@ -1587,7 +1609,7 @@ export const addEVMAndTronDeriveAddresses = createAsyncThunk(
         toastId,
       });
       return {
-        currentWalletIndex,
+        currentWalletClientId,
         evmDeriveAddresses: evmAddresses?.deriveAddresses || null,
         tronDeriveAddresses: tronAddresses?.deriveAddresses || null,
         solanaDeriveAddresses: solanaAddresses?.deriveAddresses || null,
@@ -1612,8 +1634,8 @@ export const add50AddressesOnCurrentCoin = createAsyncThunk(
     try {
       dispatch(setIsAdding50MoreAddresses(true));
       const currentState = thunkAPI.getState();
-      const currentWalletIndex =
-        payload?.index ?? _currentWalletIndexSelector(currentState);
+      const currentWalletClientId =
+        payload?.clientId ?? selectCurrentWalletClientId(currentState);
       const wallet = payload?.wallet || selectCurrentWallet(currentState);
       const currentCoin =
         payload?.currentCoin ?? selectCurrentCoin(currentState);
@@ -1651,7 +1673,7 @@ export const add50AddressesOnCurrentCoin = createAsyncThunk(
       });
       dispatch(setIsAdding50MoreAddresses(false));
       return {
-        currentWalletIndex,
+        currentWalletClientId,
         chain_name: chainName,
         deriveAddresses: addresses?.deriveAddresses || null,
       };
@@ -1675,8 +1697,8 @@ export const addCustomDeriveAddress = createAsyncThunk(
     let toastId;
     try {
       const currentState = thunkAPI.getState();
-      const currentWalletIndex =
-        payload?.index ?? _currentWalletIndexSelector(currentState);
+      const currentWalletClientId =
+        payload?.clientId ?? selectCurrentWalletClientId(currentState);
 
       const wallet = payload?.wallet || selectCurrentWallet(currentState);
       const derivePath = payload?.derivePath;
@@ -1717,7 +1739,7 @@ export const addCustomDeriveAddress = createAsyncThunk(
           toastId,
         });
         return {
-          currentWalletIndex,
+          currentWalletClientId,
           chain_name,
           account: accountData?.account || {},
         };
@@ -1776,22 +1798,18 @@ export const findHiddenWalletByCode = async (state, code) => {
     if (matched) {
       return {
         matched: true,
-        walletIndex: index,
+        clientId: allWallets[index].clientId,
         walletName: allWallets[index].walletName,
       };
     }
   }
-  return {matched: false, walletIndex: null, walletName: null};
+  return {matched: false, clientId: null, walletName: null};
 };
 
-export const isSecretCodeInUseByOtherWallet = async (
-  state,
-  code,
-  walletIndex,
-) => {
+export const isSecretCodeInUseByOtherWallet = async (state, code, clientId) => {
   const allWallets = selectAllWallets(state) || [];
   for (let index = 0; index < allWallets.length; index++) {
-    if (index === Number(walletIndex)) {
+    if (allWallets[index]?.clientId === clientId) {
       continue;
     }
     const hideSettings = allWallets[index]?.hideSettings;
@@ -1816,17 +1834,15 @@ export const walletsSlice = createSlice({
   initialState,
   reducers: {
     setWalletChainExistingCoin: (state, action) => {
-      const {walletIndex, chainWallets} = action.payload;
-      const wallet = state.allWallets[walletIndex];
+      const {clientId, chainWallets} = action.payload;
+      const wallet = getWalletByClientId(state, clientId);
       if (wallet) {
         wallet.chain_existing_coin = chainWallets;
       }
     },
     setCoinsInCurrentWallet: (state, action) => {
       // get the current wallet
-      const allWallets = state.allWallets;
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = allWallets[currentWalletIndex] || {};
+      const currentWallet = getCurrentWallet(state) || {};
       if (Array.isArray(action?.payload)) {
         currentWallet.coins = action?.payload;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
@@ -1836,20 +1852,18 @@ export const walletsSlice = createSlice({
       }
     },
     setWalletPosition: (state, {payload}) => {
-      const index = validateNumber(payload?.index);
+      const clientId = payload?.clientId;
       const isMoveUp = payload?.isMoveUp;
       const previousAllWallets = state.allWallets;
-      let previousCurrentWalletIndex = state.currentWalletIndex;
       if (previousAllWallets.length === 1) {
         console.warn('Can not move because it have only 1 item');
         return;
       }
-      if (
-        index === null ||
-        index < 0 ||
-        index > previousAllWallets.length - 1
-      ) {
-        console.warn('invalid index');
+      const index = previousAllWallets.findIndex(
+        item => item?.clientId === clientId,
+      );
+      if (index === -1) {
+        console.warn('invalid clientId', clientId);
         return;
       }
       const updateArr = moveItem(
@@ -1860,22 +1874,9 @@ export const walletsSlice = createSlice({
       if (updateArr) {
         state.allWallets = updateArr;
       }
-      if (
-        (isMoveUp && previousCurrentWalletIndex === index) ||
-        (!isMoveUp && previousCurrentWalletIndex === index + 1)
-      ) {
-        previousCurrentWalletIndex = previousCurrentWalletIndex - 1;
-      } else if (
-        (!isMoveUp && previousCurrentWalletIndex === index) ||
-        (isMoveUp && previousCurrentWalletIndex === index - 1)
-      ) {
-        previousCurrentWalletIndex = previousCurrentWalletIndex + 1;
-      }
-      state.currentWalletIndex = previousCurrentWalletIndex;
     },
     rearrangeWallet: (state, {payload}) => {
       const newWallets = payload?.allWallets;
-      const newCurrentWalletIndex = validateNumber(payload?.currentWalletIndex);
       const previousAllWallets = state.allWallets;
       if (
         !Array.isArray(newWallets) ||
@@ -1889,20 +1890,13 @@ export const walletsSlice = createSlice({
         return;
       }
       state.allWallets = newWallets;
-      if (
-        newCurrentWalletIndex !== null &&
-        newCurrentWalletIndex >= 0 &&
-        newCurrentWalletIndex < previousAllWallets.length
-      ) {
-        state.currentWalletIndex = newCurrentWalletIndex;
-      }
     },
     setBackedUp: state => {
-      const currentWallet = state.allWallets[state.currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isBackedup = true;
     },
     setCurrentCoin: (state, action) => {
-      const currentWallet = state.allWallets[state.currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const id = action.payload;
       const findCoin = currentWallet.coins.find(item => item?._id === id);
       if (!findCoin) {
@@ -1918,7 +1912,7 @@ export const walletsSlice = createSlice({
       const symbol = payload?.symbol;
       const tempContractAddress = payload?.contractAddress;
       if (chain_name && symbol && tempContractAddress) {
-        const currentWallet = state.allWallets[state.currentWalletIndex];
+        const currentWallet = getCurrentWallet(state);
         currentWallet.coins = currentWallet.coins.map(item => {
           if (item?.chain_name === chain_name && item?.symbol === symbol) {
             return {
@@ -1932,29 +1926,28 @@ export const walletsSlice = createSlice({
     },
     resetWallet: () => initialState,
     updateWalletName: (state, action) => {
-      const updateWalletIndex = action?.payload?.index;
+      const clientId = action?.payload?.clientId;
       const updateWalletName = action?.payload?.walletName?.trim?.();
-      const allWallets = state.allWallets;
-      if (!allWallets[updateWalletIndex]) {
-        throw new Error('cannot update name because invalid index.js');
+      const updateWallet = getWalletByClientId(state, clientId);
+      if (!updateWallet) {
+        throw new Error('cannot update name because invalid clientId');
       }
       if (!updateWalletName) {
         console.warn('updateWalletName: rejected empty wallet name');
         return;
       }
-      const currentWallet = allWallets[updateWalletIndex];
-      currentWallet.walletName = updateWalletName;
+      updateWallet.walletName = updateWalletName;
     },
-    setCurrentWalletIndex: (state, action) => {
-      const index = action.payload;
-      if (isNaN(Number(index)) || !state?.allWallets[index]) {
+    setCurrentWalletClientId: (state, action) => {
+      const clientId = action.payload;
+      if (!getWalletByClientId(state, clientId)) {
         throw new Error(
-          `setCurrentWalletIndex: missing or invalid action payload: ${index}`,
+          `setCurrentWalletClientId: missing or invalid action payload: ${clientId}`,
         );
       }
-      state.allWallets.forEach((wallet, walletIndex) => {
+      state.allWallets.forEach(wallet => {
         if (
-          walletIndex !== Number(index) &&
+          wallet?.clientId !== clientId &&
           wallet?.hideSettings &&
           !wallet.hideSettings.isHidden &&
           wallet.hideSettings.relockOption !== RELOCK_OPTIONS.MANUAL
@@ -1962,54 +1955,44 @@ export const walletsSlice = createSlice({
           wallet.hideSettings.isHidden = true;
         }
       });
-      state.currentWalletIndex = index;
+      state.currentWalletClientId = clientId;
     },
     deleteWallet: (state, action) => {
-      const index = action?.payload;
+      const clientId = action?.payload;
       const allWallets = state.allWallets;
       if (allWallets?.length === 1) {
         throw new Error('cannot deleted because there is only 1 wallet');
       }
-      if (index === state.currentWalletIndex) {
+      if (clientId === state.currentWalletClientId) {
         throw new Error('cannot deleted because it is selected wallet');
       }
-      if (!allWallets[index]) {
+      if (!getWalletByClientId(state, clientId)) {
         throw new Error('wallet not available');
       }
-      state.allWallets = allWallets.filter((_, i) => i !== Number(index));
-      if (state.currentWalletIndex > index) {
-        state.currentWalletIndex = state.currentWalletIndex - 1;
-      }
+      state.allWallets = allWallets.filter(item => item?.clientId !== clientId);
     },
     deleteCoin: (state, action) => {
       const coinId = action?.payload;
-      const allWallets = state.allWallets;
-      const currentWalletIndex = state.currentWalletIndex;
       if (!coinId) {
         throw new Error('Id is not found ');
       }
-      const currentWallet = allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const allCoins = [...currentWallet.coins];
       currentWallet.coins = allCoins.filter(item => item?._id !== coinId);
-      state.allWallets[currentWalletIndex] = currentWallet;
     },
     setWalletConnect(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const previousSession = currentWallet?.session || {};
       currentWallet.session = {...previousSession, ...payload};
     },
     setWalletConnectWalletData(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const previousSession = currentWallet?.walletData || {};
       currentWallet.walletData = {...previousSession, ...payload};
     },
     setNftSelectedChain(state, {payload}) {
       if (NFT_SUPPORTED_CHAIN.includes(payload)) {
-        const allWallet = state.allWallets;
-        const currentWalletIndex = state.currentWalletIndex;
-        const currentWallet = allWallet[currentWalletIndex];
+        const currentWallet = getCurrentWallet(state);
         currentWallet.selectedNftChain = payload;
       } else {
         console.error('setNftSelectedChain Invalid payload:', payload);
@@ -2025,17 +2008,15 @@ export const walletsSlice = createSlice({
       }));
     },
     setNftLoading(state, {payload}) {
-      const {currentWalletIndex, isLoading, selectedNftChain} = payload;
-      const allWallet = state.allWallets;
-      const currentWallet = allWallet[currentWalletIndex];
+      const {clientId, isLoading, selectedNftChain} = payload;
+      const currentWallet = getWalletByClientId(state, clientId);
       const nft = currentWallet.nft;
       currentWallet.nft = {...nft, [`${selectedNftChain}_loading`]: isLoading};
     },
     setNft(state, {payload}) {
-      const {currentWalletIndex, data, selectedNftChain, available} = payload;
+      const {clientId, data, selectedNftChain, available} = payload;
       if (Array.isArray(data)) {
-        const allWallet = state.allWallets;
-        const currentWallet = allWallet[currentWalletIndex];
+        const currentWallet = getWalletByClientId(state, clientId);
         const nft = currentWallet.nft;
         currentWallet.nft = {
           ...nft,
@@ -2046,9 +2027,7 @@ export const walletsSlice = createSlice({
       }
     },
     setSelectedNft(state, {payload}) {
-      const allWallet = state.allWallets;
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = allWallet[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const selectedChain = currentWallet.selectedNftChain;
       const ownChain = MORALIS_CHAIN_TO_CHAIN[selectedChain];
       const allCoins = currentWallet.coins;
@@ -2058,29 +2037,25 @@ export const walletsSlice = createSlice({
       currentWallet.selectedNft = {...payload, coin: foundCoin};
     },
     removeWalletConnectSession(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallets = state.allWallets[currentWalletIndex];
-      const tempSession = {...currentWallets.session};
+      const currentWallet = getCurrentWallet(state);
+      const tempSession = {...currentWallet.session};
       delete tempSession[payload];
-      const tempWalletData = {...currentWallets.walletData};
+      const tempWalletData = {...currentWallet.walletData};
       delete tempWalletData[payload];
-      currentWallets.session = tempSession;
-      currentWallets.walletData = tempWalletData;
+      currentWallet.session = tempSession;
+      currentWallet.walletData = tempWalletData;
     },
     removeAllWalletConnectSession(state) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallets = state.allWallets[currentWalletIndex];
-      currentWallets.session = {};
-      currentWallets.walletData = {};
+      const currentWallet = getCurrentWallet(state);
+      currentWallet.session = {};
+      currentWallet.walletData = {};
     },
     setIsAddMoreAddressPopupHidden(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isAddMoreAddressPopupHidden = payload;
     },
     setIsAdding50MoreAddresses(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isAdding50MoreAddresses = payload;
     },
     resetIsAdding50MoreAddresses(state) {
@@ -2100,8 +2075,7 @@ export const walletsSlice = createSlice({
         return;
       }
       const {chain_name, address} = payload;
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       currentWallet.coins = currentWallet?.coins.map(item => {
         const allDeriveAddresses = Array.isArray(item?.deriveAddresses)
           ? item?.deriveAddresses
@@ -2120,8 +2094,7 @@ export const walletsSlice = createSlice({
       });
     },
     updateCurrentCoin(state, {payload}) {
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       currentWallet.coins = currentWallet?.coins.map(item => {
         if (item?._id === selectedCoinId) {
@@ -2138,8 +2111,7 @@ export const walletsSlice = createSlice({
         console.warn('address payload is required for delete derive address');
         return;
       }
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       const selectedCoin = currentWallet?.coins.find(
         item => item?._id === selectedCoinId,
@@ -2194,8 +2166,7 @@ export const walletsSlice = createSlice({
         );
         return;
       }
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = state.allWallets[currentWalletIndex];
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       const selectedCoin = currentWallet?.coins.find(
         item => item?._id === selectedCoinId,
@@ -2248,18 +2219,16 @@ export const walletsSlice = createSlice({
       });
     },
     updateIsEVMAddressesAdded: (state, action) => {
-      const updateWalletIndex = action?.payload?.index;
+      const clientId = action?.payload?.clientId;
       const value = action?.payload?.value;
-      const allWallets = state.allWallets;
-      if (!allWallets[updateWalletIndex]) {
-        throw new Error('cannot update status because invalid index.js');
+      const currentWallet = getWalletByClientId(state, clientId);
+      if (!currentWallet) {
+        throw new Error('cannot update status because invalid clientId');
       }
-      const currentWallet = allWallets[updateWalletIndex];
       currentWallet.isEVMAddressesAdded = value;
     },
     rearrangeCurrentWalletCoins: (state, {payload}) => {
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[state.currentWalletIndex] || {};
+      const currentWallet = getCurrentWallet(state) || {};
       const rearrangeCoins = payload?.rearrangeCoins;
       if (Array.isArray(rearrangeCoins)) {
         currentWallet.coins = rearrangeCoins;
@@ -2269,8 +2238,7 @@ export const walletsSlice = createSlice({
     },
     sortCurrentWalletCoins: (state, {payload}) => {
       const sortOption = payload?.sortOption;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[state.currentWalletIndex] || {};
+      const currentWallet = getCurrentWallet(state) || {};
       const coins = Array.isArray(currentWallet?.coins)
         ? [...currentWallet.coins]
         : [];
@@ -2350,8 +2318,7 @@ export const walletsSlice = createSlice({
     setCurrentWalletCoinsPosition: (state, {payload}) => {
       const index = validateNumber(payload?.index);
       const isMoveUp = payload?.isMoveUp;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[state.currentWalletIndex] || {};
+      const currentWallet = getCurrentWallet(state) || {};
       const allCoins = Array.isArray(currentWallet?.coins)
         ? [...currentWallet?.coins]
         : [];
@@ -2383,12 +2350,6 @@ export const walletsSlice = createSlice({
       if (wallets.length <= 1) {
         return;
       }
-
-      // Save the currently selected wallet's clientId to find it after sorting
-      const currentWallet = wallets[state.currentWalletIndex];
-      const currentWalletId = currentWallet?.clientId || currentWallet?.id;
-
-      // Helper function to calculate wallet total balance
 
       let sortedWallets;
       switch (sortOption) {
@@ -2431,21 +2392,9 @@ export const walletsSlice = createSlice({
       }
 
       state.allWallets = sortedWallets;
-
-      // Find the new index of the currently selected wallet
-      const newIndex = sortedWallets.findIndex(
-        wallet => (wallet?.clientId || wallet?.id) === currentWalletId,
-      );
-
-      // Update currentWalletIndex to the new position
-      if (newIndex !== -1) {
-        state.currentWalletIndex = newIndex;
-      }
     },
     togglePrivacyMode: (state, {payload}) => {
-      const walletIndex = payload?.walletIndex;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[walletIndex];
+      const currentWallet = getWalletByClientId(state, payload?.clientId);
       if (currentWallet) {
         currentWallet.privacyMode = !currentWallet.privacyMode;
       } else {
@@ -2453,9 +2402,7 @@ export const walletsSlice = createSlice({
       }
     },
     setWalletHideSettings: (state, {payload}) => {
-      const walletIndex = payload?.walletIndex;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[walletIndex];
+      const currentWallet = getWalletByClientId(state, payload?.clientId);
       if (!currentWallet) {
         throw new Error('setWalletHideSettings: wallet not found');
       }
@@ -2477,23 +2424,21 @@ export const walletsSlice = createSlice({
         relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
         hideNotification: hideNotification ?? true,
       };
-      reassignCurrentWalletIndexIfHidden(state);
+      reassignCurrentWalletIfHiddenState(state);
     },
     clearWalletHideSettings: (state, {payload}) => {
-      const walletIndex = payload?.walletIndex;
-      const currentWallet = state.allWallets[walletIndex];
+      const currentWallet = getWalletByClientId(state, payload?.clientId);
       if (currentWallet) {
         currentWallet.hideSettings = undefined;
       }
     },
     setWalletRevealed: (state, {payload}) => {
-      const walletIndex = payload?.walletIndex;
       const isHidden = !!payload?.isHidden;
-      const currentWallet = state.allWallets[walletIndex];
+      const currentWallet = getWalletByClientId(state, payload?.clientId);
       if (currentWallet?.hideSettings) {
         currentWallet.hideSettings.isHidden = isHidden;
         if (isHidden) {
-          reassignCurrentWalletIndexIfHidden(state);
+          reassignCurrentWalletIfHiddenState(state);
         }
       }
     },
@@ -2503,10 +2448,10 @@ export const walletsSlice = createSlice({
           item.hideSettings.isHidden = true;
         }
       });
-      reassignCurrentWalletIndexIfHidden(state);
+      reassignCurrentWalletIfHiddenState(state);
     },
     reassignCurrentWalletIfHidden: state => {
-      reassignCurrentWalletIndexIfHidden(state);
+      reassignCurrentWalletIfHiddenState(state);
     },
     resetCoinsToDefaultAddressForPrivacyMode: (state, {payload}) => {
       const allWallets = Array.isArray(state.allWallets)
@@ -2532,12 +2477,13 @@ export const walletsSlice = createSlice({
       state.allWallets = newWallet;
     },
     removeEVMDeriveAddresses: (state, action) => {
-      const updateWalletIndex = action?.payload?.index;
-      const allWallets = state.allWallets;
-      if (!allWallets[updateWalletIndex]) {
-        throw new Error('cannot update name because invalid index.js');
+      const currentWallet = getWalletByClientId(
+        state,
+        action?.payload?.clientId,
+      );
+      if (!currentWallet) {
+        throw new Error('cannot update name because invalid clientId');
       }
-      const currentWallet = allWallets[updateWalletIndex];
       const allCoins = [...currentWallet.coins];
       currentWallet.coins = allCoins.map(item => {
         const deriveAddressSupportChain = isDeriveAddressSupportChain(
@@ -2625,11 +2571,11 @@ export const walletsSlice = createSlice({
       const payload = action?.payload;
       const {txid, vout} = payload?.txData || {};
       const existingCoinId = payload?.existingCoinId;
-      const existingCurrentWalletIndex = payload?.existingCurrentWalletIndex;
-      const allWallets = state.allWallets;
-      const currentWalletIndex =
-        existingCurrentWalletIndex ?? state.currentWalletIndex;
-      const currentWallet = allWallets[currentWalletIndex];
+      const existingCurrentWalletClientId =
+        payload?.existingCurrentWalletClientId;
+      const currentWallet = existingCurrentWalletClientId
+        ? getWalletByClientId(state, existingCurrentWalletClientId)
+        : getCurrentWallet(state);
       if (!currentWallet) {
         console.warn('removeUnClaimedLightningBTC: wallet not found');
         return;
@@ -2644,19 +2590,18 @@ export const walletsSlice = createSlice({
       }
     },
     addCoinsToWallet: (state, action) => {
-      const {walletIndex, coins} = action?.payload;
-      if (walletIndex == null) {
-        console.warn('walletIndex is incorrect', walletIndex);
+      const {clientId, coins} = action?.payload;
+      if (!clientId) {
+        console.warn('clientId is incorrect', clientId);
         return;
       }
       if (!Array.isArray(coins) || coins.length === 0) {
-        console.warn('coins is incorrect', walletIndex);
+        console.warn('coins is incorrect', clientId);
         return;
       }
-      const allWallets = state.allWallets;
-      const wallet = allWallets[walletIndex];
+      const wallet = getWalletByClientId(state, clientId);
       if (!wallet) {
-        console.warn('wallet not found', walletIndex);
+        console.warn('wallet not found', clientId);
         return;
       }
       const existingCoins = Array.isArray(wallet.coins) ? wallet.coins : [];
@@ -2666,15 +2611,14 @@ export const walletsSlice = createSlice({
       ]);
     },
     addLastCoinScanData: (state, action) => {
-      const {walletIndex} = action?.payload;
-      if (walletIndex == null) {
-        console.warn('walletIndex is incorrect', walletIndex);
+      const {clientId} = action?.payload;
+      if (!clientId) {
+        console.warn('clientId is incorrect', clientId);
         return;
       }
-      const allWallets = state.allWallets;
-      const wallet = allWallets[walletIndex];
+      const wallet = getWalletByClientId(state, clientId);
       if (!wallet) {
-        console.warn('wallet not found', walletIndex);
+        console.warn('wallet not found', clientId);
         return;
       }
       wallet.lastCoinsScanTimestamp = new Date().toISOString();
@@ -2698,13 +2642,14 @@ export const walletsSlice = createSlice({
   extraReducers: builder => {
     builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
       const coinData = payload.coinData;
-      const currentWalletIndex = payload.currentWalletIndex;
-      if (Array.isArray(coinData) && !isNaN(Number(currentWalletIndex))) {
-        const allWallets = state.allWallets;
-        const currentWallets = allWallets[currentWalletIndex] || {};
-        currentWallets.coins = coinData;
-        currentWallets.chain_existing_coin = extractChainExistingCoins(
-          currentWallets.chain_existing_coin,
+      const currentWallet = getWalletByClientId(
+        state,
+        payload.currentWalletClientId,
+      );
+      if (Array.isArray(coinData) && currentWallet) {
+        currentWallet.coins = coinData;
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
           coinData,
         );
       }
@@ -2734,9 +2679,8 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(refreshCurrentCoin.fulfilled, (state, {payload}) => {
       if (payload?.updatedCurrentCoin) {
-        const allWallets = state.allWallets;
-        const currentWallets = allWallets[state.currentWalletIndex] || {};
-        const allCoins = [...currentWallets.coins];
+        const currentWallet = getCurrentWallet(state) || {};
+        const allCoins = [...currentWallet.coins];
         const updatedCurrentCoin = payload?.updatedCurrentCoin;
         const updatedNativeCoin = payload?.updatedNativeCoin;
         const foundIndex = allCoins.findIndex(
@@ -2752,15 +2696,15 @@ export const walletsSlice = createSlice({
               allCoins[foundNativeCoinIndex] = updatedNativeCoin;
             }
           }
-          currentWallets.coins = allCoins;
-          currentWallets.chain_existing_coin = extractChainExistingCoins(
-            currentWallets.chain_existing_coin,
+          currentWallet.coins = allCoins;
+          currentWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallet.chain_existing_coin,
             allCoins,
           );
         } else {
-          currentWallets.coins = allCoins;
-          currentWallets.chain_existing_coin = extractChainExistingCoins(
-            currentWallets.chain_existing_coin,
+          currentWallet.coins = allCoins;
+          currentWallet.chain_existing_coin = extractChainExistingCoins(
+            currentWallet.chain_existing_coin,
             allCoins,
           );
         }
@@ -2771,20 +2715,18 @@ export const walletsSlice = createSlice({
         return;
       }
       const {recentTransaction, coinId} = payload;
-      const currentWallets = state.allWallets[state.currentWalletIndex] || {};
-      const allCoins = [...currentWallets.coins];
+      const currentWallet = getCurrentWallet(state) || {};
+      const allCoins = [...currentWallet.coins];
       const foundIndex = allCoins.findIndex(item => item?._id === coinId);
       if (foundIndex !== -1) {
         allCoins[foundIndex] = {...allCoins[foundIndex], recentTransaction};
-        currentWallets.coins = allCoins;
+        currentWallet.coins = allCoins;
       }
     });
     builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {
       const newCoin = payload.newCoin;
       const existingCoinId = payload.existingCoinId;
-      const allWallets = state.allWallets;
-      const currentWalletIndex = state.currentWalletIndex;
-      const currentWallet = allWallets[currentWalletIndex] || {};
+      const currentWallet = getCurrentWallet(state) || {};
       const previousCoins = currentWallet.coins;
       if (newCoin) {
         currentWallet.coins = [...previousCoins, newCoin];
@@ -2806,9 +2748,8 @@ export const walletsSlice = createSlice({
       const existingCoins = Array.isArray(payload.existingCoins)
         ? payload.existingCoins
         : [];
-      const currentWalletIndex = payload.currentWalletIndex;
-      const allWallets = state.allWallets;
-      const currentWallet = allWallets[currentWalletIndex] || {};
+      const currentWallet =
+        getWalletByClientId(state, payload.currentWalletClientId) || {};
       const previousCoins = currentWallet.coins;
       if (!existingCoins.length) {
         currentWallet.coins = getUniqueCoins([...previousCoins, ...newCoins]);
@@ -2835,12 +2776,11 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(addToken.fulfilled, (state, {payload}) => {
       if (payload) {
-        const allWallets = state.allWallets;
-        const currentWallets = allWallets[state.currentWalletIndex] || {};
-        currentWallets.coins = [...currentWallets.coins, payload];
-        currentWallets.chain_existing_coin = extractChainExistingCoins(
-          currentWallets.chain_existing_coin,
-          currentWallets.coins,
+        const currentWallet = getCurrentWallet(state) || {};
+        currentWallet.coins = [...currentWallet.coins, payload];
+        currentWallet.chain_existing_coin = extractChainExistingCoins(
+          currentWallet.chain_existing_coin,
+          currentWallet.coins,
         );
       }
     });
@@ -2889,26 +2829,27 @@ export const walletsSlice = createSlice({
       } else {
         const allWallets = state.allWallets;
         state.allWallets = [...allWallets, newStoreWallet];
-        state.currentWalletIndex = state.allWallets.length - 1;
+        state.currentWalletClientId = newStoreWallet.clientId;
       }
     });
     builder.addCase(
       addEVMAndTronDeriveAddresses.fulfilled,
       (state, {payload}) => {
-        const currentWalletIndex = payload?.currentWalletIndex;
+        const currentWallet = getWalletByClientId(
+          state,
+          payload?.currentWalletClientId,
+        );
         const tronDeriveAddresses = payload?.tronDeriveAddresses;
         const evmDeriveAddresses = payload?.evmDeriveAddresses;
         const solanaDeriveAddresses = payload?.solanaDeriveAddresses;
         if (
-          currentWalletIndex !== undefined &&
+          currentWallet &&
           Array.isArray(evmDeriveAddresses) &&
           evmDeriveAddresses.length
         ) {
-          const allWallets = state.allWallets;
-          const currentWallets = allWallets[currentWalletIndex] || {};
-          const allCoins = [...currentWallets.coins];
+          const allCoins = [...currentWallet.coins];
 
-          currentWallets.coins = allCoins.map(item => {
+          currentWallet.coins = allCoins.map(item => {
             const oldDeriveAddress = item?.deriveAddresses;
 
             const isEVM = isEVMChain(item?.chain_name);
@@ -2946,20 +2887,21 @@ export const walletsSlice = createSlice({
     builder.addCase(
       add50AddressesOnCurrentCoin.fulfilled,
       (state, {payload}) => {
-        const currentWalletIndex = payload?.currentWalletIndex;
+        const currentWallet = getWalletByClientId(
+          state,
+          payload?.currentWalletClientId,
+        );
         const chainName = payload?.chain_name;
         const deriveAddresses = payload?.deriveAddresses;
         if (
-          currentWalletIndex !== undefined &&
+          currentWallet &&
           Array.isArray(deriveAddresses) &&
           deriveAddresses.length &&
           chainName
         ) {
-          const allWallets = state.allWallets;
-          const currentWallets = allWallets[currentWalletIndex] || {};
-          const allCoins = [...currentWallets.coins];
+          const allCoins = [...currentWallet.coins];
 
-          currentWallets.coins = allCoins.map(item => {
+          currentWallet.coins = allCoins.map(item => {
             const oldDeriveAddress = item?.deriveAddresses;
             const isSelectedEvm = isEVMChain(chainName);
             const isEVM = isEVMChain(item?.chain_name);
@@ -2979,21 +2921,22 @@ export const walletsSlice = createSlice({
       },
     );
     builder.addCase(addCustomDeriveAddress.fulfilled, (state, {payload}) => {
-      const currentWalletIndex = payload?.currentWalletIndex;
+      const currentWallet = getWalletByClientId(
+        state,
+        payload?.currentWalletClientId,
+      );
       const chain_name = payload?.chain_name;
       const account = payload?.account;
       if (
-        currentWalletIndex !== undefined &&
+        currentWallet &&
         account?.privateKey &&
         account?.address &&
         account?.derivePath &&
         chain_name
       ) {
-        const allWallets = state.allWallets;
-        const currentWallets = allWallets[currentWalletIndex] || {};
-        const allCoins = [...currentWallets.coins];
+        const allCoins = [...currentWallet.coins];
         const isEVM = isEVMChain(chain_name);
-        currentWallets.coins = allCoins.map(item => {
+        currentWallet.coins = allCoins.map(item => {
           if (
             (isEVM && isEVMChain(item?.chain_name)) ||
             chain_name === item?.chain_name
@@ -3034,7 +2977,7 @@ export const {
   setCurrentCoin,
   setWalletChainExistingCoin,
   updateWalletName,
-  setCurrentWalletIndex,
+  setCurrentWalletClientId,
   updateUserCoins,
   setCoinsInCurrentWallet,
   deleteWallet,
