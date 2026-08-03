@@ -13,8 +13,14 @@ let feesInfo = {
     },
   },
   multiplier: {
-    ethereum: 1.3,
-    polygon: 1.3,
+    ethereum: {
+      testnet: 1.3,
+      mainnet: 1.3,
+    },
+    polygon: {
+      testnet: 1.3,
+      mainnet: 1.3,
+    },
   },
 };
 
