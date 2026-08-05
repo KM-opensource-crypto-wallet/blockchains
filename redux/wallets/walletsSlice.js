@@ -158,7 +158,7 @@ export const RELOCK_OPTIONS = {
 };
 
 const getWalletByClientId = (state, clientId) =>
-  state.allWallets.find(wallet => wallet?.clientId === clientId);
+  state.allWallets.find(wallet => wallet?.clientId === clientId) || {};
 
 const getCurrentWallet = state =>
   getWalletByClientId(state, state.currentWalletClientId);
@@ -1842,7 +1842,7 @@ export const walletsSlice = createSlice({
     },
     setCoinsInCurrentWallet: (state, action) => {
       // get the current wallet
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       if (Array.isArray(action?.payload)) {
         currentWallet.coins = action?.payload;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
@@ -1892,11 +1892,11 @@ export const walletsSlice = createSlice({
       state.allWallets = newWallets;
     },
     setBackedUp: state => {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isBackedup = true;
     },
     setCurrentCoin: (state, action) => {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const id = action.payload;
       const findCoin = currentWallet.coins.find(item => item?._id === id);
       if (!findCoin) {
@@ -1912,7 +1912,7 @@ export const walletsSlice = createSlice({
       const symbol = payload?.symbol;
       const tempContractAddress = payload?.contractAddress;
       if (chain_name && symbol && tempContractAddress) {
-        const currentWallet = getCurrentWallet(state) || {};
+        const currentWallet = getCurrentWallet(state);
         currentWallet.coins = currentWallet.coins.map(item => {
           if (item?.chain_name === chain_name && item?.symbol === symbol) {
             return {
@@ -1976,25 +1976,25 @@ export const walletsSlice = createSlice({
       if (!coinId) {
         throw new Error('Id is not found ');
       }
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const allCoins = Array.isArray(currentWallet.coins)
         ? [...currentWallet.coins]
         : [];
       currentWallet.coins = allCoins.filter(item => item?._id !== coinId);
     },
     setWalletConnect(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
-      const previousSession = currentWallet?.session || {};
+      const currentWallet = getCurrentWallet(state);
+      const previousSession = currentWallet?.session;
       currentWallet.session = {...previousSession, ...payload};
     },
     setWalletConnectWalletData(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
-      const previousSession = currentWallet?.walletData || {};
+      const currentWallet = getCurrentWallet(state);
+      const previousSession = currentWallet?.walletData;
       currentWallet.walletData = {...previousSession, ...payload};
     },
     setNftSelectedChain(state, {payload}) {
       if (NFT_SUPPORTED_CHAIN.includes(payload)) {
-        const currentWallet = getCurrentWallet(state) || {};
+        const currentWallet = getCurrentWallet(state);
         currentWallet.selectedNftChain = payload;
       } else {
         console.error('setNftSelectedChain Invalid payload:', payload);
@@ -2011,14 +2011,14 @@ export const walletsSlice = createSlice({
     },
     setNftLoading(state, {payload}) {
       const {clientId, isLoading, selectedNftChain} = payload;
-      const currentWallet = getWalletByClientId(state, clientId) || {};
+      const currentWallet = getWalletByClientId(state, clientId);
       const nft = currentWallet.nft;
       currentWallet.nft = {...nft, [`${selectedNftChain}_loading`]: isLoading};
     },
     setNft(state, {payload}) {
       const {clientId, data, selectedNftChain, available} = payload;
       if (Array.isArray(data)) {
-        const currentWallet = getWalletByClientId(state, clientId) || {};
+        const currentWallet = getWalletByClientId(state, clientId);
         const nft = currentWallet.nft;
         currentWallet.nft = {
           ...nft,
@@ -2029,7 +2029,7 @@ export const walletsSlice = createSlice({
       }
     },
     setSelectedNft(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const selectedChain = currentWallet.selectedNftChain;
       const ownChain = MORALIS_CHAIN_TO_CHAIN[selectedChain];
       const allCoins = currentWallet.coins;
@@ -2039,7 +2039,7 @@ export const walletsSlice = createSlice({
       currentWallet.selectedNft = {...payload, coin: foundCoin};
     },
     removeWalletConnectSession(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const tempSession = {...currentWallet.session};
       delete tempSession[payload];
       const tempWalletData = {...currentWallet.walletData};
@@ -2048,16 +2048,16 @@ export const walletsSlice = createSlice({
       currentWallet.walletData = tempWalletData;
     },
     removeAllWalletConnectSession(state) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       currentWallet.session = {};
       currentWallet.walletData = {};
     },
     setIsAddMoreAddressPopupHidden(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isAddMoreAddressPopupHidden = payload;
     },
     setIsAdding50MoreAddresses(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       currentWallet.isAdding50MoreAddresses = payload;
     },
     resetIsAdding50MoreAddresses(state) {
@@ -2077,7 +2077,7 @@ export const walletsSlice = createSlice({
         return;
       }
       const {chain_name, address} = payload;
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       currentWallet.coins = currentWallet?.coins.map(item => {
         const allDeriveAddresses = Array.isArray(item?.deriveAddresses)
           ? item?.deriveAddresses
@@ -2096,7 +2096,7 @@ export const walletsSlice = createSlice({
       });
     },
     updateCurrentCoin(state, {payload}) {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       currentWallet.coins = currentWallet?.coins.map(item => {
         if (item?._id === selectedCoinId) {
@@ -2113,7 +2113,7 @@ export const walletsSlice = createSlice({
         console.warn('address payload is required for delete derive address');
         return;
       }
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       const selectedCoin = currentWallet?.coins.find(
         item => item?._id === selectedCoinId,
@@ -2168,7 +2168,7 @@ export const walletsSlice = createSlice({
         );
         return;
       }
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const selectedCoinId = currentWallet?.selectedCoin;
       const selectedCoin = currentWallet?.coins.find(
         item => item?._id === selectedCoinId,
@@ -2230,7 +2230,7 @@ export const walletsSlice = createSlice({
       currentWallet.isEVMAddressesAdded = value;
     },
     rearrangeCurrentWalletCoins: (state, {payload}) => {
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const rearrangeCoins = payload?.rearrangeCoins;
       if (Array.isArray(rearrangeCoins)) {
         currentWallet.coins = rearrangeCoins;
@@ -2240,7 +2240,7 @@ export const walletsSlice = createSlice({
     },
     sortCurrentWalletCoins: (state, {payload}) => {
       const sortOption = payload?.sortOption;
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const coins = Array.isArray(currentWallet?.coins)
         ? [...currentWallet.coins]
         : [];
@@ -2320,7 +2320,7 @@ export const walletsSlice = createSlice({
     setCurrentWalletCoinsPosition: (state, {payload}) => {
       const index = validateNumber(payload?.index);
       const isMoveUp = payload?.isMoveUp;
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const allCoins = Array.isArray(currentWallet?.coins)
         ? [...currentWallet?.coins]
         : [];
@@ -2683,7 +2683,7 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(refreshCurrentCoin.fulfilled, (state, {payload}) => {
       if (payload?.updatedCurrentCoin) {
-        const currentWallet = getCurrentWallet(state) || {};
+        const currentWallet = getCurrentWallet(state);
         const allCoins = Array.isArray(currentWallet.coins)
           ? [...currentWallet.coins]
           : [];
@@ -2721,7 +2721,7 @@ export const walletsSlice = createSlice({
         return;
       }
       const {recentTransaction, coinId} = payload;
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const allCoins = Array.isArray(currentWallet.coins)
         ? [...currentWallet.coins]
         : [];
@@ -2734,7 +2734,7 @@ export const walletsSlice = createSlice({
     builder.addCase(addOrToggleCoinInWallet.fulfilled, (state, {payload}) => {
       const newCoin = payload.newCoin;
       const existingCoinId = payload.existingCoinId;
-      const currentWallet = getCurrentWallet(state) || {};
+      const currentWallet = getCurrentWallet(state);
       const previousCoins = Array.isArray(currentWallet.coins)
         ? currentWallet.coins
         : [];
@@ -2758,8 +2758,10 @@ export const walletsSlice = createSlice({
       const existingCoins = Array.isArray(payload.existingCoins)
         ? payload.existingCoins
         : [];
-      const currentWallet =
-        getWalletByClientId(state, payload.currentWalletClientId) || {};
+      const currentWallet = getWalletByClientId(
+        state,
+        payload.currentWalletClientId,
+      );
       const previousCoins = Array.isArray(currentWallet.coins)
         ? currentWallet.coins
         : [];
@@ -2788,7 +2790,7 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(addToken.fulfilled, (state, {payload}) => {
       if (payload) {
-        const currentWallet = getCurrentWallet(state) || {};
+        const currentWallet = getCurrentWallet(state);
         currentWallet.coins = Array.isArray(currentWallet.coins)
           ? [...currentWallet.coins, payload]
           : [payload];
