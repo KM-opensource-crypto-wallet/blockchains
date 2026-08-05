@@ -1,7 +1,7 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {
   selectAllWallets,
-  _currentWalletIndexSelector,
+  selectCurrentWalletClientId,
   isCoinScanAvailableForTimestamp,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
@@ -36,8 +36,8 @@ const initialState = {
   // Current coin being scanned (for display)
   currentSyncingCoin: null,
 
-  // Wallet index where syncing started (to add coins to correct wallet)
-  syncingWalletIndex: null,
+  // Wallet clientId where syncing started (to add coins to correct wallet)
+  syncingWalletClientId: null,
 
   // Wallet name where syncing started (for display)
   syncingWalletName: null,
@@ -85,15 +85,12 @@ export const syncAllCoins = createAsyncThunk(
   async (args, thunkAPI) => {
     const state = thunkAPI.getState();
     // Scan the requested wallet (may differ from the active one), falling
-    // back to the current wallet when no walletIndex is provided.
-    const rawWalletIndex = args?.walletIndex;
-    const targetWalletIndex =
-      rawWalletIndex !== null &&
-      rawWalletIndex !== undefined &&
-      !isNaN(Number(rawWalletIndex))
-        ? Number(rawWalletIndex)
-        : _currentWalletIndexSelector(state);
-    const targetWallet = selectAllWallets(state)?.[targetWalletIndex];
+    // back to the current wallet when no walletClientId is provided.
+    const targetWalletClientId =
+      args?.walletClientId || selectCurrentWalletClientId(state);
+    const targetWallet = selectAllWallets(state)?.find(
+      item => item?.clientId === targetWalletClientId,
+    );
     if (!targetWallet) {
       return thunkAPI.rejectWithValue('Wallet not found');
     }
@@ -101,7 +98,7 @@ export const syncAllCoins = createAsyncThunk(
     // Every successful exit must record the scan timestamp so the 24-hour
     // cooldown arms even when a scan finds nothing new to check.
     const finishScanSuccess = () => {
-      thunkAPI.dispatch(addLastCoinScanData({walletIndex: targetWalletIndex}));
+      thunkAPI.dispatch(addLastCoinScanData({clientId: targetWalletClientId}));
       return {success: true};
     };
 
@@ -123,7 +120,7 @@ export const syncAllCoins = createAsyncThunk(
 
     // Step 1: Fetch all supported coins
     thunkAPI.dispatch(setStatus('fetching'));
-    thunkAPI.dispatch(setSyncingWalletIndex(targetWalletIndex));
+    thunkAPI.dispatch(setSyncingWalletClientId(targetWalletClientId));
     thunkAPI.dispatch(setSyncingWalletName(targetWallet?.walletName || null));
     const resp = await fetchCurrenciesAPI({status: false, ignoreLimit: true});
     if (isScanAborted()) {
@@ -223,7 +220,7 @@ export const syncAllCoins = createAsyncThunk(
     // Store wallets in the specific wallet's state for reuse
     thunkAPI.dispatch(
       setWalletChainExistingCoin({
-        walletIndex: targetWalletIndex,
+        clientId: targetWalletClientId,
         chainWallets,
       }),
     );
@@ -320,15 +317,12 @@ export const syncAllCoins = createAsyncThunk(
         return false;
       }
       // Enforce 1 scan per 24 hours per wallet
-      const rawWalletIndex = args?.walletIndex;
-      const walletIndex =
-        rawWalletIndex !== null &&
-        rawWalletIndex !== undefined &&
-        !isNaN(Number(rawWalletIndex))
-          ? Number(rawWalletIndex)
-          : state.wallets?.currentWalletIndex;
-      const lastScanTimestamp =
-        state.wallets?.allWallets?.[walletIndex]?.lastCoinsScanTimestamp;
+      const walletClientId =
+        args?.walletClientId || selectCurrentWalletClientId(state);
+      const wallet = selectAllWallets(state)?.find(
+        item => item?.clientId === walletClientId,
+      );
+      const lastScanTimestamp = wallet?.lastCoinsScanTimestamp;
       if (!isCoinScanAvailableForTimestamp(lastScanTimestamp)) {
         return false;
       }
@@ -338,20 +332,16 @@ export const syncAllCoins = createAsyncThunk(
 
 // Cancel the running scan AND arm the 24h cooldown for the wallet being
 // scanned, so start/cancel loops can't burn RPC resources. Reads the wallet
-// index before cancelSync because cancelling may reset the slice state.
+// clientId before cancelSync because cancelling may reset the slice state.
 // Only arms the cooldown while a scan is actually running: a completed scan
-// already recorded its timestamp (finishScanSuccess), and syncingWalletIndex
+// already recorded its timestamp (finishScanSuccess), and syncingWalletClientId
 // survives completion/retained partial results, so re-arming here would
 // extend the cooldown window.
 export const cancelSyncWithCooldown = () => (dispatch, getState) => {
   const state = getState();
-  const walletIndex = state.coinSync?.syncingWalletIndex;
-  if (
-    walletIndex !== null &&
-    walletIndex !== undefined &&
-    selectIsSyncing(state)
-  ) {
-    dispatch(addLastCoinScanData({walletIndex}));
+  const clientId = state.coinSync?.syncingWalletClientId;
+  if (clientId && selectIsSyncing(state)) {
+    dispatch(addLastCoinScanData({clientId}));
   }
   dispatch(cancelSync());
 };
@@ -382,8 +372,8 @@ export const coinSyncSlice = createSlice({
     setStatus: (state, action) => {
       state.status = action.payload;
     },
-    setSyncingWalletIndex: (state, action) => {
-      state.syncingWalletIndex = action.payload;
+    setSyncingWalletClientId: (state, action) => {
+      state.syncingWalletClientId = action.payload;
     },
     setSyncingWalletName: (state, action) => {
       state.syncingWalletName = action.payload;
@@ -468,7 +458,7 @@ export const {
   resetCoinSync,
   cancelSync,
   setStatus,
-  setSyncingWalletIndex,
+  setSyncingWalletClientId,
   setSyncingWalletName,
   setTotalCoins,
   setScannedCoins,
