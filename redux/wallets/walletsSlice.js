@@ -313,7 +313,7 @@ export const createWallet = createAsyncThunk(
     const masterClientId = getMasterClientId(currentState);
     registerUserAPI({
       coins: walletData.newStoreWallet?.coins,
-      clientId: walletData?.clientId,
+      clientId: newStoreWallet?.clientId,
       masterClientId,
       is_create_wallet: true,
       is_imported: isFromImportWallet,
