@@ -361,7 +361,6 @@ const ETHER_API_KEYS = shuffleArray([
 export const config = {
   TRON_SOLIDITY_NODE: 'https://api.trongrid.io',
   TRON_EVENT_SERVER: 'https://api.trongrid.io',
-  TRON_API_KEY: process.env.TRON_API_KEY_1,
   TRON_FULL_HOST: 'https://api.trongrid.io',
   BLOCK_CYPHER_BASE_URL: 'https://api.blockcypher.com',
   BLOCK_CYPHER_API_KEY: process.env.BLOCK_CYPHER_API_KEY,
@@ -466,10 +465,6 @@ export const config = {
   TON_SCAN_URL: IS_SANDBOX
     ? 'https://testnet.tonscan.org'
     : 'https://tonscan.org',
-  TON_SCAN_BASE_URL: IS_SANDBOX
-    ? 'https://testnet.toncenter.com'
-    : 'https://toncenter.com',
-  TON_SCAN_API_KEY: process.env.TON_SCAN_API_KEY,
   TRON_SCAN_BASE_URL: IS_SANDBOX
     ? 'https://nileapi.tronscan.org'
     : 'https://apilist.tronscanapi.com',

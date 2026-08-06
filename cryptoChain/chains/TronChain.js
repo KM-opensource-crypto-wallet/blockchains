@@ -3,6 +3,7 @@ import {
   getPremiumRPCUrl,
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
@@ -22,42 +23,22 @@ const removeSubstringFromPrivateKey = privateKey => {
     : privateKey;
 };
 
+const withRpcSession = tronWeb => {
+  for (const node of [tronWeb.fullNode, tronWeb.solidityNode]) {
+    node.instance.defaults.adapter = rpcSessionAdapter;
+  }
+  return tronWeb;
+};
+
 export const TronChain = () => {
-  // Build ordered provider list: premium RPCs first, then trongrid with API keys as fallback.
-  // Each entry is a TronWeb options object.
-  const buildTronProviders = () => {
-    const providers = [];
-
-    // Premium providers (QuickNode, Alchemy, etc.) — each URL is a standalone fullHost
-    const premiumUrls = getPremiumRPCUrl('tron');
-    for (const url of premiumUrls) {
-      providers.push({fullHost: url});
-    }
-
-    // Trongrid fallback — retry with no key, then each API key in turn
-    const tronGridOptions = {
+  const buildTronProviders = () => [
+    ...getPremiumRPCUrl('tron').map(url => ({fullHost: url})),
+    {
       fullHost: getRPCUrl('tron_full_host'),
       solidityNode: getRPCUrl('tron_solidity_node'),
       eventServer: getRPCUrl('tron_event_server'),
-    };
-    providers.push({...tronGridOptions}); // no API key
-    const apiKey1 = getRPCUrl('tron_api_key');
-    const apiKey2 = getRPCUrl('tron_api_key_2');
-    if (apiKey1) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey1},
-      });
-    }
-    if (apiKey2) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey2},
-      });
-    }
-
-    return providers;
-  };
+    },
+  ];
 
   let defaultTronWeb = null;
 
@@ -77,8 +58,7 @@ export const TronChain = () => {
     const providers = buildTronProviders();
     for (let i = 0; i < providers.length; i++) {
       try {
-        const tronWeb = new TronWeb(providers[i]);
-        return await cb(tronWeb);
+        return await cb(withRpcSession(new TronWeb(providers[i])));
       } catch (e) {
         console.error(
           'Error for tron provider',

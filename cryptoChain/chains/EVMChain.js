@@ -18,6 +18,11 @@ import {
   getPremiumRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
+  getRpcSessionHeaders,
+  isRpcProxyUrl,
+  refreshSessionForReplay,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {
   convertToSmallAmount,
   deleteItemAtIndex,
   extractHashFromEVMError,
@@ -236,7 +241,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     : [...premiumRpcUrls, ...freeRpcUrls];
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
-  console.log('All rpcs', allRpcUrls);
   const chainId = CHAIN_ID[chain_name];
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
@@ -378,6 +382,31 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     const fetchRequest = new FetchRequest(url);
     fetchRequest.timeout = TIMEOUT;
     fetchRequest.retryFunc = async () => null;
+    if (isRpcProxyUrl(url)) {
+      fetchRequest.preflightFunc = async request => {
+        const sessionHeaders = await getRpcSessionHeaders(url);
+        Object.entries(sessionHeaders || {}).forEach(([key, value]) =>
+          request.setHeader(key, value),
+        );
+        return request;
+      };
+      // Mint a new token so call failed premium rpc again
+      fetchRequest.processFunc = async (request, response) => {
+        if (response.statusCode !== 401) {
+          return response;
+        }
+        const sentToken = request.getHeader('x-rpc-session');
+        if (await refreshSessionForReplay(sentToken)) {
+          const replay = new Error(
+            'RPC session expired, replaying with a fresh token',
+          );
+          replay.throttle = true;
+          replay.stall = 0;
+          throw replay;
+        }
+        return response;
+      };
+    }
     return new JsonRpcProvider(fetchRequest, chainId, {staticNetwork: true});
   };
 

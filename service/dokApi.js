@@ -209,6 +209,12 @@ export const fetchRpcUrls = async countryCode => {
     throw e;
   }
 };
+
+export const fetchRpcSession = async () => {
+  const resp = await DokApi.post('/rpc/session');
+  return resp?.data;
+};
+
 export const fetchFeesInfo = async () => {
   try {
     const resp = await DokApi.get('/get-fees-info', {

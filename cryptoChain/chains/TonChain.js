@@ -16,6 +16,10 @@ import {
 } from '@ton/ton';
 import {keyPairFromSeed} from '@ton/crypto';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  buildRpcProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import BigNumber from 'bignumber.js';
 import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
 import {WL_APP_NAME} from 'utils/wlData';
@@ -43,9 +47,12 @@ const findTxHashBySeqno = async (tonClient, address, seqno) => {
 };
 
 export const TonChain = () => {
+  const tonProxyBase = buildRpcProxyUrl('ton');
   const tonClient = new TonClient({
-    endpoint: getRPCUrl('ton'),
-    apiKey: getRPCUrl('ton_api_key'),
+    endpoint: tonProxyBase
+      ? `${tonProxyBase}/api/v2/jsonRPC`
+      : getRPCUrl('ton'),
+    httpAdapter: rpcSessionAdapter,
   });
 
   return {

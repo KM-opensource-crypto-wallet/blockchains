@@ -1,19 +1,13 @@
 import {fetchRpcUrls} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {
-  isValidObject,
-  safelyJsonParse,
-} from 'dok-wallet-blockchain-networks/helper';
+import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {buildRpcProxyUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import dayjs from 'dayjs';
 
 const allRPCUrl = {
   solana: {
     mainnet: 'https://api.mainnet-beta.solana.com',
     testnet: 'https://api.devnet.solana.com',
-  },
-  solana_wc: {
-    mainnet: `wss://solana-mainnet.g.alchemy.com/v2/${process.env.SOLANA_RPC_KEY}`,
-    testnet: 'ws://api.devnet.solana.com',
   },
   tx_solana: {
     mainnet: 'https://api.mainnet-beta.solana.com',
@@ -43,14 +37,6 @@ const allRPCUrl = {
     mainnet: 'https://api.trongrid.io',
     testnet: 'https://nile.trongrid.io',
   },
-  tron_api_key: {
-    mainnet: process.env.TRON_API_KEY_1,
-    testnet: process.env.TRON_API_KEY_1,
-  },
-  tron_api_key_2: {
-    mainnet: process.env.TRON_API_KEY_2,
-    testnet: process.env.TRON_API_KEY_2,
-  },
   cosmos: {
     mainnet: 'https://cosmos-rpc.publicnode.com:443',
     testnet: 'https://cosmos-rpc.publicnode.com:443',
@@ -62,10 +48,6 @@ const allRPCUrl = {
   ton: {
     mainnet: 'https://toncenter.com/api/v2/jsonRPC',
     testnet: 'https://testnet.toncenter.com/api/v2/jsonRPC',
-  },
-  ton_api_key: {
-    mainnet: process.env.TON_SCAN_API_KEY,
-    testnet: process.env.TON_SCAN_API_KEY,
   },
   polygon_blockscout: {
     mainnet: true,
@@ -315,20 +297,6 @@ export const getFreeRPCUrl = chain_name => {
 };
 
 export const getPremiumRPCUrl = chain_name => {
-  try {
-    const raw = process.env.PREMIUM_RPC_URLS;
-    if (!raw) {
-      return [];
-    }
-    const parsed = safelyJsonParse(raw);
-    const chainEntry = parsed?.[chain_name];
-    if (!chainEntry) {
-      return [];
-    }
-    const network = IS_SANDBOX ? 'testnet' : 'mainnet';
-    const urls = chainEntry[network];
-    return Array.isArray(urls) && urls.length > 0 ? urls : [];
-  } catch {
-    return [];
-  }
+  const proxyUrl = buildRpcProxyUrl(chain_name);
+  return proxyUrl ? [proxyUrl] : [];
 };
