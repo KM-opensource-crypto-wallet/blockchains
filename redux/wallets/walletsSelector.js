@@ -21,87 +21,66 @@ export const selectVisibleWallets = createSelector(
     (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
 );
 
-export const selectVisibleWalletsWithIndex = createSelector(
-  [selectAllWallets],
-  allWallets =>
-    (allWallets || [])
-      .map((wallet, index) => ({wallet, index}))
-      .filter(({wallet}) => !isWalletHiddenAndLocked(wallet)),
-);
-
 export const selectAllWalletName = state => {
   const allWallets = state.wallets?.allWallets;
   return allWallets.map(item => item?.walletName);
 };
 
+export const selectCurrentWalletClientId = state =>
+  state.wallets?.currentWalletClientId;
+
+export const selectCurrentWallet = state => {
+  const allWallets = state.wallets?.allWallets || [];
+  return (
+    allWallets.find(
+      wallet => wallet?.clientId === state.wallets?.currentWalletClientId,
+    ) || null
+  );
+};
+
 export const getSelectedNftChain = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNftChain || 'Ethereum';
 };
 
 export const getSelectedNftData = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_data`] || [];
 };
 
 export const getSelectedNftLoading = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_loading`] || false;
 };
 
 export const getSelectedNftAvailable = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_available`] || false;
 };
 
 export const getSelectedNft = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNft || {};
 };
 
-export const selectCurrentWallet = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  return allWallets[currentWalletIndex] || null;
-};
-
-export const selectCurrentWalletClientId = state =>
-  selectCurrentWallet(state)?.clientId;
-
 export const isImportWalletWithPrivateKey = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return !!currentWallet?.isImportWalletWithPrivateKey;
 };
 
 export const selectWalletChainName = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return currentWallet?.chain_name;
 };
 
 export const selectCurrentWalletSortOption = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return currentWallet?.coinsSortOption || 'default';
 };
 
@@ -330,20 +309,12 @@ export const selectIsBackedUp = state => {
   return !!currentWallet?.isBackedup;
 };
 
-export const _currentWalletIndexSelector = state => {
-  return state.wallets.currentWalletIndex;
-};
-
 export const getCurrentWalletPhrase = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets[currentWalletIndex]?.phrase;
+  return selectCurrentWallet(state)?.phrase;
 };
 
 export const getCurrentWalletIsAddMoreAddressPopupHidden = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets[currentWalletIndex]?.isAddMoreAddressPopupHidden;
+  return selectCurrentWallet(state)?.isAddMoreAddressPopupHidden;
 };
 
 export const foundCoinInCurrentWallet = (currentWallet, page) => {
@@ -360,10 +331,6 @@ export const getEthereumCoin = state => {
   );
 };
 
-export const getCurrentWalletIndex = state => {
-  return state?.wallets?.currentWalletIndex;
-};
-
 export const getPendingTransactions = state => {
   return state?.wallets?.pendingTransactions || {};
 };
@@ -375,9 +342,7 @@ export const getPendingTransactionsWithKey = (pendingTransactions, key) => {
 };
 
 export const isAdding50MoreAddresses = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets?.[currentWalletIndex]?.isAdding50MoreAddresses;
+  return selectCurrentWallet(state)?.isAdding50MoreAddresses;
 };
 
 export const getMasterClientId = state => {
