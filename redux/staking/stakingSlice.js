@@ -52,7 +52,7 @@ export const fetchStakingAllowance = createAsyncThunk(
     const result = await chain.readAllowance({
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderAddress,
+      spenderAddress: stakingProviderAddress,
       amountInWei,
     });
     return {
@@ -98,7 +98,7 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
       isFetchNonce: payload.isFetchNonce,
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderAddress,
+      spenderAddress: stakingProviderAddress,
       amountInWei,
       feesType: payload.feesType,
       nonce: payload.nonce,
@@ -273,7 +273,7 @@ export const executeApprove = createAsyncThunk(
         from: currentCoin?.address,
         contractAddress: currentCoin?.contractAddress,
         privateKey,
-        stakingProviderAddress,
+        spenderAddress: stakingProviderAddress,
         amountInWei,
         nonce: payload?.nonce,
         gasFee: toWeiBigInt(payload.gasFee),

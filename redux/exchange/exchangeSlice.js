@@ -173,6 +173,7 @@ export const calculateExchange = createAsyncThunk(
           message: 'Invalid custom address',
         });
       }
+      return thunkAPI.rejectWithValue(e?.message);
     }
   },
 );
@@ -188,7 +189,7 @@ export const fetchExchangeAllowance = createAsyncThunk(
         getExchange(currentState);
       const transferData = getTransferData(currentState);
       const swapData = transferData?.swapData;
-      const {permit_abi, to, spender} = swapData;
+      const {permit_abi, spender} = swapData;
       const {address, contractAddress, decimal} = selectedFromAsset;
       const decimals = decimal || 18;
       const amountInWei = BigInt(
@@ -207,7 +208,6 @@ export const fetchExchangeAllowance = createAsyncThunk(
         isPermit2Flow: Boolean(permit_abi),
         permitAbi: permit_abi,
         spenderAddress: spender,
-        swapTo: to,
         contractAddress: contractAddress,
         amountInWei,
       });
@@ -273,6 +273,7 @@ export const fetchExchangeApproveEstimationFee = createAsyncThunk(
         feesType: payload?.feesType,
         nonce: payload?.nonce,
         allowance,
+        needsReset: allowanceData?.needsReset,
       });
       const finalAllowanceData = {
         ...allowanceData,
@@ -308,9 +309,9 @@ export const approveSwapAllowance = createAsyncThunk(
         payload;
       const decimals = decimal || 18;
       const allowanceData = currentState?.exchange?.allowanceData;
+      const {needsReset, allowanceFormatted} = allowanceData;
       const allowance = BigInt(
-        convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
-          '0',
+        convertToSmallAmount(allowanceFormatted, decimals) || '0',
       );
       if (!isEVMChain(chain_name)) {
         throw new Error('approveSwapAllowance only supports EVM chains');
@@ -341,6 +342,7 @@ export const approveSwapAllowance = createAsyncThunk(
         gasFee: gasFee,
         maxPriorityFeePerGas: maxPriorityFeePerGas,
         feesType: feesType,
+        needsReset,
       });
 
       // The approve tx just consumed a nonce on-chain. Re-fetch the next
@@ -603,7 +605,7 @@ export const sendSwap = createAsyncThunk(
         throw new Error('Failed to get native coin');
       }
       const res = await nativeCoin.swap({
-        swapData,
+        swapData: swapData,
         estimateGas: estimateGas,
         gasFee: gasFee,
         maxPriorityFeePerGas: maxPriorityFeePerGas,

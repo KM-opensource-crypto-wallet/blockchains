@@ -603,11 +603,9 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
     swap: async payload =>
-      await chain.swapToken({
+      await chain.swap({
         from: wallet.address,
         privateKey: wallet.privateKey,
-        contractAddress: token.contractAddress,
-        decimal: token.decimal,
         ...payload,
       }),
     getEstimateSwapFee: async payload =>
