@@ -1041,22 +1041,23 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           let finalToAddress = toAddress;
 
           if (swapData) {
-            const swapGasLimit = swapData.gasLimit || swapData.gas;
-            if (swapGasLimit) {
-              // Provider-quoted gas limits can be too tight for the actual
-              // executed route, causing on-chain out-of-gas reverts (surfaced
-              // as misleading errors like TRANSFER_FROM_FAILED). Buffer it.
-              estimateGas = (BigInt(swapGasLimit) * 140n) / 100n;
-            } else {
+            try {
               estimateGas = await evmProvider.estimateGas({
                 from: fromAddress,
                 to: swapData.to,
                 value: swapData.value || '0x0',
                 data: swapData.data || '0x',
               });
+              estimateGas = (BigInt(estimateGas) * 140n) / 100n;
+
+              value = swapData.value || '0x0';
+              finalToAddress = swapData.to || toAddress;
+            } catch (estimateError) {
+              const swapGasLimit = swapData.gasLimit || swapData.gas;
+              estimateGas = swapGasLimit
+                ? (BigInt(swapGasLimit) * 140n) / 100n
+                : 300000n;
             }
-            value = swapData.value || '0x0';
-            finalToAddress = swapData.to || toAddress;
           } else {
             value = convertToSmallAmount(amount, decimals);
             estimateGas = await contract[
