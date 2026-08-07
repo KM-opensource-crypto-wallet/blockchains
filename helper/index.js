@@ -119,6 +119,7 @@ const ethereumChains = {
   ink: 'ethereum',
   sei: 'ethereum',
   hyperliquid: 'ethereum',
+  robinhood: 'ethereum',
 };
 
 const supportedChain = [
@@ -336,6 +337,7 @@ const EVM_CHAINS = [
   'ink',
   'sei',
   'hyperliquid',
+  'robinhood',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
@@ -466,6 +468,7 @@ const TRANSACTION_LIST_LIMIT_100 = [
   'linea',
   'zksync',
   'sei',
+  'robinhood',
 ];
 
 export const isTransactionListLimit100 = chain_name =>
@@ -793,6 +796,14 @@ export const ModalAddTokenList = [
     token_type: 'ERC20',
     isEVM: true,
   },
+  {
+    label: 'Robinhood',
+    value: 'robinhood',
+    chain_symbol: 'ETH',
+    type: 'token',
+    token_type: 'ERC20',
+    isEVM: true,
+  },
 ];
 
 export const PrivateKeyList = [
@@ -961,6 +972,7 @@ export const CustomRPCList = [
   {label: 'Ink', value: 'ink'},
   {label: 'Sei', value: 'sei'},
   {label: 'Hyperliquid', value: 'hyperliquid'},
+  {label: 'Robinhood', value: 'robinhood'},
 ];
 export const AUTO_LOCK = [
   {
