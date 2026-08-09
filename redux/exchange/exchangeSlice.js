@@ -4,24 +4,23 @@ import {
   calculateEstimateFee,
   setCurrentTransferData,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
-import {
-  getChain,
-  getHashString,
-} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {
   isEVMChain,
   isNameSupportChain,
-  isPendingTransactionSupportedChain,
-  createPendingTransactionKey,
-  getExplorerTxUrl,
   convertToSmallAmount,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
+import {applyApproveGasPrice} from 'dok-wallet-blockchain-networks/helper/approveFees';
+import {buildExchangePairKey} from 'dok-wallet-blockchain-networks/helper/exchangeHelpers';
 import {showToast} from 'utils/toast';
-import {createExchange} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {
+  createExchange,
+  getExchangeQuote,
+} from 'dok-wallet-blockchain-networks/service/dokApi';
+import BigNumber from 'bignumber.js';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
-import {refreshCoins} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {ethers} from 'ethers';
 
@@ -51,6 +50,24 @@ const initialState = {
   exchangeToName: '',
   availableProviders: [],
   slippage: '',
+  // The provider quote object's extraData, echoed back to /create-exchange.
+  extraData: null,
+  // Per-pair provider minimums: {[pairKey]: {providers: [], fetchedAt: ms}}.
+  providerMinimums: {},
+  // requestId of the latest quote/minimum thunk; only that request's result
+  // is allowed to commit, so a slow stale response can never overwrite a
+  // newer one.
+  quoteRequestId: null,
+  isQuoteFetching: false,
+  quoteError: null,
+  quoteFetchedAt: null,
+  // The amount the current quotes/selection were fetched for. While it
+  // differs from amountFrom (typing inside the debounce window) the shown
+  // quote is stale and the CTA must stay disabled.
+  lastQuotedAmount: null,
+  // True after the user taps a provider row; keeps their choice across quote
+  // refreshes instead of snapping back to the best rate.
+  isProviderManuallySelected: false,
   allowanceData: null,
   allowanceLoading: false,
   approveLoading: false,
@@ -58,6 +75,101 @@ const initialState = {
   permitAllowanceLoading: false,
   permitApproveLoading: false,
 };
+
+// Client-side freshness for the per-pair minimums (the backend additionally
+// caches CEX minimums in Redis for an hour).
+const PAIR_MINIMUMS_TTL_MS = 5 * 60 * 1000;
+
+const buildQuoteBasePayload = (
+  selectedFromAsset,
+  selectedToAsset,
+  slippage,
+) => ({
+  coinFrom: selectedFromAsset?.symbol,
+  coinTo: selectedToAsset?.symbol,
+  networkFrom: selectedFromAsset?.chain_symbol,
+  networkTo: selectedToAsset?.chain_symbol,
+  rateType: 'fixed',
+  fromChainName: selectedFromAsset?.chain_name,
+  toChainName: selectedToAsset?.chain_name,
+  fromContractAddress: selectedFromAsset?.contractAddress,
+  toContractAddress: selectedToAsset?.contractAddress,
+  // Authoritative token decimals — the DEX adapters otherwise depend on a
+  // hardcoded per-address map and refuse to quote unmapped tokens.
+  fromDecimals: selectedFromAsset?.decimal,
+  toDecimals: selectedToAsset?.decimal,
+  fromAddress: selectedFromAsset?.address,
+  slippage: slippage ? Number(slippage) : undefined,
+});
+
+// Fetches every provider's minimum (and a reference quote at that minimum)
+// for the currently selected pair. Amount-specific quotes come from
+// fetchExchangeQuotes; this one only refreshes when the cached entry is
+// older than PAIR_MINIMUMS_TTL_MS.
+export const fetchPairMinimums = createAsyncThunk(
+  'exchange/fetchPairMinimums',
+  async (_, thunkAPI) => {
+    const {selectedFromAsset, selectedToAsset, slippage, providerMinimums} =
+      getExchange(thunkAPI.getState());
+    const pairKey = buildExchangePairKey(selectedFromAsset, selectedToAsset);
+    const cached = providerMinimums?.[pairKey];
+    if (
+      cached?.providers?.length &&
+      Date.now() - cached.fetchedAt < PAIR_MINIMUMS_TTL_MS
+    ) {
+      return {
+        pairKey,
+        providers: cached.providers,
+        fetchedAt: cached.fetchedAt,
+      };
+    }
+    const payload = {
+      ...buildQuoteBasePayload(selectedFromAsset, selectedToAsset, slippage),
+      amount: null,
+      isFetchMinimum: true,
+    };
+    const resp = await getExchangeQuote(payload);
+    const providers = Array.isArray(resp?.data) ? resp.data : [];
+    return {pairKey, providers, fetchedAt: Date.now()};
+  },
+  {
+    condition: (_, {getState}) => {
+      const {selectedFromAsset, selectedToAsset} = getExchange(getState());
+      return !!buildExchangePairKey(selectedFromAsset, selectedToAsset);
+    },
+  },
+);
+
+// Fetches quotes from all providers at the given amount. Latest-wins: the
+// pending reducer stamps quoteRequestId and fulfilled/rejected only commit
+// when their requestId still matches, so rapid typing can't surface a stale
+// response.
+export const fetchExchangeQuotes = createAsyncThunk(
+  'exchange/fetchExchangeQuotes',
+  async ({amount}, thunkAPI) => {
+    const {selectedFromAsset, selectedToAsset, slippage} = getExchange(
+      thunkAPI.getState(),
+    );
+    const payload = {
+      ...buildQuoteBasePayload(selectedFromAsset, selectedToAsset, slippage),
+      amount: amount?.toString() || '1',
+    };
+    const resp = await getExchangeQuote(payload);
+    const providers = Array.isArray(resp?.data) ? resp.data : [];
+    return {providers, fetchedAt: Date.now()};
+  },
+  {
+    condition: ({amount} = {}, {getState}) => {
+      const {selectedFromAsset, selectedToAsset} = getExchange(getState());
+      const amountBN = new BigNumber(amount ?? NaN);
+      return (
+        !!buildExchangePairKey(selectedFromAsset, selectedToAsset) &&
+        amountBN.isFinite() &&
+        amountBN.gt(0)
+      );
+    },
+  },
+);
 
 export const calculateExchange = createAsyncThunk(
   'exchange/calculateExchange',
@@ -115,7 +227,11 @@ export const calculateExchange = createAsyncThunk(
         toChainName: selectedToAsset?.chain_name,
         fromContractAddress: selectedFromAsset?.contractAddress,
         toContractAddress: selectedToAsset?.contractAddress,
-        amount: Number(amountFrom),
+        fromDecimals: selectedFromAsset?.decimal,
+        toDecimals: selectedToAsset?.decimal,
+        // String, not Number: the DEX adapters convert human-decimal strings
+        // to smallest units and a Number can drop into exponent notation.
+        amount: amountFrom?.toString(),
         rateType: 'fixed',
         withdrawalAddress: finalCustomAddress || selectedToAsset?.address,
         validName,
@@ -139,7 +255,9 @@ export const calculateExchange = createAsyncThunk(
           dispatch(
             setCurrentTransferData({
               toAddress: data?.depositAddress,
-              swapData: data?.swapData,
+              // Null it out explicitly: a deposit-address provider must not
+              // inherit calldata left behind by a previous DEX quote.
+              swapData: data?.swapData || null,
               memo: data?.memo || null,
               currentCoin: selectedFromAsset,
               amount: data?.amount + '',
@@ -155,13 +273,17 @@ export const calculateExchange = createAsyncThunk(
               contractAddress: selectedFromAsset?.contractAddress,
               selectedWallet: selectedFromWallet,
               selectedCoin: selectedFromAsset,
-              isSwapFee: true,
+              isExchange: true,
             }),
           ).unwrap();
         }
         dispatch(setExchangeSuccess(true));
+        // Returned so callers can branch on this quote rather than on a
+        // useSelector value captured before the quote was fetched.
+        return data;
       } else {
         dispatch(setExchangeSuccess(false));
+        return thunkAPI.rejectWithValue('Failed to create the exchange');
       }
     } catch (e) {
       console.error('errorr in exchange', e);
@@ -189,9 +311,17 @@ export const fetchExchangeAllowance = createAsyncThunk(
         getExchange(currentState);
       const transferData = getTransferData(currentState);
       const swapData = transferData?.swapData;
-      const {permit_abi, spender} = swapData;
+      const {spender} = swapData || {};
       const {address, contractAddress, decimal} = selectedFromAsset;
       const decimals = decimal || 18;
+      // No spender means the provider gave a deposit address rather than swap
+      // calldata, so this is a plain transfer with nothing to approve.
+      if (!spender) {
+        dispatch(
+          setExchangeFields({allowanceLoading: false, allowanceData: null}),
+        );
+        return {isApproved: true};
+      }
       const amountInWei = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
@@ -203,10 +333,11 @@ export const fetchExchangeAllowance = createAsyncThunk(
       if (!nativeCoin) {
         throw new Error('Failed to get native coin');
       }
+      // This reads the plain ERC20 allowance for `spender`. The router-level
+      // (Permit2) allowance is a separate concern handled by
+      // fetchExchangePermitAllowance / readPermitAllowance.
       const result = await nativeCoin.readAllowance({
         from: address,
-        isPermit2Flow: Boolean(permit_abi),
-        permitAbi: permit_abi,
         spenderAddress: spender,
         contractAddress: contractAddress,
         amountInWei,
@@ -218,8 +349,6 @@ export const fetchExchangeAllowance = createAsyncThunk(
         isApproved: result.isApproved,
         needsReset: result.needsReset,
         decimal: selectedFromAsset?.decimal,
-        permit2Amount: result.permit2Amount,
-        permit2Expiration: result.permit2Expiration,
       };
       dispatch(
         setExchangeFields({
@@ -303,13 +432,16 @@ export const approveSwapAllowance = createAsyncThunk(
         getExchange(currentState);
       const transferData = getTransferData(currentState);
       const swapData = transferData?.swapData;
-      const {spender} = swapData;
+      const {spender} = swapData || {};
       const {contractAddress, decimal, chain_name} = selectedFromAsset;
       const {type, nonce, estimateGas, gasFee, maxPriorityFeePerGas, feesType} =
         payload;
       const decimals = decimal || 18;
       const allowanceData = currentState?.exchange?.allowanceData;
-      const {needsReset, allowanceFormatted} = allowanceData;
+      const {needsReset, allowanceFormatted} = allowanceData || {};
+      if (!spender) {
+        throw new Error('No spender to approve for this exchange provider');
+      }
       const allowance = BigInt(
         convertToSmallAmount(allowanceFormatted, decimals) || '0',
       );
@@ -357,7 +489,7 @@ export const approveSwapAllowance = createAsyncThunk(
           contractAddress,
           selectedWallet: selectedFromWallet,
           selectedCoin: selectedFromAsset,
-          isSwapFee: true,
+          isExchange: true,
         }),
       ).unwrap();
 
@@ -411,7 +543,6 @@ export const fetchExchangePermitAllowance = createAsyncThunk(
         requiredFormatted: parseBalance(result.required, decimals),
         amountFormatted: parseBalance(amountInWei, decimals),
         isApproved: result.isApproved,
-        needsReset: result.needsReset,
         decimal: selectedFromAsset?.decimal,
         permit2Amount: result.permit2Amount,
         permit2Expiration: result.permit2Expiration,
@@ -529,10 +660,10 @@ export const approveExchangePermit2 = createAsyncThunk(
       const amountInWei1 = BigInt(
         convertToSmallAmount(amountFrom.toString(), decimals),
       );
-      const amountInWei =
-        type === 'unlimited'
-          ? MAX_UINT160
-          : amountInWei1 + (amountInWei1 * 200n) / 10000n;
+      // Manual approves the exact swap amount, matching the ERC20 path and what
+      // the sheet promises the user. An exact-input swap pulls exactly the
+      // quoted amount, so headroom here would only over-approve.
+      const amountInWei = type === 'unlimited' ? MAX_UINT160 : amountInWei1;
 
       const result = await nativeCoin.approvePermit2({
         permitAbi: permit_abi,
@@ -560,7 +691,7 @@ export const approveExchangePermit2 = createAsyncThunk(
           contractAddress,
           selectedWallet: selectedFromWallet,
           selectedCoin: selectedFromAsset,
-          isSwapFee: true,
+          isExchange: true,
         }),
       ).unwrap();
 
@@ -574,150 +705,6 @@ export const approveExchangePermit2 = createAsyncThunk(
         title: error?.message || 'Permit approval failed',
       });
       return thunkAPI.rejectWithValue(error?.message);
-    }
-  },
-);
-
-export const sendSwap = createAsyncThunk(
-  'exchange/sendSwap',
-  async (txData, thunkAPI) => {
-    let toastId;
-    try {
-      const currentState = thunkAPI.getState();
-      thunkAPI.dispatch(setExchangeLoading(true));
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const {swapData, estimateGas, gasFee, maxPriorityFeePerGas, isMax} =
-        transferData;
-      const navigation = txData?.navigation;
-      const router = txData?.router;
-      if (!isEVMChain(selectedFromAsset?.chain_name)) {
-        throw new Error('sendSwap only supports EVM chains');
-      }
-
-      const nativeCoin = await getNativeCoin(
-        currentState,
-        selectedFromAsset,
-        selectedFromWallet,
-      );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
-      const res = await nativeCoin.swap({
-        swapData: swapData,
-        estimateGas: estimateGas,
-        gasFee: gasFee,
-        maxPriorityFeePerGas: maxPriorityFeePerGas,
-        isMax: isMax,
-        nonce: txData?.nonce ?? transferData?.nonce,
-      });
-
-      if (res) {
-        if (navigation) {
-          navigation.popTo('Sidebar', {screen: 'Home'});
-        } else if (router) {
-          router.replace('/home');
-        }
-        thunkAPI.dispatch(setExchangeLoading(false));
-
-        const tx_hash = getHashString(res, selectedFromAsset?.chain_name);
-
-        toastId = showToast({
-          type: 'progressToast',
-          title: 'Exchange Transaction In-progress',
-          message:
-            'Your exchange transaction submitted successfully. Once the transaction completed you will be notified.',
-          autoHide: false,
-        });
-
-        if (isPendingTransactionSupportedChain(selectedFromAsset?.chain_name)) {
-          const key = createPendingTransactionKey({
-            chain_name: selectedFromAsset?.chain_name,
-            symbol: selectedFromAsset?.symbol,
-            address: selectedFromAsset?.address,
-          });
-          thunkAPI.dispatch(
-            setExchangeFields({
-              pendingTransaction: {
-                key,
-                value: {hash: res.hash, date: new Date().toISOString()},
-              },
-            }),
-          );
-        }
-
-        const confirmTransaction = await nativeCoin.waitForConfirmation({
-          transaction: res,
-          interval: 5000,
-          retries: 15,
-        });
-
-        if (confirmTransaction === 'pending') {
-          showToast({
-            type: 'warningToast',
-            title: 'Transaction pending',
-            message: 'Transaction take too long. Please check again later',
-            toastId,
-          });
-        } else if (confirmTransaction?.status === 'failed') {
-          showToast({
-            type: 'errorToast',
-            title: 'Transaction Failed',
-            message:
-              'Your transaction failed on the network. Please try again.',
-            toastId,
-          });
-        } else if (confirmTransaction) {
-          showToast({
-            type: 'successToast',
-            title: 'Exchange Successful',
-            message: `Your transaction completed successfully. You just exchanged: ${amountFrom} ${selectedFromAsset?.symbol}`,
-            toastId,
-          });
-          thunkAPI.dispatch(refreshCoins());
-        }
-
-        return {
-          tx_hash,
-          url: getExplorerTxUrl(selectedFromAsset?.chain_name, tx_hash),
-          status:
-            confirmTransaction === 'pending'
-              ? 2
-              : confirmTransaction?.status === 'failed'
-              ? 1
-              : 3,
-        };
-      } else {
-        thunkAPI.dispatch(setExchangeLoading(false));
-        showToast({
-          type: 'errorToast',
-          title: 'Something Went wrong',
-          autoHide: true,
-          toastId,
-        });
-        return thunkAPI.rejectWithValue('Swap returned empty response');
-      }
-    } catch (e) {
-      console.error('Error in sendSwap', e);
-      thunkAPI.dispatch(setExchangeLoading(false));
-      if (
-        e?.message === 'could not coalesce error' ||
-        e?.message?.includes('nonce too low')
-      ) {
-        showToast({
-          type: 'errorToast',
-          title: 'Already sent',
-          message: 'please check transaction explorer',
-        });
-      } else {
-        showToast({
-          type: 'errorToast',
-          title: e?.message || 'Swap failed',
-          toastId,
-        });
-      }
-      return thunkAPI.rejectWithValue(e?.message);
     }
   },
 );
@@ -742,6 +729,128 @@ export const exchangeSlice = createSlice({
       state.success = payload;
       state.isLoading = false;
     },
+    // Recompute the approval fee shown on the allowance sheet from a custom gas
+    // price. `target` selects which approval this applies to, since the ERC20 and
+    // permit2 approvals each have their own fee.
+    updateExchangeApproveFees(state, {payload}) {
+      const target =
+        payload?.target === 'permit' ? 'permitAllowanceData' : 'allowanceData';
+      applyApproveGasPrice(state[target], payload);
+    },
+  },
+  extraReducers: builder => {
+    builder
+      .addCase(fetchPairMinimums.pending, (state, action) => {
+        // A pair change also invalidates any in-flight amount quote.
+        state.quoteRequestId = action.meta.requestId;
+        state.isQuoteFetching = true;
+        state.quoteError = null;
+        state.availableProviders = [];
+        state.amountTo = '';
+        state.selectedExchangeChain = null;
+        state.extraData = null;
+        state.quoteFetchedAt = null;
+        state.isProviderManuallySelected = false;
+      })
+      .addCase(fetchPairMinimums.fulfilled, (state, action) => {
+        const {pairKey, providers, fetchedAt} = action.payload || {};
+        if (pairKey) {
+          state.providerMinimums[pairKey] = {providers, fetchedAt};
+        }
+        if (state.quoteRequestId === action.meta.requestId) {
+          state.isQuoteFetching = false;
+        }
+      })
+      .addCase(fetchPairMinimums.rejected, (state, action) => {
+        if (state.quoteRequestId !== action.meta.requestId) {
+          return;
+        }
+        state.isQuoteFetching = false;
+        state.quoteError =
+          action.error?.message || 'Failed to fetch providers for this pair';
+      })
+      .addCase(fetchExchangeQuotes.pending, (state, action) => {
+        state.quoteRequestId = action.meta.requestId;
+        state.isQuoteFetching = true;
+        state.quoteError = null;
+      })
+      .addCase(fetchExchangeQuotes.fulfilled, (state, action) => {
+        if (state.quoteRequestId !== action.meta.requestId) {
+          return;
+        }
+        state.isQuoteFetching = false;
+        // The user changed or cleared the amount after this request left
+        // (clearing dispatches nothing, so the requestId guard alone can't
+        // catch it) — don't surface a quote for an amount no longer shown.
+        if (state.amountFrom !== action.meta.arg?.amount) {
+          return;
+        }
+        const {providers, fetchedAt} = action.payload;
+        state.quoteError = null;
+        state.lastQuotedAmount = action.meta.arg?.amount ?? null;
+        state.availableProviders = providers;
+        state.quoteFetchedAt = fetchedAt;
+
+        // Some providers still quote below their own minimum; such a quote
+        // must never be auto-selected or the CTA would immediately reject it.
+        const requestedBN = new BigNumber(action.meta.arg?.amount ?? NaN);
+        const clearsMinimum = item => {
+          const minBN = new BigNumber(item?.minAmount ?? NaN);
+          return (
+            !minBN.isFinite() ||
+            !requestedBN.isFinite() ||
+            minBN.lte(requestedBN)
+          );
+        };
+
+        let selected = null;
+        if (
+          state.isProviderManuallySelected &&
+          state.selectedExchangeChain?.providerName
+        ) {
+          selected = providers.find(
+            item =>
+              item?.providerName ===
+                state.selectedExchangeChain?.providerName &&
+              item?.toAmount &&
+              clearsMinimum(item),
+          );
+        }
+        if (!selected) {
+          state.isProviderManuallySelected = false;
+          let bestBN = null;
+          for (let i = 0; i < providers.length; i++) {
+            if (!clearsMinimum(providers[i])) {
+              continue;
+            }
+            const toAmountBN = new BigNumber(providers[i]?.toAmount ?? NaN);
+            if (
+              toAmountBN.isFinite() &&
+              toAmountBN.gt(0) &&
+              (bestBN === null || toAmountBN.gt(bestBN))
+            ) {
+              bestBN = toAmountBN;
+              selected = providers[i];
+            }
+          }
+        }
+        if (selected?.toAmount) {
+          state.selectedExchangeChain = selected;
+          state.extraData = selected?.extraData;
+          state.amountTo = selected.toAmount + '';
+        } else {
+          state.selectedExchangeChain = null;
+          state.extraData = null;
+          state.amountTo = '0';
+        }
+      })
+      .addCase(fetchExchangeQuotes.rejected, (state, action) => {
+        if (state.quoteRequestId !== action.meta.requestId) {
+          return;
+        }
+        state.isQuoteFetching = false;
+        state.quoteError = action.error?.message || 'Failed to fetch quotes';
+      });
   },
 });
 
@@ -750,4 +859,5 @@ export const {
   setExchangeFields,
   setExchangeLoading,
   setExchangeSuccess,
+  updateExchangeApproveFees,
 } = exchangeSlice.actions;

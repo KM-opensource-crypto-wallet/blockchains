@@ -636,8 +636,8 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     getEstimateFeForAllowanceApprove: async payload =>
       await chain.getEstimateFeForAllowanceApprove({
         from: wallet.address,
+        contractAddress: token.contractAddress,
         ...payload,
-        spenderAddress: payload.contractAddress,
       }),
     readPermitAllowance: async payload =>
       await chain.readPermitAllowance({

@@ -58,6 +58,10 @@ const initialState = {
     selectedUTXOsValue: undefined,
     selectedUTXOs: undefined,
     nonce: undefined,
+    // Provider-quoted swap calldata. Only DEX aggregators return it; providers
+    // that work by deposit address leave it null, and that difference is what
+    // distinguishes a swap from a plain transfer throughout the transfer flow.
+    swapData: null,
   },
   pendingTransferData: {
     isLoading: false,
@@ -89,6 +93,8 @@ export const calculateEstimateFee = createAsyncThunk(
         getBitcoinCashFeeMultiplier(currentState);
       const selectedWallet = payload?.selectedWallet;
       const selectedCoin = payload?.selectedCoin;
+
+      const isSwap = !!(payload?.isExchange && transfer?.swapData);
 
       const multiplier = {
         bitcoin: bitcoinFeeMultiplier,
@@ -140,7 +146,7 @@ export const calculateEstimateFee = createAsyncThunk(
         respData = await nativeCoin?.getEstimateFeeForStakingRewards(payload);
       } else if (payload?.isBatchTransaction) {
         respData = await nativeCoin?.getEstimateFeeForBatchTransaction(payload);
-      } else if (payload?.isSwapFee) {
+      } else if (isSwap) {
         respData = await nativeCoin?.getEstimateSwapFee({
           ...payload,
           swapData: transfer?.swapData,
@@ -194,7 +200,14 @@ export const calculateEstimateFee = createAsyncThunk(
           nonce,
         }),
       );
-      if (
+      if (isSwap) {
+        // A swap spends exactly what the provider encoded in swapData, so the
+        // max-amount clamp must not rewrite it — that would desync the amount we
+        // display from what the router actually pulls. isMax is still cleared
+        // explicitly, because leaving a stale true behind would push
+        // maxPriorityFeePerGas up to maxFeePerGas when the swap is signed.
+        dispatch(setCurrentTransferData({isMax: false}));
+      } else if (
         !payload?.isNFT &&
         !payload.isWithdrawStaking &&
         !payload.isDeactivateStaking &&
@@ -462,6 +475,12 @@ export const currentTransferSlice = createSlice({
       state.transferData.fiatEstimateFee = currencyBN
         .multipliedBy(transactionFeeEtherBN)
         .toFixed(2);
+      // Same reasoning as the clamp in calculateEstimateFee: a swap's spend is
+      // fixed inside swapData, so the amount must not be rewritten here.
+      if (state.transferData?.swapData) {
+        state.transferData.isMax = false;
+        return;
+      }
       const currentCoin = state.transferData.currentCoin;
       const selectedUTXOsValue = state.transferData?.selectedUTXOsValue;
       const balanceBN = new BigNumber(

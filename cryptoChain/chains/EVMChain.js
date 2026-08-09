@@ -1024,7 +1024,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       additionalL1Fee,
       isFetchNonce,
       existingNonce,
-      swapData,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -1036,34 +1035,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             walletSigner,
           );
 
-          let estimateGas;
-          let value;
-          let finalToAddress = toAddress;
-
-          if (swapData) {
-            try {
-              estimateGas = await evmProvider.estimateGas({
-                from: fromAddress,
-                to: swapData.to,
-                value: swapData.value || '0x0',
-                data: swapData.data || '0x',
-              });
-              estimateGas = (BigInt(estimateGas) * 140n) / 100n;
-
-              value = swapData.value || '0x0';
-              finalToAddress = swapData.to || toAddress;
-            } catch (estimateError) {
-              const swapGasLimit = swapData.gasLimit || swapData.gas;
-              estimateGas = swapGasLimit
-                ? (BigInt(swapGasLimit) * 140n) / 100n
-                : 300000n;
-            }
-          } else {
-            value = convertToSmallAmount(amount, decimals);
-            estimateGas = await contract[
-              'transfer(address,uint256)'
-            ].estimateGas(toAddress, value);
-          }
+          const value = convertToSmallAmount(amount, decimals);
+          const estimateGas = await contract[
+            'transfer(address,uint256)'
+          ].estimateGas(toAddress, value);
 
           return await calculateTotalFees({
             evmProvider,
@@ -1071,8 +1046,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             value,
             estimateGas,
             fromAddress,
-            toAddress: finalToAddress,
-            erc20TokenContract: swapData ? undefined : contract,
+            toAddress,
+            erc20TokenContract: contract,
             additionalL1Fee,
             isFetchNonce,
             existingNonce,
@@ -1201,35 +1176,29 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }) =>
       retryFunc(async evmProvider => {
         try {
+          if (!swapData) {
+            // Callers must route transfers without swap calldata to
+            // getEstimateFee/getEstimateFeeForToken. Estimating anything here
+            // would silently price the wrong transaction.
+            throw new Error('getEstimateSwapFee requires swapData');
+          }
           let estimateGas;
-          let value;
-          let finalToAddress;
+          const value = swapData.value || '0x0';
+          const finalToAddress = swapData.to;
 
-          if (swapData) {
-            try {
-              estimateGas = await evmProvider.estimateGas({
-                from: fromAddress,
-                to: swapData.to,
-                value: swapData.value || '0x0',
-                data: swapData.data || '0x',
-              });
-              estimateGas = (BigInt(estimateGas) * 140n) / 100n;
-              value = swapData.value || '0x0';
-              finalToAddress = swapData.to;
-            } catch (estimateError) {
-              const swapGasLimit = swapData.gasLimit || swapData.gas;
-              estimateGas = swapGasLimit
-                ? (BigInt(swapGasLimit) * 140n) / 100n
-                : 300000n;
-            }
-          } else {
+          try {
             estimateGas = await evmProvider.estimateGas({
               from: fromAddress,
-              to: fromAddress,
-              value: '0x0',
+              to: swapData.to,
+              value: swapData.value || '0x0',
+              data: swapData.data || '0x',
             });
-            value = '0x0';
-            finalToAddress = fromAddress;
+            estimateGas = (BigInt(estimateGas) * 140n) / 100n;
+          } catch (estimateError) {
+            const swapGasLimit = swapData.gasLimit || swapData.gas;
+            estimateGas = swapGasLimit
+              ? (BigInt(swapGasLimit) * 140n) / 100n
+              : 300000n;
           }
 
           return await calculateTotalFees({
@@ -2669,7 +2638,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       privateKey,
     }) => {
       try {
-        const {firstTrx, secondTrx} = await retryFunc(async evmProvider => {
+        // The nonce arrives from the UI as a string; the needsReset path derives
+        // the second transaction's nonce arithmetically, where a string would
+        // concatenate ('5' + 1 === '51') and undefined would yield NaN.
+        const baseNonce =
+          nonce != null && nonce !== '' ? Number(nonce) : undefined;
+        const approveResult = await retryFunc(async evmProvider => {
           const walletSigner = new ethers.Wallet(privateKey, evmProvider);
 
           const tokenContract = new ethers.Contract(
@@ -2680,7 +2654,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
           let finalAllowance = allowance;
 
-          if (!finalAllowance) {
+          // == null, not falsy: a genuine 0n allowance is a known value and
+          // must not trigger a redundant on-chain read.
+          if (finalAllowance == null) {
             finalAllowance = await tokenContract.allowance(
               from,
               spenderAddress,
@@ -2689,7 +2665,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
           if (finalAllowance >= amountInWei) {
             console.log('Already approved');
-            return true;
+            // Discriminated so the caller can tell "nothing to do" apart from a
+            // populated transaction pair. Returning a bare `true` here used to
+            // destructure into two undefined transactions, which were then sent
+            // and surfaced to the user as a failed approval.
+            return {alreadyApproved: true};
           }
 
           let finalEstimateGas =
@@ -2717,7 +2697,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               finalMaxPriorityFeePerGas,
               finalGasPrice,
             ),
-            nonce,
+            nonce: baseNonce,
           };
           if (isEip1559NotSupported(chain_name)) {
             delete options.type;
@@ -2736,8 +2716,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           const approveTx = await tokenContract.approve.populateTransaction(
             spenderAddress,
             amountInWei,
-            needsReset
-              ? {...options, nonce: options.nonce + 1} // reset will be sent → use N+1
+            // The reset consumes `baseNonce`, so the real approve takes N+1. With
+            // no nonce supplied, leave it unset for the node to fill in.
+            needsReset && baseNonce != null
+              ? {...options, nonce: baseNonce + 1}
               : options,
           );
           return {
@@ -2745,6 +2727,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             secondTrx: approveTx,
           };
         }, null);
+        if (approveResult?.alreadyApproved) {
+          return {
+            confirmTransaction: null,
+            alreadyApproved: true,
+          };
+        }
+        if (!approveResult) {
+          throw new Error('Failed to build approve transaction');
+        }
+        const {firstTrx, secondTrx} = approveResult;
         let trx1, trx2;
         if (needsReset) {
           console.log('Resetting allowance to 0...');
@@ -2842,7 +2834,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return {
           ...obj,
           allowance,
-          fee: needsReset ? obj.fee * 2 : obj.fee,
+          // needsReset sends two transactions, so the quoted fee covers both.
+          // obj.fee is a decimal string from parseBalance; double it with
+          // BigNumber so this stays a string like every other fee we return.
+          fee: needsReset
+            ? new BigNumber(obj.fee).multipliedBy(2).toString()
+            : obj.fee,
         };
       }, null),
     readAllowance: async ({
@@ -2989,14 +2986,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           contractAddress,
           swapTo,
         );
-        const isApproved = permit2Amount >= amountInWei;
-        const needsReset = !isApproved && permit2Amount > 0n;
-        const required = isApproved ? 0n : amountInWei - permit2Amount;
+        // A Permit2 allowance carries a uint48 expiry alongside the amount, and
+        // an expired one grants nothing. Checking the amount alone reports such
+        // a permit as approved, so the approval is skipped and the swap reverts
+        // on-chain. Note there is deliberately no needsReset here: Permit2's
+        // approve() overwrites the allowance outright, so unlike ERC20 it never
+        // needs a zero-first transaction.
+        const nowInSeconds = BigInt(Math.floor(Date.now() / 1000));
+        const isApproved =
+          permit2Amount >= amountInWei &&
+          BigInt(permit2Expiration) > nowInSeconds;
+        const required =
+          permit2Amount >= amountInWei ? 0n : amountInWei - permit2Amount;
         return {
           permit2Amount,
           permit2Expiration,
           isApproved,
-          needsReset,
           required,
         };
       }, null),
