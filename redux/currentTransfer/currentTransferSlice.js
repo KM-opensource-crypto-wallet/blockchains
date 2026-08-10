@@ -62,6 +62,9 @@ const initialState = {
     // that work by deposit address leave it null, and that difference is what
     // distinguishes a swap from a plain transfer throughout the transfer flow.
     swapData: null,
+    // Backend ExchangeTransaction _id for this swap; the app reports the
+    // broadcast tx hash against it after sendFunds.
+    exchangeHistoryId: null,
   },
   pendingTransferData: {
     isLoading: false,

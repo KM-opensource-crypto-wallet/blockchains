@@ -16,6 +16,7 @@ import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
   registerUserAPI,
+  reportExchangeTransactionHash,
 } from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   addExistingDeriveAddress,
@@ -1119,6 +1120,22 @@ export const sendFunds = createAsyncThunk(
         }
 
         let tx_hash = getHashString(res, currentCoin?.chain_name);
+        // Fire-and-forget swap-history bookkeeping: reports the broadcast
+        // hash (and later the DEX outcome) against the backend record
+        // created by /create-exchange. Must never block or fail the send.
+        const reportExchangeHistory = payload => {
+          if (txData?.isExchange && transferData?.exchangeHistoryId) {
+            reportExchangeTransactionHash(transferData.exchangeHistoryId, {
+              walletClientId: currentWallet?.clientId,
+              ...payload,
+            }).catch(e =>
+              console.error('Failed to report exchange history', e?.message),
+            );
+          }
+        };
+        if (tx_hash) {
+          reportExchangeHistory({from_tx_hash: tx_hash});
+        }
         const pendingTransaction = {
           amount: txData?.amount,
           to: txData?.to,
@@ -1174,6 +1191,18 @@ export const sendFunds = createAsyncThunk(
                 });
               },
             }),
+            // exchangeHistoryId is the backend record's Mongo _id (historyId
+            // from /create-exchange) — the only id valid for every provider;
+            // it is null when the backend skipped persisting the swap.
+            ...(txData?.isExchange &&
+              transferData?.exchangeHistoryId && {
+                onViewTransaction: () => {
+                  MainNavigation.navigate({
+                    name: 'ExchangeTransactionDetails',
+                    params: {transactionId: transferData.exchangeHistoryId},
+                  });
+                },
+              }),
           },
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -1202,6 +1231,12 @@ export const sendFunds = createAsyncThunk(
             toastId,
           });
         } else if (confirmTransaction?.status === 'failed') {
+          // DEX swaps have no provider-side status API (the on-chain result
+          // IS the outcome), so the app is the source of truth here. The
+          // backend only accepts this for DEX providers.
+          if (transferData?.swapData) {
+            reportExchangeHistory({status: 'failed'});
+          }
           showToast({
             type: 'errorToast',
             title: 'Transaction Failed',
@@ -1210,6 +1245,9 @@ export const sendFunds = createAsyncThunk(
             toastId,
           });
         } else if (confirmTransaction) {
+          if (transferData?.swapData) {
+            reportExchangeHistory({status: 'completed'});
+          }
           if (txData?.to && isEVMChain(currentCoin?.chain_name)) {
             thunkAPI.dispatch(
               recordSentAddress({
@@ -1248,6 +1286,15 @@ export const sendFunds = createAsyncThunk(
                   });
                 },
               }),
+              ...(txData?.isExchange &&
+                transferData?.exchangeHistoryId && {
+                  onViewTransaction: () => {
+                    MainNavigation.navigate({
+                      name: 'ExchangeTransactionDetails',
+                      params: {transactionId: transferData.exchangeHistoryId},
+                    });
+                  },
+                }),
             },
           });
         }

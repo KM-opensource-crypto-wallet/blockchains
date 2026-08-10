@@ -239,6 +239,8 @@ export const calculateExchange = createAsyncThunk(
         extraData,
         providerName: selectedExchangeChain?.providerName,
         slippage: slippage ? Number(slippage) : undefined,
+        // Ties the backend history record to this wallet's swap history.
+        walletClientId: selectedFromWallet?.clientId,
       };
       const resp = await createExchange(payload);
       if (resp?.status === 201 || resp?.status === 200) {
@@ -258,6 +260,8 @@ export const calculateExchange = createAsyncThunk(
               // Null it out explicitly: a deposit-address provider must not
               // inherit calldata left behind by a previous DEX quote.
               swapData: data?.swapData || null,
+              // Explicit null so a stale history id never survives a re-quote.
+              exchangeHistoryId: data?.historyId || null,
               memo: data?.memo || null,
               currentCoin: selectedFromAsset,
               amount: data?.amount + '',
