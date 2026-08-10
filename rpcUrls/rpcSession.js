@@ -18,6 +18,7 @@ const PREMIUM_CHAINS = {
     'sei',
     'tron',
     'ton',
+    'solana',
   ],
   testnet: ['tron', 'ton'],
 };
@@ -78,6 +79,31 @@ export const refreshSessionForReplay = async sentToken => {
   const freshToken = await refreshRpcSession();
   return freshToken && freshToken !== sentToken ? freshToken : '';
 };
+
+// Solana chain uses fetch
+export const withRpcSessionFetch =
+  baseFetch =>
+  async (url, options = {}) => {
+    if (!isRpcProxyUrl(url)) {
+      return baseFetch(url, options);
+    }
+    const send = extra =>
+      baseFetch(url, {
+        ...options,
+        headers: {...(options.headers || {}), ...(extra || {})},
+      });
+    const sessionHeaders = await getRpcSessionHeaders(url);
+    const response = await send(sessionHeaders);
+    if (response.status !== 401) {
+      return response;
+    }
+    const freshToken = await refreshSessionForReplay(
+      sessionHeaders?.['x-rpc-session'],
+    );
+    return freshToken
+      ? send({'x-rpc-session': freshToken, 'x-rpc-network': NETWORK})
+      : response;
+  };
 
 export const rpcSessionAdapter = async requestConfig => {
   const url = `${requestConfig.baseURL ?? ''}${requestConfig.url ?? ''}`;

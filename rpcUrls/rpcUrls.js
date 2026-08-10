@@ -5,14 +5,6 @@ import {buildRpcProxyUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSessio
 import dayjs from 'dayjs';
 
 const allRPCUrl = {
-  solana: {
-    mainnet: 'https://api.mainnet-beta.solana.com',
-    testnet: 'https://api.devnet.solana.com',
-  },
-  tx_solana: {
-    mainnet: 'https://api.mainnet-beta.solana.com',
-    testnet: 'https://api.devnet.solana.com',
-  },
   ripple: {
     mainnet: 'wss://xrplcluster.com',
     testnet: 'wss://s.altnet.rippletest.net:51233',
@@ -201,14 +193,6 @@ const allFreeRpcUrl = {
     ],
     testnet: ['https://api.devnet.solana.com'],
   },
-  tx_solana: {
-    mainnet: [
-      'https://solana-mainnet.g.alchemy.com/v2/LqXKA4ZLdyCbWyPwtLqri3696CgruA0w',
-      'https://api.mainnet-beta.solana.com',
-      'https://proud-quaint-patina.solana-mainnet.quiknode.pro/7955f2808766bd176ed1fe12d66abd88b33059dd',
-    ],
-    testnet: ['https://api.devnet.solana.com'],
-  },
   filecoin: {
     mainnet: [
       'https://api.node.glif.io/rpc/v0',
@@ -296,7 +280,4 @@ export const getFreeRPCUrl = chain_name => {
     : [rpcUrls?.url[chain_name]];
 };
 
-export const getPremiumRPCUrl = chain_name => {
-  const proxyUrl = buildRpcProxyUrl(chain_name);
-  return proxyUrl ? [proxyUrl] : [];
-};
+export const getPremiumRPCUrl = chain_name => buildRpcProxyUrl(chain_name);

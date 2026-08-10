@@ -234,11 +234,11 @@ const ADDITIONAL_ESTIMATE_GAS = {
 };
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
-  const premiumRpcUrls = customRpcUrl ? [] : getPremiumRPCUrl(chain_name);
+  const premiumRpcUrl = customRpcUrl ? '' : getPremiumRPCUrl(chain_name);
   const freeRpcUrls = customRpcUrl ? [] : getFreeRPCUrl(chain_name);
   let allRpcUrls = customRpcUrl
     ? [customRpcUrl]
-    : [...premiumRpcUrls, ...freeRpcUrls];
+    : [premiumRpcUrl, ...freeRpcUrls].filter(Boolean);
   let lastRpcErrorToastAt = 0;
   const RPC_TOAST_COOLDOWN_MS = 15000;
   const chainId = CHAIN_ID[chain_name];
@@ -647,9 +647,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     };
 
     // Phase 1: Try premium RPCs first (skipped when customRpcUrl is set)
-    if (!customRpcUrl && premiumRpcUrls.length > 0) {
+    if (!customRpcUrl && premiumRpcUrl) {
       const premiumResp = await Promise.allSettled(
-        createSendTransactionsPromises(wallet, tx, premiumRpcUrls),
+        createSendTransactionsPromises(wallet, tx, [premiumRpcUrl]),
       );
       const premiumResult = extractResult(premiumResp);
       if (premiumResult) {

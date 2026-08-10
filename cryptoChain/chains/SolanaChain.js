@@ -1,4 +1,4 @@
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   Authorized,
@@ -32,7 +32,11 @@ import {
 import bs58 from 'bs58';
 import {getSolanaContract} from 'dok-wallet-blockchain-networks/service/solflare';
 import {nanoid} from 'nanoid';
-import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  getFreeRPCUrl,
+  getPremiumRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {withRpcSessionFetch} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {getStakingByChain} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {StakeWiz} from 'dok-wallet-blockchain-networks/service/stakeWiz';
 import {getStakeActivation} from '@anza-xyz/solana-rpc-get-stake-activation';
@@ -71,14 +75,15 @@ async function getSimulationUnits(
 // Example Usage
 
 export const SolanaChain = () => {
-  const retryFunc = async (cb, defaultResponse, isTransaction = false) => {
-    const solanaRpc = getFreeRPCUrl('solana');
-    const transactionSolanaRpc = getFreeRPCUrl(isWeb ? 'solana' : 'tx_solana');
-    const rpcs = isTransaction ? transactionSolanaRpc : solanaRpc;
+  const retryFunc = async (cb, defaultResponse) => {
+    const rpcs = [
+      getPremiumRPCUrl('solana'),
+      ...getFreeRPCUrl('solana'),
+    ].filter(Boolean);
     for (let i = 0; i < rpcs.length; i++) {
       try {
         const solanaProvider = new Connection(rpcs[i], {
-          fetch: customFetchWithTimeout,
+          fetch: withRpcSessionFetch(customFetchWithTimeout),
         });
         return await cb(solanaProvider);
       } catch (e) {
@@ -849,31 +854,27 @@ export const SolanaChain = () => {
         }
       }, []),
     send: async ({to, from, amount, privateKey, memo, gasFee, estimateGas}) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const transactionMessage = await prepareTransferMessage({
-              fromAddress: from,
-              toAddress: to,
-              amount,
-              memo,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            });
-            return await sendTransaction({
-              transactionMessage,
-              privateKey,
-              solanaProvider,
-            });
-          } catch (e) {
-            console.error('Error in send solana transaction', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+      retryFunc(async solanaProvider => {
+        try {
+          const transactionMessage = await prepareTransferMessage({
+            fromAddress: from,
+            toAddress: to,
+            amount,
+            memo,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          });
+          return await sendTransaction({
+            transactionMessage,
+            privateKey,
+            solanaProvider,
+          });
+        } catch (e) {
+          console.error('Error in send solana transaction', e);
+          throw e;
+        }
+      }, null),
     createStaking: async ({
       validatorPubKey,
       from,
@@ -882,30 +883,26 @@ export const SolanaChain = () => {
       gasFee,
       estimateGas,
     }) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const transactionMessage = await prepareCreateStaking({
-              from,
-              validatorPubKey,
-              amount,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            });
-            return await sendTransaction({
-              transactionMessage,
-              privateKey,
-              solanaProvider,
-            });
-          } catch (e) {
-            console.error('Error in create solana staking', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+      retryFunc(async solanaProvider => {
+        try {
+          const transactionMessage = await prepareCreateStaking({
+            from,
+            validatorPubKey,
+            amount,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          });
+          return await sendTransaction({
+            transactionMessage,
+            privateKey,
+            solanaProvider,
+          });
+        } catch (e) {
+          console.error('Error in create solana staking', e);
+          throw e;
+        }
+      }, null),
     deactivateStaking: async ({
       from,
       stakingAddress,
@@ -913,29 +910,25 @@ export const SolanaChain = () => {
       gasFee,
       estimateGas,
     }) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const tx = await buildStakingDeactivateTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              gasFee,
-              estimateGas,
-            );
-            return await sendTransaction({
-              transactionMessage: tx,
-              privateKey,
-              solanaProvider,
-            });
-          } catch (e) {
-            console.error('Error in solana deactivateStaking', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+      retryFunc(async solanaProvider => {
+        try {
+          const tx = await buildStakingDeactivateTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            gasFee,
+            estimateGas,
+          );
+          return await sendTransaction({
+            transactionMessage: tx,
+            privateKey,
+            solanaProvider,
+          });
+        } catch (e) {
+          console.error('Error in solana deactivateStaking', e);
+          throw e;
+        }
+      }, null),
     withdrawStaking: async ({
       from,
       amount,
@@ -944,30 +937,26 @@ export const SolanaChain = () => {
       gasFee,
       estimateGas,
     }) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const tx = await buildStakingWithdrawTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              amount,
-              gasFee,
-              estimateGas,
-            );
-            return await sendTransaction({
-              transactionMessage: tx,
-              privateKey,
-              solanaProvider,
-            });
-          } catch (e) {
-            console.error('Error in solana withdrawStaking', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+      retryFunc(async solanaProvider => {
+        try {
+          const tx = await buildStakingWithdrawTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            amount,
+            gasFee,
+            estimateGas,
+          );
+          return await sendTransaction({
+            transactionMessage: tx,
+            privateKey,
+            solanaProvider,
+          });
+        } catch (e) {
+          console.error('Error in solana withdrawStaking', e);
+          throw e;
+        }
+      }, null),
     sendToken: async ({
       to,
       amount,
@@ -980,35 +969,31 @@ export const SolanaChain = () => {
       gasFee,
       estimateGas,
     }) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const {transactionMessage} = await prepareTokenTransferMessage({
-              toAddress: to,
-              contractAddress,
-              amount,
-              decimals: decimal,
-              tokenAmount,
-              mint,
-              memo,
-              solanaProvider: solanaProvider,
-              privateKey,
-              estimateGas,
-              gasFee,
-            });
-            return await sendTransaction({
-              transactionMessage,
-              privateKey,
-              solanaProvider,
-            });
-          } catch (e) {
-            console.error('Error in send solana token transaction', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+      retryFunc(async solanaProvider => {
+        try {
+          const {transactionMessage} = await prepareTokenTransferMessage({
+            toAddress: to,
+            contractAddress,
+            amount,
+            decimals: decimal,
+            tokenAmount,
+            mint,
+            memo,
+            solanaProvider: solanaProvider,
+            privateKey,
+            estimateGas,
+            gasFee,
+          });
+          return await sendTransaction({
+            transactionMessage,
+            privateKey,
+            solanaProvider,
+          });
+        } catch (e) {
+          console.error('Error in send solana token transaction', e);
+          throw e;
+        }
+      }, null),
     sendNFT: async props => {
       return await SolanaChain().sendToken(props);
     },

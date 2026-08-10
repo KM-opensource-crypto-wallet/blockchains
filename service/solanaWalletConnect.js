@@ -1,8 +1,12 @@
 import {Connection, Keypair, VersionedTransaction} from '@solana/web3.js';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
+import {
+  getFreeRPCUrl,
+  getPremiumRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {customFetchWithTimeout} from 'dok-wallet-blockchain-networks/helper';
-import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {withRpcSessionFetch} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const SOLANA_SIGN_TRANSACTION = 'solana_signTransaction';
 
@@ -71,11 +75,14 @@ export const solanaWalletConnectSignAndSendTransaction = async (
     const txBuffer = Buffer.from(payload, 'base64');
 
     const versionedTransaction = VersionedTransaction.deserialize(txBuffer);
-    const rpcs = getFreeRPCUrl('tx_solana');
+    const rpcs = [
+      getPremiumRPCUrl('solana'),
+      ...getFreeRPCUrl('solana'),
+    ].filter(Boolean);
     for (let i = 0; i < rpcs.length; i++) {
       try {
         const solanaProvider = new Connection(rpcs[i], {
-          fetch: customFetchWithTimeout,
+          fetch: withRpcSessionFetch(customFetchWithTimeout),
         });
         const finalTransaction = new VersionedTransaction(
           versionedTransaction.message,

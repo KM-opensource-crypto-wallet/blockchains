@@ -31,14 +31,17 @@ const withRpcSession = tronWeb => {
 };
 
 export const TronChain = () => {
-  const buildTronProviders = () => [
-    ...getPremiumRPCUrl('tron').map(url => ({fullHost: url})),
-    {
-      fullHost: getRPCUrl('tron_full_host'),
-      solidityNode: getRPCUrl('tron_solidity_node'),
-      eventServer: getRPCUrl('tron_event_server'),
-    },
-  ];
+  const buildTronProviders = () => {
+    const premiumUrl = getPremiumRPCUrl('tron');
+    return [
+      ...(premiumUrl ? [{fullHost: premiumUrl}] : []),
+      {
+        fullHost: getRPCUrl('tron_full_host'),
+        solidityNode: getRPCUrl('tron_solidity_node'),
+        eventServer: getRPCUrl('tron_event_server'),
+      },
+    ];
+  };
 
   let defaultTronWeb = null;
 
