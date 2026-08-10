@@ -20,7 +20,7 @@ import walletsSlice, {
   createWallet,
   refreshCoins,
   setCurrentCoin,
-  setCurrentWalletIndex,
+  setCurrentWalletClientId,
   addOrToggleCoinInWallet,
   updateWalletName,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
@@ -41,6 +41,7 @@ describe('walletsSlice tesets', () => {
         allWallets: [
           {
             id: 'wallet1',
+            clientId: 'client1',
             walletName: 'Main Wallet',
             coins: [
               {
@@ -62,6 +63,7 @@ describe('walletsSlice tesets', () => {
           },
           {
             id: 'wallet2',
+            clientId: 'client2',
             walletName: 'testWallet',
             coins: [
               {
@@ -75,7 +77,7 @@ describe('walletsSlice tesets', () => {
             selectedCoinIndex: null,
           },
         ],
-        currentWalletIndex: 0,
+        currentWalletClientId: 'client1',
       },
     };
 
@@ -159,13 +161,15 @@ describe('walletsSlice tesets', () => {
           allWallets: [
             {
               id: 'wallet1',
+              clientId: 'client1',
               selectedCoin: null,
             },
             {
               id: 'wallet2',
+              clientId: 'client2',
             },
           ],
-          currentWalletIndex: 0,
+          currentWalletClientId: 'client1',
         },
       };
       const result = selectCurrentCoin(mockState);
@@ -184,6 +188,7 @@ describe('walletsSlice tesets', () => {
       allWallets: [
         {
           id: 'wallet1',
+          clientId: 'client1',
           coins: [
             {_id: 'a', isInWallet: true, isSupported: true, page: 'a'},
             {_id: 'b', isInWallet: false, isSupported: true, page: 'b'},
@@ -192,6 +197,7 @@ describe('walletsSlice tesets', () => {
         },
         {
           id: 'wallet2',
+          clientId: 'client2',
           coins: [
             {_id: 'a', isInWallet: true, isSupported: true, page: 'a'},
             {_id: 'b', isInWallet: false, isSupported: true, page: 'b'},
@@ -199,39 +205,40 @@ describe('walletsSlice tesets', () => {
           selectedCoin: 'a',
         },
       ],
-      currentWalletIndex: 0,
+      currentWalletClientId: 'client1',
     };
     const walletsReducer = walletsSlice.reducer;
 
     it('should update wallet name', () => {
       let state = {...initialState};
-      const action = updateWalletName({index: 0, walletName: 'new name'});
+      const action = updateWalletName({
+        clientId: 'client1',
+        walletName: 'new name',
+      });
       const nextState = walletsReducer(state, action);
       expect(nextState.allWallets[0].walletName).toEqual('new name');
     });
 
-    it('should set the current wallet by index.js', () => {
+    it('should set the current wallet by clientId', () => {
       let state = {...initialState};
-      const action = setCurrentWalletIndex(1);
+      const action = setCurrentWalletClientId('client2');
       const nextState = walletsReducer(state, action);
-      expect(nextState.currentWalletIndex).toEqual(1);
+      expect(nextState.currentWalletClientId).toEqual('client2');
     });
 
-    it('should throw exception if passing non number index.js', () => {
+    it('should throw exception if passing missing clientId', () => {
       let state = {...initialState};
-      const action = setCurrentWalletIndex('a');
-      // const nextState = walletsReducer(state, action);
+      const action = setCurrentWalletClientId(undefined);
       expect(() => walletsReducer(state, action)).toThrow(
-        'setCurrentWalletIndex: missing or invalid action payload: a',
+        'setCurrentWalletClientId: missing or invalid action payload: undefined',
       );
     });
 
-    it('should throw exception if passing index.js of non existing wallet', () => {
+    it('should throw exception if passing clientId of non existing wallet', () => {
       let state = {...initialState};
-      const action = setCurrentWalletIndex(25);
-      // const nextState = walletsReducer(state, action);
+      const action = setCurrentWalletClientId('unknown');
       expect(() => walletsReducer(state, action)).toThrow(
-        'setCurrentWalletIndex: missing or invalid action payload: 25',
+        'setCurrentWalletClientId: missing or invalid action payload: unknown',
       );
     });
 
@@ -648,9 +655,10 @@ describe('walletsSlice tesets', () => {
                 {id: 'b', isInWallet: false, isSupported: true, page: 'B'},
               ],
               selectedCoinIndex: 0,
+              clientId: 'client1',
             },
           ],
-          currentWalletIndex: 0,
+          currentWalletClientId: 'client1',
         },
         settings: {
           localCurrency: 'USD',
@@ -691,6 +699,7 @@ describe('walletsSlice tesets', () => {
         const mockWallet = {
           newStoreWallet: {
             id: '1',
+            clientId: 'client1',
             walletName: 'Test Wallet',
             coins: [
               {id: 1, name: 'Coin One', page: 'coin1'},
@@ -712,8 +721,10 @@ describe('walletsSlice tesets', () => {
         );
         expect(foundWallet).toEqual(mockWallet.newStoreWallet);
 
-        // Check that the currentWalletIndex was updated
-        expect(state.currentWalletIndex).toEqual(0);
+        // Check that the current wallet pointer was updated
+        expect(state.currentWalletClientId).toEqual(
+          mockWallet.newStoreWallet.clientId,
+        );
       });
 
       it('handles addToken.fulfilled', async () => {
@@ -721,6 +732,7 @@ describe('walletsSlice tesets', () => {
           allWallets: [
             {
               id: '1',
+              clientId: 'client1',
               coins: [
                 {id: 'a', isInWallet: true, isSupported: true},
                 {id: 'b', isInWallet: false, isSupported: true},
@@ -729,16 +741,16 @@ describe('walletsSlice tesets', () => {
             },
             {
               id: '2',
+              clientId: 'client2',
               coins: [{id: 'c', isInWallet: true, isSupported: true}],
               selectedCoinIndex: 0,
             },
           ],
-          currentWalletIndex: 0, // Moved inside the preloadedState object
+          currentWalletClientId: 'client1',
         };
         const store = configureStore({
           reducer: walletsSlice.reducer,
           preloadedState,
-          currentWalletIndex: '1',
         });
 
         let st = store.getState();

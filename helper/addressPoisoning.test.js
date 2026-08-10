@@ -21,6 +21,7 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => {
     'ink',
     'sei',
     'hyperliquid',
+    'robinhood',
   ];
   return {
     isEVMChain: chain_name => EVM_CHAINS.includes(chain_name),

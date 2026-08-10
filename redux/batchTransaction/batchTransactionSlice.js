@@ -10,7 +10,10 @@ import {
   getBatchTransactions,
   getBatchTransactionsBalances,
 } from './batchTransactionSelectors';
-import {createBalanceKey} from 'dok-wallet-blockchain-networks/helper';
+import {
+  createBalanceKey,
+  getCustomizePublicAddress,
+} from 'dok-wallet-blockchain-networks/helper';
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {getLocalCurrency} from 'dok-wallet-blockchain-networks/redux/settings/settingsSelectors';
 import structuredClone from '@ungap/structured-clone';
@@ -84,7 +87,7 @@ export const initializeFilters = createAsyncThunk(
           !addressObj[address]
         ) {
           addressObj[address] = {
-            label: `${address.slice(0, 8)}...${address.slice(-6)}`,
+            label: getCustomizePublicAddress(address),
             value: address,
           };
         }

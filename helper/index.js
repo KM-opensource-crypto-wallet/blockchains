@@ -28,9 +28,16 @@ export const getTokenLogoUrl = contractAddress => {
 };
 
 export function getCustomizePublicAddress(str) {
-  return `${str?.substring(0, 10) || ''}...${
-    str?.substring(str.length - 10, str.length) || ''
-  }`;
+  if (!str) {
+    return '';
+  }
+  if (str.length <= 23) {
+    return str;
+  }
+  return `${str.substring(0, 10)}...${str.substring(
+    str.length - 10,
+    str.length,
+  )}`;
 }
 
 export function capitalizeFirstLetter(str) {
@@ -112,6 +119,7 @@ const ethereumChains = {
   ink: 'ethereum',
   sei: 'ethereum',
   hyperliquid: 'ethereum',
+  robinhood: 'ethereum',
 };
 
 const supportedChain = [
@@ -329,6 +337,7 @@ const EVM_CHAINS = [
   'ink',
   'sei',
   'hyperliquid',
+  'robinhood',
 ];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
@@ -459,6 +468,7 @@ const TRANSACTION_LIST_LIMIT_100 = [
   'linea',
   'zksync',
   'sei',
+  'robinhood',
 ];
 
 export const isTransactionListLimit100 = chain_name =>
@@ -786,6 +796,14 @@ export const ModalAddTokenList = [
     token_type: 'ERC20',
     isEVM: true,
   },
+  {
+    label: 'Robinhood',
+    value: 'robinhood',
+    chain_symbol: 'ETH',
+    type: 'token',
+    token_type: 'ERC20',
+    isEVM: true,
+  },
 ];
 
 export const PrivateKeyList = [
@@ -954,6 +972,7 @@ export const CustomRPCList = [
   {label: 'Ink', value: 'ink'},
   {label: 'Sei', value: 'sei'},
   {label: 'Hyperliquid', value: 'hyperliquid'},
+  {label: 'Robinhood', value: 'robinhood'},
 ];
 export const AUTO_LOCK = [
   {
@@ -1560,17 +1579,29 @@ export const getCoinsCount = coins => {
   return coins.filter(coin => coin?.isInWallet).length;
 };
 
+const BALANCE_UNITS = [
+  {threshold: 1e12, suffix: 'T'},
+  {threshold: 1e9, suffix: 'B'},
+  {threshold: 1e6, suffix: 'M'},
+  {threshold: 1e3, suffix: 'K'},
+];
+
+const balanceFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 2,
+});
+
 export const formatBalance = value => {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
     return '0.00';
   }
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(2) + 'M';
-  } else if (num >= 1000) {
-    return num.toLocaleString('en-US', {maximumFractionDigits: 2});
+  for (let i = 0; i < BALANCE_UNITS.length; i++) {
+    const {threshold, suffix} = BALANCE_UNITS[i];
+    if (n >= threshold) {
+      return `${Math.floor((n / threshold) * 100) / 100}${suffix}`;
+    }
   }
-  return num.toFixed(2);
+  return balanceFormatter.format(n);
 };
 
 const getScanUrlName = chain_name => {

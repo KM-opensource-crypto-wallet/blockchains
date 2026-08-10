@@ -10,79 +10,77 @@ export const selectAllWallets = state => {
   return state.wallets?.allWallets;
 };
 
+export const isWalletHiddenAndLocked = wallet =>
+  !wallet?.walletName || !!wallet?.hideSettings?.isHidden;
+
+// Memoized: these build new arrays, so without createSelector every call
+// returns a fresh reference and useSelector re-renders on unrelated updates.
+export const selectVisibleWallets = createSelector(
+  [selectAllWallets],
+  allWallets =>
+    (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
+);
+
 export const selectAllWalletName = state => {
   const allWallets = state.wallets?.allWallets;
   return allWallets.map(item => item?.walletName);
 };
 
+export const selectCurrentWalletClientId = state =>
+  state.wallets?.currentWalletClientId;
+
+export const selectCurrentWallet = state => {
+  const allWallets = state.wallets?.allWallets || [];
+  return (
+    allWallets.find(
+      wallet => wallet?.clientId === state.wallets?.currentWalletClientId,
+    ) || null
+  );
+};
+
 export const getSelectedNftChain = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNftChain || 'Ethereum';
 };
 
 export const getSelectedNftData = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_data`] || [];
 };
 
 export const getSelectedNftLoading = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_loading`] || false;
 };
 
 export const getSelectedNftAvailable = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
   return nft[`${selectedNftChain}_available`] || false;
 };
 
 export const getSelectedNft = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state?.wallets?.currentWalletIndex;
-  const selectedWallet = allWallets[currentWalletIndex];
+  const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNft || {};
 };
 
-export const selectCurrentWallet = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  return allWallets[currentWalletIndex] || null;
-};
-
-export const selectCurrentWalletClientId = state =>
-  selectCurrentWallet(state)?.clientId;
-
 export const isImportWalletWithPrivateKey = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return !!currentWallet?.isImportWalletWithPrivateKey;
 };
 
 export const selectWalletChainName = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return currentWallet?.chain_name;
 };
 
 export const selectCurrentWalletSortOption = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  const currentWallet = allWallets[currentWalletIndex] || null;
+  const currentWallet = selectCurrentWallet(state);
   return currentWallet?.coinsSortOption || 'default';
 };
 
@@ -311,20 +309,12 @@ export const selectIsBackedUp = state => {
   return !!currentWallet?.isBackedup;
 };
 
-export const _currentWalletIndexSelector = state => {
-  return state.wallets.currentWalletIndex;
-};
-
 export const getCurrentWalletPhrase = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets[currentWalletIndex]?.phrase;
+  return selectCurrentWallet(state)?.phrase;
 };
 
 export const getCurrentWalletIsAddMoreAddressPopupHidden = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets[currentWalletIndex]?.isAddMoreAddressPopupHidden;
+  return selectCurrentWallet(state)?.isAddMoreAddressPopupHidden;
 };
 
 export const foundCoinInCurrentWallet = (currentWallet, page) => {
@@ -341,10 +331,6 @@ export const getEthereumCoin = state => {
   );
 };
 
-export const getCurrentWalletIndex = state => {
-  return state?.wallets?.currentWalletIndex;
-};
-
 export const getPendingTransactions = state => {
   return state?.wallets?.pendingTransactions || {};
 };
@@ -356,9 +342,7 @@ export const getPendingTransactionsWithKey = (pendingTransactions, key) => {
 };
 
 export const isAdding50MoreAddresses = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets.currentWalletIndex;
-  return allWallets?.[currentWalletIndex]?.isAdding50MoreAddresses;
+  return selectCurrentWallet(state)?.isAdding50MoreAddresses;
 };
 
 export const getMasterClientId = state => {
@@ -382,8 +366,25 @@ export const getLastCoinsScanTimestamp = state => {
   return currentWallet?.lastCoinsScanTimestamp;
 };
 
-export const isCoinsScanTimestampValid = state => {
-  const timestamp = getLastCoinsScanTimestamp(state);
+// One scan allowed per wallet within this window (also used by
+// useCoinScanCooldown in the app for the countdown label).
+export const COIN_SCAN_COOLDOWN_HOURS = 24;
+
+export const isCoinScanAvailableForTimestamp = timestamp => {
   if (timestamp === null || timestamp === undefined) return true;
-  return dayjs().diff(dayjs(timestamp), 'hour') >= 24;
+  return dayjs().diff(dayjs(timestamp), 'hour') >= COIN_SCAN_COOLDOWN_HOURS;
+};
+
+export const isCoinsScanTimestampValid = state =>
+  isCoinScanAvailableForTimestamp(getLastCoinsScanTimestamp(state));
+
+// One-time banner: only imported wallets that have never been scanned and
+// never dismissed the banner (both flags persist on the wallet object).
+export const selectShouldShowCoinSyncBanner = state => {
+  const wallet = selectCurrentWallet(state);
+  return (
+    !!wallet?.isImported &&
+    !wallet?.isCoinSyncBannerDismissed &&
+    !wallet?.lastCoinsScanTimestamp
+  );
 };

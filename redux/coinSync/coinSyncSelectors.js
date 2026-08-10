@@ -13,22 +13,16 @@ export const selectScannedCoins = state => state.coinSync?.scannedCoins || 0;
 export const selectCurrentSyncingCoin = state =>
   state.coinSync?.currentSyncingCoin || null;
 
-export const selectSyncingWalletIndex = state =>
-  state.coinSync?.syncingWalletIndex;
-
 export const selectSyncingWalletName = state =>
   state.coinSync?.syncingWalletName || null;
 
-export const selectIsFetching = state => state.coinSync?.status === 'fetching';
+// clientId of the wallet the current/last scan belongs to - may differ from
+// the current wallet (a scan can be started from another wallet's Edit
+// screen). Null when no scan is attached (idle promo banner).
+export const selectSyncingWalletClientId = state =>
+  state.coinSync?.syncingWalletClientId || null;
 
-export const selectIsBannerDismissed = state => {
-  const allWallets = state.wallets?.allWallets;
-  const currentWalletIndex = state.wallets?.currentWalletIndex;
-  const clientId = allWallets?.[currentWalletIndex]?.clientId;
-  return (
-    (clientId && state.coinSync?.dismissedBannerClientIds?.[clientId]) || false
-  );
-};
+export const selectIsFetching = state => state.coinSync?.status === 'fetching';
 
 export const selectIsCreatingWallets = state =>
   state.coinSync?.status === 'creating_wallets';
