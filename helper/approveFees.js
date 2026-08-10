@@ -30,7 +30,7 @@ export function applyApproveGasPrice(
   let transactionFeeBN = gasPriceBN.multipliedBy(estimateGasBN).plus(l1FeesBn);
   // The reset path sends two txs (reset-to-0 + approve) and the estimation
   // doubles the fee to match. Keep the local recompute consistent with it.
-  if (allowanceData?.needsAllowanceReset || allowanceData?.needsReset) {
+  if (allowanceData?.needsReset) {
     transactionFeeBN = transactionFeeBN.multipliedBy(2);
   }
   allowanceData.gasFee = gasPriceBN.toString();

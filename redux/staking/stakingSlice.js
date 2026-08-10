@@ -115,7 +115,10 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
       nonce: result.nonce ?? null,
       transactionFee: result.fee,
       l1Fees: result.l1Fees?.toString() ?? null,
-      needsAllowanceReset: !!result.allowance,
+      // Accurate on-chain flag from readAllowance. Storing !!result.allowance
+      // here would over-double the fee on a custom gas edit for tokens that
+      // have a non-zero allowance but need no reset-to-zero.
+      needsReset: allowanceData?.needsReset,
     };
   },
 );

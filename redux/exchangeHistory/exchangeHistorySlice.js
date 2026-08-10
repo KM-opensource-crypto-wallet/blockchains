@@ -91,9 +91,13 @@ export const fetchMoreExchangeTransactions = createAsyncThunk(
  */
 export const fetchExchangeTransactionDetails = createAsyncThunk(
   'exchangeHistory/fetchExchangeTransactionDetails',
-  async (id, {rejectWithValue}) => {
+  async (id, {getState, rejectWithValue}) => {
     try {
-      const resp = await getExchangeTransactionById(id);
+      const walletClientId = selectCurrentWalletClientId(getState());
+      if (!walletClientId) {
+        return rejectWithValue('No wallet selected');
+      }
+      const resp = await getExchangeTransactionById(id, walletClientId);
       return resp?.data;
     } catch (err) {
       return rejectWithValue(

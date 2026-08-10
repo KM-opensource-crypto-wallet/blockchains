@@ -417,9 +417,11 @@ export const getExchangeTransactions = async ({
   }
 };
 
-export const getExchangeTransactionById = async id => {
+export const getExchangeTransactionById = async (id, walletClientId) => {
   try {
-    const resp = await DokApi.get(`/exchange-transactions/${id}`);
+    const resp = await DokApi.get(`/exchange-transactions/${id}`, {
+      params: {walletClientId},
+    });
     return {status: resp?.status, data: resp?.data?.data};
   } catch (e) {
     console.error('Error in getExchangeTransactionById', JSON.stringify(e));
