@@ -24,6 +24,9 @@ export const PolkadotWalletConnectSignTransaction = async ({
     const keyring = new Keyring({ss58Format: 0});
     const keypair = keyring.addFromSeed(Buffer.from(privateKey, 'hex'));
     const transactionPayload = signTypeData?.transactionPayload ?? signTypeData;
+    if (transactionPayload?.signedExtensions) {
+      api.registry.setSignedExtensions(transactionPayload.signedExtensions);
+    }
     const payload = api.registry.createType(
       'ExtrinsicPayload',
       transactionPayload,

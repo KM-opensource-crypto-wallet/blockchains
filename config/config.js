@@ -253,7 +253,7 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'ripple',
     symbol: 'XRP',
   },
-  'polkadot:68d56f15f85d3136970ec16946040bc1': {
+  'polkadot:67f9723393ef76214df0118c34bbbd3d': {
     chain_display_name: 'Polkadot',
     chain_name: 'polkadot',
     symbol: 'DOT',
@@ -386,7 +386,7 @@ const WalletConnectSupportedChainProduction = {
     chain_name: 'ripple',
     symbol: 'XRP',
   },
-  'polkadot:91b171bb158e2d3848fa23a9f1c25182': {
+  'polkadot:68d56f15f85d3136970ec16946040bc1': {
     chain_display_name: 'Polkadot',
     chain_name: 'polkadot',
     symbol: 'DOT',

@@ -8,10 +8,7 @@ import {showToast} from 'utils/toast';
 import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tonWalletConnect';
 import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/stellarWalletConnect';
 import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/rippleWalletConnect';
-import {
-  PolkadotWalletConnectSignMessage,
-  polkadotWalletConnectTransaction,
-} from 'dok-wallet-blockchain-networks/service/polkadotWalletConnect';
+import {polkadotWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/polkadotWalletConnect';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -86,8 +83,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
           method,
           transactionData,
           privateKey,
-          chain_name,
-          null,
+          signTypeData,
         );
       } else {
         tx = await etherWalletConnectTransaction(
