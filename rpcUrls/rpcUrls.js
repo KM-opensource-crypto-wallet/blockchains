@@ -25,7 +25,7 @@ const allRPCUrl = {
   },
   tezos: {
     mainnet: 'https://mainnet.tezos.ecadinfra.com',
-    testnet: 'https://ghostnet.ecadinfra.com',
+    testnet: 'https://rpc.bakingnet.teztnets.com',
   },
   stellar: {
     mainnet: 'https://horizon.stellar.org',
@@ -53,7 +53,7 @@ const allRPCUrl = {
   },
   cosmos: {
     mainnet: 'https://cosmos-rpc.publicnode.com:443',
-    testnet: 'https://cosmos-rpc.publicnode.com:443',
+    testnet: 'https://cosmos-testnet-rpc.itrocket.net',
   },
   polkadot: {
     mainnet: 'https://dot-rpc.stakeworld.io/assethub',

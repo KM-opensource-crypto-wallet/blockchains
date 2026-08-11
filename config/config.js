@@ -253,10 +253,35 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'ripple',
     symbol: 'XRP',
   },
-  'polkadot:67f9723393ef76214df0118c34bbbd3d': {
+  'polkadot:e143f23803ac50e8f6f8e62695d1ce9e': {
     chain_display_name: 'Polkadot',
     chain_name: 'polkadot',
     symbol: 'DOT',
+  },
+  'cosmos:provider': {
+    chain_display_name: 'Cosmos',
+    chain_name: 'cosmos',
+    symbol: 'ATOM',
+  },
+  'hedera:testnet': {
+    chain_display_name: 'Hedera',
+    chain_name: 'hedera',
+    symbol: 'HBAR',
+  },
+  'aptos:2': {
+    chain_display_name: 'Aptos',
+    chain_name: 'aptos',
+    symbol: 'APT',
+  },
+  'tezos:testnet': {
+    chain_display_name: 'Tezos',
+    chain_name: 'tezos',
+    symbol: 'XTZ',
+  },
+  'bip122:000000000933ea01ad0ee984209779ba': {
+    chain_display_name: 'Bitcoin',
+    chain_name: 'bitcoin',
+    symbol: 'BTC',
   },
 };
 
@@ -391,6 +416,31 @@ const WalletConnectSupportedChainProduction = {
     chain_name: 'polkadot',
     symbol: 'DOT',
   },
+  'cosmos:cosmoshub-4': {
+    chain_display_name: 'Cosmos',
+    chain_name: 'cosmos',
+    symbol: 'ATOM',
+  },
+  'hedera:mainnet': {
+    chain_display_name: 'Hedera',
+    chain_name: 'hedera',
+    symbol: 'HBAR',
+  },
+  'aptos:1': {
+    chain_display_name: 'Aptos',
+    chain_name: 'aptos',
+    symbol: 'APT',
+  },
+  'tezos:mainnet': {
+    chain_display_name: 'Tezos',
+    chain_name: 'tezos',
+    symbol: 'XTZ',
+  },
+  'bip122:000000000019d6689c085ae165831e93': {
+    chain_display_name: 'Bitcoin',
+    chain_name: 'bitcoin',
+    symbol: 'BTC',
+  },
 };
 
 const ETHER_API_KEYS = shuffleArray([
@@ -494,7 +544,9 @@ export const config = {
   COSMOS_SCAN_URL: 'https://www.mintscan.io',
   COSMOS_SCAN_BASE_URL: 'https://apis.mintscan.io',
   COSMOS_API_KEY: process.env.COSMOS_API_KEY,
-  COSMOS_REST_BASE_URL: 'https://cosmos-rest.publicnode.com',
+  COSMOS_REST_BASE_URL: IS_SANDBOX
+    ? 'https://cosmos-testnet-api.polkachu.com'
+    : 'https://cosmos-rest.publicnode.com',
   AVAX_SCAN_API_URL:
     'https://api-beta.avascan.info/v2/network/mainnet/evm/43114',
   VICTION_SCAN_API_URL: IS_SANDBOX

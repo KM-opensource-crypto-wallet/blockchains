@@ -2,13 +2,18 @@ import {createAsyncThunk} from '@reduxjs/toolkit';
 import {etherWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/etherWalletConnect';
 import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletconnect';
 import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
-import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tronWalletConnect';
-import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/solanaWalletConnect';
+import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/tronWalletConnect';
+import {solanaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/solanaWalletConnect';
 import {showToast} from 'utils/toast';
-import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/tonWalletConnect';
-import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/stellarWalletConnect';
-import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/rippleWalletConnect';
-import {polkadotWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/polkadotWalletConnect';
+import {tonWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/tonWalletConnect';
+import {stellarWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/stellarWalletConnect';
+import {rippleWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/rippleWalletConnect';
+import {polkadotWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/polkadotWalletConnect';
+import {cosmosWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/cosmosWalletConnect';
+import {hederaWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/hederaWalletConnect';
+import {aptosWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/aptosWalletConnect';
+import {tezosWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/tezosWalletConnect';
+import {bitcoinWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/bitcoinWalletConnect';
 
 export const createWalletConnectTransaction = createAsyncThunk(
   'walletConnect/createWalletConnectTransaction',
@@ -23,6 +28,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
       signTypeData,
       sessionId,
       topic,
+      domain,
     } = payload;
     const dispatch = thunkAPI.dispatch;
     let tx;
@@ -55,6 +61,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
           transactionData,
           privateKey,
           signTypeData,
+          domain,
         );
       } else if (method?.includes('stellar')) {
         tx = await stellarWalletConnectTransaction(
@@ -80,6 +87,43 @@ export const createWalletConnectTransaction = createAsyncThunk(
         );
       } else if (method?.includes('polkadot')) {
         tx = await polkadotWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('cosmos')) {
+        tx = await cosmosWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('hedera')) {
+        tx = await hederaWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('aptos')) {
+        tx = await aptosWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (method?.includes('tezos')) {
+        tx = await tezosWalletConnectTransaction(
+          method,
+          transactionData,
+          privateKey,
+          signTypeData,
+        );
+      } else if (chain_name === 'bitcoin') {
+        // bip122 methods (getAccountAddresses, signMessage, signPsbt,
+        // sendTransfer) are not chain-prefixed, so dispatch on chain_name.
+        tx = await bitcoinWalletConnectTransaction(
           method,
           transactionData,
           privateKey,

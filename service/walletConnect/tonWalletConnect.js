@@ -9,7 +9,7 @@ import {
   internal,
   SendMode,
 } from '@ton/ton';
-import {keyPairFromSeed, sign} from '@ton/crypto';
+import {keyPairFromSeed, sign, sha256_sync} from '@ton/crypto';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
 export const TON_SEND_MESSAGE = 'ton_sendMessage';
@@ -69,21 +69,88 @@ export const TonWalletConnectSendMessage = async ({payload, privateKey}) => {
   }
 };
 
-export const TonWalletConnectSignData = async ({signTypeData, privateKey}) => {
+const getDomainFromUrl = url => {
+  return (url || '').replace(/^[a-zA-Z]+:\/\//, '').split(/[/?#]/)[0];
+};
+
+// message = 0xffff || "ton-connect/sign-data/" || workchain || address_hash
+//   || domain_len || domain || timestamp || type_prefix || payload_len || payload
+const createTextBinaryHash = ({
+  type,
+  content,
+  workChain,
+  addressHash,
+  domain,
+  timestamp,
+}) => {
+  const wcBuffer = Buffer.alloc(4);
+  wcBuffer.writeInt32BE(workChain);
+
+  const domainBuffer = Buffer.from(domain, 'utf8');
+  const domainLenBuffer = Buffer.alloc(4);
+  domainLenBuffer.writeUInt32BE(domainBuffer.length);
+
+  const tsBuffer = Buffer.alloc(8);
+  tsBuffer.writeBigUInt64BE(BigInt(timestamp));
+
+  const typePrefix = Buffer.from(type === 'text' ? 'txt' : 'bin');
+  const payloadBuffer = Buffer.from(
+    content,
+    type === 'text' ? 'utf8' : 'base64',
+  );
+  const payloadLenBuffer = Buffer.alloc(4);
+  payloadLenBuffer.writeUInt32BE(payloadBuffer.length);
+
+  const message = Buffer.concat([
+    Buffer.from([0xff, 0xff]),
+    Buffer.from('ton-connect/sign-data/'),
+    wcBuffer,
+    addressHash,
+    domainLenBuffer,
+    domainBuffer,
+    tsBuffer,
+    typePrefix,
+    payloadLenBuffer,
+    payloadBuffer,
+  ]);
+
+  return sha256_sync(message);
+};
+
+export const TonWalletConnectSignData = async ({
+  signTypeData,
+  privateKey,
+  domain,
+}) => {
   try {
+    const data = Array.isArray(signTypeData) ? signTypeData[0] : signTypeData;
     const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
-    let messageBytes;
-    if (signTypeData?.type === 'text') {
-      messageBytes = Buffer.from(signTypeData.text, 'utf8');
-    } else if (signTypeData?.cell) {
-      messageBytes = Cell.fromBase64(signTypeData.cell).hash();
+    const wallet = WalletContractV4.create({
+      publicKey: keyPair.publicKey,
+      workchain: 0,
+    });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const parsedDomain = getDomainFromUrl(domain);
+    let messageHash;
+    if (data?.type === 'text' || data?.type === 'binary') {
+      messageHash = createTextBinaryHash({
+        type: data.type,
+        content: data.type === 'text' ? data.text : data.bytes,
+        workChain: wallet.address.workChain,
+        addressHash: wallet.address.hash,
+        domain: parsedDomain,
+        timestamp,
+      });
     } else {
       throw new Error('Unsupported ton_signData type');
     }
-    const signature = sign(messageBytes, keyPair.secretKey);
+    const signature = sign(messageHash, keyPair.secretKey);
     return {
       signature: Buffer.from(signature).toString('base64'),
-      publicKey: Buffer.from(keyPair.publicKey).toString('hex'),
+      address: wallet.address.toString(),
+      timestamp,
+      domain: parsedDomain,
+      payload: data,
     };
   } catch (e) {
     console.error('Error in TonWalletConnectSignData', e);
@@ -96,6 +163,7 @@ export const tonWalletConnectTransaction = async (
   payload,
   privateKey,
   signTypeData,
+  domain,
 ) => {
   let tx = null;
   switch (method) {
@@ -103,7 +171,7 @@ export const tonWalletConnectTransaction = async (
       tx = await TonWalletConnectSendMessage({payload, privateKey});
       break;
     case TON_SIGN_DATA:
-      tx = await TonWalletConnectSignData({signTypeData, privateKey});
+      tx = await TonWalletConnectSignData({signTypeData, privateKey, domain});
       break;
     default:
       break;
