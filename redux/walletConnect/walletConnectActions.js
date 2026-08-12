@@ -1,5 +1,5 @@
 import {createAsyncThunk} from '@reduxjs/toolkit';
-import {etherWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/etherWalletConnect';
+import {etherWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/etherWalletConnect';
 import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletconnect';
 import {setWalletConnectTransactionSubmit} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {tronWalletConnectTransaction} from 'dok-wallet-blockchain-networks/service/walletConnect/tronWalletConnect';
