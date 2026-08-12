@@ -536,9 +536,9 @@ export const config = {
   THORCHAIN_API_URL: 'https://midgard.thorchain.network',
   THORCHAIN_SCAN_URL: 'https://viewblock.io/thorchain',
   TZKT_API_BASE_URL: IS_SANDBOX
-    ? 'https://api.ghostnet.tzkt.io'
+    ? 'https://api.shadownet.tzkt.io'
     : 'https://api.tzkt.io',
-  TEZOS_SCAN_URL: IS_SANDBOX ? 'https://ghostnet.tzkt.io' : 'https://tzkt.io',
+  TEZOS_SCAN_URL: IS_SANDBOX ? 'https://shadownet.tzkt.io' : 'https://tzkt.io',
   STAKE_WIZ_BASE_URL: 'https://api.stakewiz.com',
 
   COSMOS_SCAN_URL: 'https://www.mintscan.io',
