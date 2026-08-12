@@ -120,7 +120,9 @@ export const createWalletConnectTransaction = createAsyncThunk(
           privateKey,
           signTypeData,
         );
-      } else if (chain_name === 'bitcoin') {
+      } else if (
+        ['bitcoin', 'bitcoin_segwit', 'bitcoin_legacy'].includes(chain_name)
+      ) {
         // bip122 methods (getAccountAddresses, signMessage, signPsbt,
         // sendTransfer) are not chain-prefixed, so dispatch on chain_name.
         tx = await bitcoinWalletConnectTransaction(
@@ -128,6 +130,7 @@ export const createWalletConnectTransaction = createAsyncThunk(
           transactionData,
           privateKey,
           signTypeData,
+          chain_name,
         );
       } else {
         tx = await etherWalletConnectTransaction(

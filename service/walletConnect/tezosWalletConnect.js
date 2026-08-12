@@ -12,9 +12,6 @@ const buildTransferParams = op => ({
   to: op.destination,
   amount: Number(op.amount),
   mutez: true,
-  ...(op.fee != null && {fee: Number(op.fee)}),
-  ...(op.storage_limit != null && {storageLimit: Number(op.storage_limit)}),
-  ...(op.gas_limit != null && {gasLimit: Number(op.gas_limit)}),
 });
 
 export const TezosWalletConnectGetAccounts = async ({privateKey}) => {
