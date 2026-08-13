@@ -35,6 +35,20 @@ const getDerivePathByChain = chain_name => {
 
 const firstOf = data => (Array.isArray(data) ? data[0] : data);
 
+// BIP-137 header flag: 39-42 signals a native segwit (bech32) P2WPKH
+// address, 35-38 signals P2SH-P2WPKH (segwit), 31-34 signals compressed
+// P2PKH (legacy — ECPair keys here are always compressed) — must match
+// this wallet's address type.
+const getBip137FlagBase = chain_name => {
+  if (chain_name === 'bitcoin_segwit') {
+    return 35;
+  }
+  if (chain_name === 'bitcoin_legacy') {
+    return 31;
+  }
+  return 39;
+};
+
 const getKeyPairAndAddress = (privateKey, chain_name) => {
   const ECPair = ECPairFactory(ecc);
   const network = getNetwork();
@@ -102,16 +116,7 @@ export const BitcoinWalletConnectSignMessage = async ({
       hash,
       keyPair.privateKey,
     );
-    // BIP-137 header flag: 39-42 signals a native segwit (bech32) P2WPKH
-    // address, 35-38 signals P2SH-P2WPKH (segwit), 31-34 signals compressed
-    // P2PKH (legacy — ECPair keys here are always compressed) — must match
-    // this wallet's address type.
-    const flagBase =
-      chain_name === 'bitcoin_segwit'
-        ? 35
-        : chain_name === 'bitcoin_legacy'
-        ? 31
-        : 39;
+    const flagBase = getBip137FlagBase(chain_name);
     const flag = flagBase + recoveryId;
     const compactSig = Buffer.concat([
       Buffer.from([flag]),

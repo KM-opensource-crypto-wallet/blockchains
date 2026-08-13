@@ -28,7 +28,7 @@ function extractTxJson(data) {
 function hexToBytes(hex) {
   const bytes = [];
   for (let i = 0; i < hex.length; i += 2) {
-    bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    bytes.push(Number.parseInt(hex.slice(i, i + 2), 16));
   }
   return bytes;
 }
