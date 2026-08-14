@@ -448,6 +448,7 @@ const feesOptionsChains = [
   'litecoin',
   'dogecoin',
   'bitcoin_cash',
+  'bitcoin_taproot',
 ];
 
 export const isFeesOptionChain = chain_name =>
@@ -842,6 +843,10 @@ export const PrivateKeyList = [
   {
     label: 'Bitcoin Native Segwit',
     value: 'bitcoin',
+  },
+  {
+    label: 'Bitcoin Taproot',
+    value: 'bitcoin_taproot',
   },
   {
     label: 'Cosmos',

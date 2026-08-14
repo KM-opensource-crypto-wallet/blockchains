@@ -391,7 +391,7 @@ export const config = {
     : 'https://mempool.space/api',
   BITCOIN_NETWORK_STRING: IS_SANDBOX
     ? bitcoin?.networks?.testnet
-    : bitcoin?.networks?.mainnet,
+    : bitcoin?.networks?.bitcoin,
   LITECOIN_NETWORK_STRING: {
     messagePrefix: '\x18Litecoin Signed Message:\n',
     bech32: 'ltc',
