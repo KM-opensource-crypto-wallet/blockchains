@@ -143,7 +143,7 @@ const supportedChain = [
   'bitcoin_cash',
   'cardano',
   'filecoin',
-  // 'bitcoin_taproot'
+  'bitcoin_taproot',
   'bitcoin_lightning',
 ];
 
@@ -307,7 +307,7 @@ const BITCOIN_CHAINS = [
   'bitcoin',
   'bitcoin_segwit',
   'bitcoin_legacy',
-  // 'bitcoin_taproot',
+  'bitcoin_taproot',
 ];
 
 export const isBitcoinChain = chain_name => BITCOIN_CHAINS.includes(chain_name);
@@ -389,6 +389,7 @@ const DERIVE_ADDRESS_SUPPORT_CHAIN = [
   'bitcoin',
   'bitcoin_segwit',
   'bitcoin_legacy',
+  'bitcoin_taproot',
 ];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
@@ -448,6 +449,7 @@ const feesOptionsChains = [
   'litecoin',
   'dogecoin',
   'bitcoin_cash',
+  'bitcoin_taproot',
 ];
 
 export const isFeesOptionChain = chain_name =>
@@ -842,6 +844,10 @@ export const PrivateKeyList = [
   {
     label: 'Bitcoin Native Segwit',
     value: 'bitcoin',
+  },
+  {
+    label: 'Bitcoin Taproot',
+    value: 'bitcoin_taproot',
   },
   {
     label: 'Cosmos',

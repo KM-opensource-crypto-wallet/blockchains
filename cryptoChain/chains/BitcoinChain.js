@@ -98,6 +98,11 @@ export const BitcoinChain = () => {
           pubkey: keyPair.publicKey,
           network: customNetwork,
         });
+      } else if (chain_name === 'bitcoin_taproot') {
+        data = bitcoin.payments.p2tr({
+          internalPubkey: toXOnly(keyPair.publicKey),
+          network: customNetwork,
+        });
       }
       return {
         address: data.address,
@@ -465,6 +470,32 @@ export const BitcoinChain = () => {
   };
 };
 
+const tapTweakHash = pubKey => bitcoin.crypto.taggedHash('TapTweak', pubKey);
+
+// P2TR key-path spends must be signed with a tap-tweaked private key (BIP341),
+// not the raw derived key.
+const tweakSigner = (signer, network) => {
+  let privateKey = signer.privateKey;
+  if (!privateKey) {
+    throw new Error('Private key is required for tweaking signer!');
+  }
+  if (signer.publicKey[0] === 3) {
+    privateKey = ecc.privateNegate(privateKey);
+  }
+  const tweakedPrivateKey = ecc.privateAdd(
+    privateKey,
+    tapTweakHash(toXOnly(signer.publicKey)),
+  );
+  if (!tweakedPrivateKey) {
+    throw new Error('Invalid tweaked private key!');
+  }
+  return ECPairFactory(ecc).fromPrivateKey(
+    // eslint-disable-next-line no-undef
+    Buffer.from(tweakedPrivateKey),
+    {network},
+  );
+};
+
 const buildUTXO = async ({
   fromAddress,
   amount,
@@ -628,9 +659,12 @@ const buildUTXO = async ({
             }),
           }).redeem.output;
         }
-        // if (chain_name === 'bitcoin_taproot') {
-        //   tempInputData.tapInternalKey = childNodeXOnlyPubkey;
-        // }
+        if (chain_name === 'bitcoin_taproot') {
+          const derivePath = utxo?.derivePath;
+          tempInputData.tapInternalKey = toXOnly(
+            keyPairs[derivePath]?.publicKey,
+          );
+        }
         tx.addInput(tempInputData);
       } else if (utxo.txhash) {
         const tempInputData = {
@@ -673,10 +707,16 @@ const buildUTXO = async ({
     // Sign inputs
     for (let i = 0; i < inputData.length; i++) {
       const derivePath = inputData[i].derivePath;
-      await tx.signInput(i, keyPairs[derivePath]);
+      const signer =
+        chain_name === 'bitcoin_taproot'
+          ? tweakSigner(keyPairs[derivePath], customNetwork)
+          : keyPairs[derivePath];
+      await tx.signInput(i, signer);
     }
     const validator = (pubkey, msghash, signature) =>
-      ECPair.fromPublicKey(pubkey).verify(msghash, signature);
+      pubkey.length === 32
+        ? ecc.verifySchnorr(msghash, pubkey, signature)
+        : ECPair.fromPublicKey(pubkey).verify(msghash, signature);
     const isvalidate = tx.validateSignaturesOfAllInputs(validator);
     if (!isvalidate) {
       throw new Error('Error in validation of bitcoin transaction');
@@ -721,6 +761,8 @@ const getDeriveAddressByChain = chain_name => {
     ? "m/84'/0'/0'/0/0"
     : chain_name === 'bitcoin_segwit'
     ? "m/49'/0'/0'/0/0"
+    : chain_name === 'bitcoin_taproot'
+    ? "m/86'/0'/0'/0/0"
     : "m/44'/0'/0'/0/0";
 };
 
@@ -749,6 +791,8 @@ const getNetworkByChainName = chain_name => {
     ? Object.assign({}, bitcoin.networks.bitcoin, {
         bip32: mainNetworkKeys.bitcoin_segwit,
       })
+    : chain_name === 'bitcoin_taproot'
+    ? config.BITCOIN_NETWORK_STRING
     : '';
 };
 
