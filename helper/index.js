@@ -389,6 +389,7 @@ const DERIVE_ADDRESS_SUPPORT_CHAIN = [
   'bitcoin',
   'bitcoin_segwit',
   'bitcoin_legacy',
+  'bitcoin_taproot',
 ];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
