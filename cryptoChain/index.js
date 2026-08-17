@@ -359,17 +359,32 @@ const getBaseCoin = async (chain, wallet, coin) => {
       await chain.checkDelegation?.({address: wallet.address}),
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
-    swap: async payload =>
-      await chain.swap({
+    // A DEX quote must never fall through to a plain transfer — there is no
+    // real deposit address behind swapData — so a chain without swap support
+    // fails loudly instead of a bare "not a function" TypeError.
+    swap: async payload => {
+      if (typeof chain.swap !== 'function') {
+        throw new Error(
+          `Swaps are not supported on ${coin?.chain_name || 'this chain'} yet`,
+        );
+      }
+      return await chain.swap({
         from: wallet.address,
         privateKey: wallet.privateKey,
         ...payload,
-      }),
-    getEstimateSwapFee: async payload =>
-      await chain.getEstimateSwapFee({
+      });
+    },
+    getEstimateSwapFee: async payload => {
+      if (typeof chain.getEstimateSwapFee !== 'function') {
+        throw new Error(
+          `Swaps are not supported on ${coin?.chain_name || 'this chain'} yet`,
+        );
+      }
+      return await chain.getEstimateSwapFee({
         fromAddress: wallet.address,
         ...payload,
-      }),
+      });
+    },
     checkAndApproveSwap: async payload =>
       await chain.checkAndApproveSwap({
         from: wallet.address,
@@ -602,19 +617,34 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.checkDelegation?.({address: wallet.address}),
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
-    swap: async payload =>
-      await chain.swap({
+    // Same guard as the base-coin wrapper: a DEX quote must never degrade
+    // into a plain transfer on a chain without swap support.
+    swap: async payload => {
+      if (typeof chain.swap !== 'function') {
+        throw new Error(
+          `Swaps are not supported on ${token?.chain_name || 'this chain'} yet`,
+        );
+      }
+      return await chain.swap({
         from: wallet.address,
         privateKey: wallet.privateKey,
         ...payload,
-      }),
-    getEstimateSwapFee: async payload =>
-      await chain.getEstimateSwapFee({
+      });
+    },
+    getEstimateSwapFee: async payload => {
+      if (typeof chain.getEstimateSwapFee !== 'function') {
+        throw new Error(
+          `Swaps are not supported on ${token?.chain_name || 'this chain'} yet`,
+        );
+      }
+      return await chain.getEstimateSwapFee({
         fromAddress: wallet.address,
         contractAddress: token.contractAddress,
         decimal: token.decimal,
+        privateKey: wallet.privateKey,
         ...payload,
-      }),
+      });
+    },
     checkAndApproveSwap: async payload =>
       await chain.checkAndApproveSwap({
         from: wallet.address,
@@ -637,6 +667,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.getEstimateFeForAllowanceApprove({
         from: wallet.address,
         contractAddress: token.contractAddress,
+        privateKey: wallet.privateKey,
         ...payload,
       }),
     readPermitAllowance: async payload =>
@@ -648,6 +679,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     getEstimateFeeForPermitApprove: async payload =>
       await chain.getEstimateFeeForPermitApprove({
         from: wallet.address,
+        privateKey: wallet.privateKey,
         ...payload,
       }),
     approvePermit2: async payload =>

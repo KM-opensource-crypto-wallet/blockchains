@@ -26,9 +26,11 @@ import {
   isEip1559NotSupported,
   isEip7702SupportedChain,
   isLayer2Chain,
+  isSwapBlockingError,
   isValidEVMTransactionHash,
   parseBalance,
   sleep,
+  SWAP_QUOTE_EXPIRED_ERROR,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
@@ -596,6 +598,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return await cb(retryEvmProvider);
       } catch (e) {
         console.error('Error for EVM rpc', allRpcUrls[i], 'Errors:', e);
+        if (isSwapBlockingError(e?.message)) {
+          // A swap simulation revert is deterministic — retrying it on the
+          // next RPC only repeats the estimateGas call, and a later RPC's
+          // transport error would replace this message, breaking the
+          // toast/return-to-Exchange handling keyed on it in sendFunds.
+          throw e;
+        }
         if (i === allRpcUrls.length - 1) {
           const now = Date.now();
           if (
@@ -1195,10 +1204,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             });
             estimateGas = (BigInt(estimateGas) * 140n) / 100n;
           } catch (estimateError) {
-            const swapGasLimit = swapData.gasLimit || swapData.gas;
-            estimateGas = swapGasLimit
-              ? (BigInt(swapGasLimit) * 140n) / 100n
-              : 300000n;
+            // This only runs after approvals are settled (calculateExchange
+            // defers the swap estimate for approval-flow quotes), so a revert
+            // means the quote itself is bad or expired — never price the fee
+            // off a fallback gas limit that hides it.
+            console.error('Swap fee simulation reverted', estimateError);
+            throw new Error(SWAP_QUOTE_EXPIRED_ERROR);
           }
 
           return await calculateTotalFees({
@@ -2897,14 +2908,28 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           let txData;
 
           if (swapData) {
-            if (typeof finalEstimateGas !== 'bigint') {
-              finalEstimateGas = await evmProvider.estimateGas({
+            // Always re-estimate at broadcast time: the stored estimate is at
+            // least a poll interval old, and an under-provisioned gas limit
+            // ends as on-chain OUT_OF_GAS (seen at 98.5% of the limit on
+            // multi-leg routes). The simulation doubles as the expired-quote
+            // gate below.
+            let freshEstimate;
+            try {
+              freshEstimate = await evmProvider.estimateGas({
                 from: from,
                 to: swapData.to,
                 value: swapData.value,
                 data: swapData.data,
               });
+            } catch (estimateError) {
+              // Simulation reverts ⇒ the on-chain tx would revert too and
+              // burn the fee. Most common cause: the quote expired while the
+              // approval was confirming.
+              throw new Error(SWAP_QUOTE_EXPIRED_ERROR);
             }
+            // The send-time estimate is authoritative — the stored one can be
+            // up to a poll interval stale.
+            finalEstimateGas = (BigInt(freshEstimate) * 140n) / 100n;
             finalTo = swapData.to || to;
             txValue = swapData.value;
             txData = swapData.data;
@@ -2959,6 +2984,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return await createSendTransaction(new ethers.Wallet(privateKey), tx);
       } catch (e) {
         console.error('Error in swap transaction', e);
+        if (isSwapBlockingError(e?.message)) {
+          // ethers-decode-error would rewrite this message and sendFunds
+          // matches on it verbatim to route the user back to Exchange.
+          throw e;
+        }
         const {reason} = await errorDecoder.decode(e);
         throw new Error(reason);
       }

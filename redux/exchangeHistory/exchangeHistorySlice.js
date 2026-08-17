@@ -20,6 +20,7 @@ const initialState = {
   error: null,
   currentTransaction: null,
   detailLoading: false,
+  detailRefreshing: false,
   detailError: null,
 };
 
@@ -88,10 +89,13 @@ export const fetchMoreExchangeTransactions = createAsyncThunk(
 /**
  * Detail fetch; the backend refreshes a non-terminal transaction from its
  * provider before responding, so this doubles as the polling call.
+ * Pass {id, refresh: true} for pull-to-refresh so the RefreshControl
+ * spinner stays on until this settles; the background poll omits it and
+ * shows no spinner at all.
  */
 export const fetchExchangeTransactionDetails = createAsyncThunk(
   'exchangeHistory/fetchExchangeTransactionDetails',
-  async (id, {getState, rejectWithValue}) => {
+  async ({id}, {getState, rejectWithValue}) => {
     try {
       const walletClientId = selectCurrentWalletClientId(getState());
       if (!walletClientId) {
@@ -158,15 +162,21 @@ export const exchangeHistorySlice = createSlice({
         state.loadingMore = false;
       })
       .addCase(fetchExchangeTransactionDetails.pending, (state, action) => {
-        // Keep showing the current data during a poll of the same tx.
-        if (state.currentTransaction?._id !== action.meta.arg) {
+        const {id, refresh} = action.meta.arg || {};
+        // Keep showing the current data during a refetch of the same tx;
+        // a pull-to-refresh keeps the RefreshControl spinner going, the
+        // background poll stays invisible.
+        if (state.currentTransaction?._id !== id) {
           state.currentTransaction = null;
           state.detailLoading = true;
+        } else if (refresh) {
+          state.detailRefreshing = true;
         }
         state.detailError = null;
       })
       .addCase(fetchExchangeTransactionDetails.fulfilled, (state, action) => {
         state.detailLoading = false;
+        state.detailRefreshing = false;
         if (action.payload) {
           state.currentTransaction = action.payload;
           // Keep the list row in sync with the refreshed status.
@@ -180,6 +190,7 @@ export const exchangeHistorySlice = createSlice({
       })
       .addCase(fetchExchangeTransactionDetails.rejected, (state, action) => {
         state.detailLoading = false;
+        state.detailRefreshing = false;
         state.detailError = action.payload || 'Something went wrong';
       });
   },

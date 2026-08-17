@@ -15,7 +15,23 @@ export const getExchangePermitAllowanceLoading = state =>
 export const getExchangePermitApproveLoading = state =>
   state.exchange.permitApproveLoading;
 
+export const selectExchangeFromAsset = state =>
+  state.exchange.selectedFromAsset;
+export const selectExchangeFromWallet = state =>
+  state.exchange.selectedFromWallet;
+export const selectExchangeToAsset = state => state.exchange.selectedToAsset;
+export const selectExchangeAmountFrom = state => state.exchange.amountFrom;
+export const selectExchangeAmountTo = state => state.exchange.amountTo;
+export const selectExchangeLoading = state => state.exchange.isLoading;
+export const selectExchangeToName = state => state.exchange.exchangeToName;
+export const selectExchangeToAddress = state =>
+  state.exchange.exchangeToAddress;
+export const selectSelectedExchangeChain = state =>
+  state.exchange.selectedExchangeChain;
+
 export const selectIsQuoteFetching = state => state.exchange.isQuoteFetching;
+export const selectFromBalanceLoading = state =>
+  state.exchange.fromBalanceLoading;
 export const selectQuoteError = state => state.exchange.quoteError;
 export const selectQuoteFetchedAt = state => state.exchange.quoteFetchedAt;
 
@@ -139,11 +155,6 @@ export const selectProviderRows = createSelector(
     }
     return [...usable, ...belowMin, ...rest];
   },
-);
-
-export const selectBestProviderRow = createSelector(
-  [selectProviderRows],
-  rows => rows.find(row => row.isBest) || null,
 );
 
 // Lowest known minimum across providers for the current pair; feeds the

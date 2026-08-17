@@ -7,12 +7,16 @@ import {
 import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {
   isEVMChain,
+  isSwapApprovalChain,
   isNameSupportChain,
   convertToSmallAmount,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {applyApproveGasPrice} from 'dok-wallet-blockchain-networks/helper/approveFees';
-import {buildExchangePairKey} from 'dok-wallet-blockchain-networks/helper/exchangeHelpers';
+import {
+  buildExchangePairKey,
+  collectFromAddresses,
+} from 'dok-wallet-blockchain-networks/helper/exchangeHelpers';
 import {showToast} from 'utils/toast';
 import {
   createExchange,
@@ -21,6 +25,7 @@ import {
 import BigNumber from 'bignumber.js';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {refreshCurrentCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {ethers} from 'ethers';
 
@@ -44,7 +49,6 @@ const initialState = {
   isLoading: false,
   success: false,
   selectedExchangeChain: null,
-  sliderValue: 0,
   fiatPay: '0',
   exchangeToAddress: '',
   exchangeToName: '',
@@ -74,6 +78,8 @@ const initialState = {
   permitAllowanceData: null,
   permitAllowanceLoading: false,
   permitApproveLoading: false,
+  // True while the selected from-asset's live balance is being fetched.
+  fromBalanceLoading: false,
 };
 
 // Client-side freshness for the per-pair minimums (the backend additionally
@@ -87,9 +93,10 @@ const buildQuoteBasePayload = (
 ) => ({
   coinFrom: selectedFromAsset?.symbol,
   coinTo: selectedToAsset?.symbol,
-  networkFrom: selectedFromAsset?.chain_symbol,
-  networkTo: selectedToAsset?.chain_symbol,
   rateType: 'fixed',
+  // Chain names are the only network identifiers sent — symbols are ambiguous
+  // (ethereum/arbitrum/base all use ETH); the backend maps chain_name to each
+  // provider's own network code.
   fromChainName: selectedFromAsset?.chain_name,
   toChainName: selectedToAsset?.chain_name,
   fromContractAddress: selectedFromAsset?.contractAddress,
@@ -99,7 +106,21 @@ const buildQuoteBasePayload = (
   fromDecimals: selectedFromAsset?.decimal,
   toDecimals: selectedToAsset?.decimal,
   fromAddress: selectedFromAsset?.address,
+  // BTC only: every funded derive address, so LI.FI can gather UTXOs across
+  // the HD wallet's change addresses instead of just the primary address.
+  // undefined for every other chain.
+  fromAddresses: collectFromAddresses(selectedFromAsset),
+  // DEX quotes bake the recipient into the calldata; quote for the real
+  // destination wallet so cross-VM routes price (and execute) correctly. A
+  // custom address is only validated at submit — the backend re-quotes there
+  // if the recipient changed.
+  withdrawalAddress: selectedToAsset?.address,
   slippage: slippage ? Number(slippage) : undefined,
+  // This app version can attach OP_RETURN memos to bitcoin sends — the
+  // backend only offers BTC-origin routes that need a memo (LI.FI's shared
+  // vault) to payloads carrying this flag, so older apps never receive a
+  // deposit they would execute memo-less.
+  supportsBtcMemo: true,
 });
 
 // Fetches every provider's minimum (and a reference quote at that minimum)
@@ -171,6 +192,44 @@ export const fetchExchangeQuotes = createAsyncThunk(
   },
 );
 
+// The state every allowance/approve/estimate thunk starts from. One place
+// instead of six copies of the same destructuring preamble.
+const getExchangeContext = state => {
+  const {selectedFromAsset, selectedFromWallet, amountFrom} =
+    getExchange(state);
+  const transferData = getTransferData(state);
+  return {
+    selectedFromAsset,
+    selectedFromWallet,
+    amountFrom,
+    transferData,
+    swapData: transferData?.swapData,
+    decimals: selectedFromAsset?.decimal || 18,
+  };
+};
+
+const toAmountInWei = (amountFrom, decimals) =>
+  BigInt(convertToSmallAmount(amountFrom.toString(), decimals));
+
+const getNativeCoinOrThrow = async (state, asset, wallet) => {
+  const nativeCoin = await getNativeCoin(state, asset, wallet);
+  if (!nativeCoin) {
+    throw new Error('Failed to get native coin');
+  }
+  return nativeCoin;
+};
+
+// The fee fields both approval sheets merge into their sheet data after an
+// approve-fee estimation. BigInts stringified for the redux store.
+const buildApproveFeeFields = result => ({
+  gasFee: result.gasFee?.toString() ?? null,
+  maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
+  feesOptions: result.feesOptions ?? null,
+  estimateGas: result.estimateGas?.toString() ?? null,
+  nonce: result.nonce ?? null,
+  transactionFee: result.fee,
+});
+
 export const calculateExchange = createAsyncThunk(
   'exchange/calculateExchange',
   async (_, thunkAPI) => {
@@ -219,26 +278,17 @@ export const calculateExchange = createAsyncThunk(
         }
       }
       const payload = {
-        coinFrom: selectedFromAsset?.symbol,
-        coinTo: selectedToAsset?.symbol,
-        networkFrom: selectedFromAsset?.chain_symbol,
-        networkTo: selectedToAsset?.chain_symbol,
-        fromChainName: selectedFromAsset?.chain_name,
-        toChainName: selectedToAsset?.chain_name,
-        fromContractAddress: selectedFromAsset?.contractAddress,
-        toContractAddress: selectedToAsset?.contractAddress,
-        fromDecimals: selectedFromAsset?.decimal,
-        toDecimals: selectedToAsset?.decimal,
+        ...buildQuoteBasePayload(selectedFromAsset, selectedToAsset, slippage),
         // String, not Number: the DEX adapters convert human-decimal strings
         // to smallest units and a Number can drop into exponent notation.
         amount: amountFrom?.toString(),
-        rateType: 'fixed',
+        // Base payload quotes for the destination wallet; the create must
+        // honour a validated custom address instead.
         withdrawalAddress: finalCustomAddress || selectedToAsset?.address,
         validName,
         refundAddress: selectedFromAsset?.address,
         extraData,
         providerName: selectedExchangeChain?.providerName,
-        slippage: slippage ? Number(slippage) : undefined,
         // Ties the backend history record to this wallet's swap history.
         walletClientId: selectedFromWallet?.clientId,
       };
@@ -266,20 +316,17 @@ export const calculateExchange = createAsyncThunk(
               currentCoin: selectedFromAsset,
               amount: data?.amount + '',
               isSendFunds: false,
+              // Freshness window for the created transaction, enforced at
+              // every commit point on the Transfer screen and in sendFunds.
+              // Providers set their own TTL; absent (CEX deposit addresses)
+              // means no client-side expiry.
+              quoteCreatedAt: Date.now(),
+              quoteTtlSeconds: data?.quoteTtlSeconds ?? null,
             }),
           );
-          await dispatch(
-            calculateEstimateFee({
-              isFetchNonce: true,
-              fromAddress: selectedFromAsset?.address,
-              toAddress: data?.depositAddress,
-              amount: data?.amount + '',
-              contractAddress: selectedFromAsset?.contractAddress,
-              selectedWallet: selectedFromWallet,
-              selectedCoin: selectedFromAsset,
-              isExchange: true,
-            }),
-          ).unwrap();
+          // No fee estimate here: estimateExchangeFee is the single owner,
+          // fired (not awaited) by the Exchange screen when it navigates to
+          // Transfer — after any allowance/permit steps have settled.
         }
         dispatch(setExchangeSuccess(true));
         // Returned so callers can branch on this quote rather than on a
@@ -299,8 +346,95 @@ export const calculateExchange = createAsyncThunk(
           message: 'Invalid custom address',
         });
       }
-      return thunkAPI.rejectWithValue(e?.message);
+      // The backend forwards the provider's rejection reason (e.g. Velora
+      // refusing a route its simulation says will revert) in the response
+      // body; the axios message is just "Request failed with status code N".
+      return thunkAPI.rejectWithValue(e?.response?.data?.message || e?.message);
     }
+  },
+);
+
+// The SINGLE owner of the exchange fee estimate. The Exchange screen fires
+// it (without awaiting) right before navigating to Transfer — after any
+// allowance/permit steps settled, so the router simulation can succeed and
+// the nonce is fetched fresh after approve txs consumed one. Its first
+// synchronous action sets currentTransfer loading, so Transfer mounts in
+// the loading state. Rejects on swap-blocking errors (expired quote) so
+// awaiting callers, like the Transfer poll, can surface them.
+export const estimateExchangeFee = createAsyncThunk(
+  'exchange/estimateExchangeFee',
+  async (_, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    const {selectedFromAsset, selectedFromWallet, amountFrom, transferData} =
+      getExchangeContext(thunkAPI.getState());
+    return await dispatch(
+      calculateEstimateFee({
+        isFetchNonce: true,
+        fromAddress: selectedFromAsset?.address,
+        toAddress: transferData?.toAddress,
+        amount: amountFrom + '',
+        contractAddress: selectedFromAsset?.contractAddress,
+        selectedWallet: selectedFromWallet,
+        selectedCoin: selectedFromAsset,
+        isExchange: true,
+        // Bitcoin OP_RETURN memos add an output to the tx, so the fee
+        // estimate must include it.
+        memo: transferData?.memo || undefined,
+      }),
+    ).unwrap();
+  },
+);
+
+// Fetches the live balance of the selected from-asset (and its gas coin —
+// refreshCurrentCoin refreshes both) and re-syncs the exchange snapshot from
+// the result. selectedFromAsset is a detached copy of the wallet coin, so
+// re-copying it from the store is not enough — the chain must be queried.
+// Fail-open: on any error the last-known balance stays displayed.
+export const refreshExchangeFromBalance = createAsyncThunk(
+  'exchange/refreshExchangeFromBalance',
+  async (_, thunkAPI) => {
+    const dispatch = thunkAPI.dispatch;
+    try {
+      dispatch(setExchangeFields({fromBalanceLoading: true}));
+      const {selectedFromAsset, selectedFromWallet} = getExchangeContext(
+        thunkAPI.getState(),
+      );
+      const result = await dispatch(
+        refreshCurrentCoin({
+          currentCoin: selectedFromAsset,
+          currentWallet: selectedFromWallet,
+        }),
+      ).unwrap();
+      const updatedCoin = result?.updatedCurrentCoin;
+      // Staleness guard: drop the result if the user switched coins while
+      // the fetch was in flight.
+      const {selectedFromAsset: latestFromAsset} = getExchangeContext(
+        thunkAPI.getState(),
+      );
+      if (updatedCoin && latestFromAsset?._id === updatedCoin?._id) {
+        dispatch(
+          setExchangeFields({
+            selectedFromAsset: updatedCoin,
+            fromBalanceLoading: false,
+          }),
+        );
+        return updatedCoin;
+      }
+      dispatch(setExchangeFields({fromBalanceLoading: false}));
+      return null;
+    } catch (error) {
+      console.error('Error refreshing exchange from-balance', error);
+      dispatch(setExchangeFields({fromBalanceLoading: false}));
+      return null;
+    }
+  },
+  {
+    condition: (_, {getState}) => {
+      const exchange = getExchange(getState());
+      return (
+        Boolean(exchange?.selectedFromAsset) && !exchange?.fromBalanceLoading
+      );
+    },
   },
 );
 
@@ -311,13 +445,15 @@ export const fetchExchangeAllowance = createAsyncThunk(
     try {
       dispatch(setExchangeFields({allowanceLoading: true}));
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const swapData = transferData?.swapData;
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
       const {spender} = swapData || {};
-      const {address, contractAddress, decimal} = selectedFromAsset;
-      const decimals = decimal || 18;
+      const {address, contractAddress} = selectedFromAsset;
       // No spender means the provider gave a deposit address rather than swap
       // calldata, so this is a plain transfer with nothing to approve.
       if (!spender) {
@@ -326,17 +462,12 @@ export const fetchExchangeAllowance = createAsyncThunk(
         );
         return {isApproved: true};
       }
-      const amountInWei = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
-      const nativeCoin = await getNativeCoin(
+      const amountInWei = toAmountInWei(amountFrom, decimals);
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
       // This reads the plain ERC20 allowance for `spender`. The router-level
       // (Permit2) allowance is a separate concern handled by
       // fetchExchangePermitAllowance / readPermitAllowance.
@@ -377,47 +508,39 @@ export const fetchExchangeApproveEstimationFee = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const spenderAddress = transferData?.swapData?.spender;
-      const decimals = selectedFromAsset?.decimal || 18;
-      const amountInWei = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
+      const amountInWei = toAmountInWei(amountFrom, decimals);
       const allowanceData = currentState?.exchange?.allowanceData;
       const allowance = BigInt(
         convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) ||
           '0',
       );
-      const nativeCoin = await getNativeCoin(
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
       const result = await nativeCoin.getEstimateFeForAllowanceApprove({
         from: selectedFromAsset?.address,
         contractAddress: selectedFromAsset?.contractAddress,
-        spenderAddress: spenderAddress,
+        spenderAddress: swapData?.spender,
         amountInWei,
         feesType: payload?.feesType,
         nonce: payload?.nonce,
         allowance,
         needsReset: allowanceData?.needsReset,
       });
-      const finalAllowanceData = {
-        ...allowanceData,
-        gasFee: result.gasFee?.toString() ?? null,
-        maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
-        feesOptions: result.feesOptions ?? null,
-        estimateGas: result.estimateGas?.toString() ?? null,
-        nonce: result.nonce ?? null,
-        transactionFee: result.fee,
-      };
-      dispatch(setExchangeFields({allowanceData: finalAllowanceData}));
+      dispatch(
+        setExchangeFields({
+          allowanceData: {...allowanceData, ...buildApproveFeeFields(result)},
+        }),
+      );
     } catch (error) {
       console.error('Error in fetchExchangeApproveEstimationFee', error);
       return thunkAPI.rejectWithValue(error?.message);
@@ -432,15 +555,17 @@ export const approveSwapAllowance = createAsyncThunk(
     try {
       dispatch(setExchangeFields({approveLoading: true}));
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const swapData = transferData?.swapData;
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
       const {spender} = swapData || {};
-      const {contractAddress, decimal, chain_name} = selectedFromAsset;
+      const {contractAddress, chain_name} = selectedFromAsset;
       const {type, nonce, estimateGas, gasFee, maxPriorityFeePerGas, feesType} =
         payload;
-      const decimals = decimal || 18;
       const allowanceData = currentState?.exchange?.allowanceData;
       const {needsReset, allowanceFormatted} = allowanceData || {};
       if (!spender) {
@@ -449,24 +574,21 @@ export const approveSwapAllowance = createAsyncThunk(
       const allowance = BigInt(
         convertToSmallAmount(allowanceFormatted, decimals) || '0',
       );
-      if (!isEVMChain(chain_name)) {
-        throw new Error('approveSwapAllowance only supports EVM chains');
+      if (!isSwapApprovalChain(chain_name)) {
+        throw new Error(
+          `Swap approvals are not supported on ${chain_name || 'this chain'}`,
+        );
       }
-      const nativeCoin = await getNativeCoin(
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
-
-      const amountInWei1 = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
 
       const amountInWei =
-        type === 'unlimited' ? ethers.MaxUint256 : amountInWei1;
+        type === 'unlimited'
+          ? ethers.MaxUint256
+          : toAmountInWei(amountFrom, decimals);
 
       const result = await nativeCoin.approve({
         spenderAddress: spender,
@@ -481,22 +603,9 @@ export const approveSwapAllowance = createAsyncThunk(
         needsReset,
       });
 
-      // The approve tx just consumed a nonce on-chain. Re-fetch the next
-      // nonce from the node (same as the staking flow does after its
-      // approve) instead of trusting the caller-computed nonce+1.
-      await dispatch(
-        calculateEstimateFee({
-          isFetchNonce: true,
-          fromAddress: selectedFromAsset?.address,
-          toAddress: transferData?.toAddress,
-          amount: amountFrom + '',
-          contractAddress,
-          selectedWallet: selectedFromWallet,
-          selectedCoin: selectedFromAsset,
-          isExchange: true,
-        }),
-      ).unwrap();
-
+      // No fee estimate here: estimateExchangeFee runs at navigation time
+      // (after all approval steps settle) with isFetchNonce, so the nonce
+      // this approve just consumed is re-fetched there.
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
     } catch (error) {
@@ -518,22 +627,19 @@ export const fetchExchangePermitAllowance = createAsyncThunk(
     try {
       dispatch(setExchangeFields({permitAllowanceLoading: true}));
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const swapData = transferData?.swapData;
-      const decimals = selectedFromAsset?.decimal || 18;
-      const amountInWei = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
-      const nativeCoin = await getNativeCoin(
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
+      const amountInWei = toAmountInWei(amountFrom, decimals);
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
       const result = await nativeCoin.readPermitAllowance({
         from: selectedFromAsset?.address,
         permitAbi: swapData?.permit_abi,
@@ -577,17 +683,17 @@ export const fetchExchangePermitApproveEstimationFee = createAsyncThunk(
     const dispatch = thunkAPI.dispatch;
     try {
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const swapData = transferData?.swapData;
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
       const {permit_abi, to, spender} = swapData;
-      const {address, contractAddress, decimal} = selectedFromAsset;
+      const {address, contractAddress} = selectedFromAsset;
       const {nonce, feesType} = payload;
-      const decimals = decimal || 18;
-      const amountInWei = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
+      const amountInWei = toAmountInWei(amountFrom, decimals);
       const permitAllowanceData = currentState?.exchange?.permitAllowanceData;
       const permit2Amount = BigInt(
         convertToSmallAmount(
@@ -595,14 +701,11 @@ export const fetchExchangePermitApproveEstimationFee = createAsyncThunk(
           decimals,
         ) || '0',
       );
-      const nativeCoin = await getNativeCoin(
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
       const result = await nativeCoin.getEstimateFeeForPermitApprove({
         from: address,
         contractAddress: contractAddress,
@@ -614,17 +717,13 @@ export const fetchExchangePermitApproveEstimationFee = createAsyncThunk(
         nonce: nonce,
         permit2Amount,
       });
-      const finalPermitAllowanceData = {
-        ...permitAllowanceData,
-        gasFee: result.gasFee?.toString() ?? null,
-        maxPriorityFeePerGas: result.maxPriorityFeePerGas?.toString() ?? null,
-        feesOptions: result.feesOptions ?? null,
-        estimateGas: result.estimateGas?.toString() ?? null,
-        nonce: result.nonce ?? null,
-        transactionFee: result.fee,
-      };
       dispatch(
-        setExchangeFields({permitAllowanceData: finalPermitAllowanceData}),
+        setExchangeFields({
+          permitAllowanceData: {
+            ...permitAllowanceData,
+            ...buildApproveFeeFields(result),
+          },
+        }),
       );
     } catch (error) {
       console.error('Error in fetchExchangePermitApproveEstimationFee', error);
@@ -640,34 +739,33 @@ export const approveExchangePermit2 = createAsyncThunk(
     try {
       dispatch(setExchangeFields({permitApproveLoading: true}));
       const currentState = thunkAPI.getState();
-      const {selectedFromAsset, selectedFromWallet, amountFrom} =
-        getExchange(currentState);
-      const transferData = getTransferData(currentState);
-      const swapData = transferData?.swapData;
+      const {
+        selectedFromAsset,
+        selectedFromWallet,
+        amountFrom,
+        swapData,
+        decimals,
+      } = getExchangeContext(currentState);
       const {permit_abi, to, spender} = swapData;
-      const {address, contractAddress, chain_name, decimal} = selectedFromAsset;
-      const decimals = decimal || 18;
+      const {address, contractAddress, chain_name} = selectedFromAsset;
       const {type, nonce, estimateGas, gasFee, maxPriorityFeePerGas, feesType} =
         payload;
       if (!isEVMChain(chain_name)) {
         throw new Error('approveExchangePermit2 only supports EVM chains');
       }
-      const nativeCoin = await getNativeCoin(
+      const nativeCoin = await getNativeCoinOrThrow(
         currentState,
         selectedFromAsset,
         selectedFromWallet,
       );
-      if (!nativeCoin) {
-        throw new Error('Failed to get native coin');
-      }
 
-      const amountInWei1 = BigInt(
-        convertToSmallAmount(amountFrom.toString(), decimals),
-      );
       // Manual approves the exact swap amount, matching the ERC20 path and what
       // the sheet promises the user. An exact-input swap pulls exactly the
       // quoted amount, so headroom here would only over-approve.
-      const amountInWei = type === 'unlimited' ? MAX_UINT160 : amountInWei1;
+      const amountInWei =
+        type === 'unlimited'
+          ? MAX_UINT160
+          : toAmountInWei(amountFrom, decimals);
 
       const result = await nativeCoin.approvePermit2({
         permitAbi: permit_abi,
@@ -683,22 +781,9 @@ export const approveExchangePermit2 = createAsyncThunk(
         feesType: feesType,
       });
 
-      // The permit2 approve tx just consumed a nonce on-chain. Re-fetch the
-      // next nonce from the node instead of trusting the caller-computed
-      // nonce+1, same as approveSwapAllowance above.
-      await dispatch(
-        calculateEstimateFee({
-          isFetchNonce: true,
-          fromAddress: address,
-          toAddress: transferData?.toAddress,
-          amount: amountFrom + '',
-          contractAddress,
-          selectedWallet: selectedFromWallet,
-          selectedCoin: selectedFromAsset,
-          isExchange: true,
-        }),
-      ).unwrap();
-
+      // No fee estimate here: estimateExchangeFee runs at navigation time
+      // (after all approval steps settle) with isFetchNonce, so the nonce
+      // this approve just consumed is re-fetched there.
       dispatch(setExchangeFields({permitApproveLoading: false}));
       return result;
     } catch (error) {
@@ -719,9 +804,6 @@ export const exchangeSlice = createSlice({
   reducers: {
     setExchangeFields(state, {payload}) {
       return {...state, ...payload};
-    },
-    resetExchangeFields() {
-      return initialState;
     },
     setExchangeLoading(state, {payload}) {
       state.isLoading = payload;
@@ -859,7 +941,6 @@ export const exchangeSlice = createSlice({
 });
 
 export const {
-  resetExchangeFields,
   setExchangeFields,
   setExchangeLoading,
   setExchangeSuccess,

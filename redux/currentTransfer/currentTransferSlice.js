@@ -20,6 +20,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {
   convertToSmallAmount,
+  isSwapBlockingError,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 
@@ -65,6 +66,11 @@ const initialState = {
     // Backend ExchangeTransaction _id for this swap; the app reports the
     // broadcast tx hash against it after sendFunds.
     exchangeHistoryId: null,
+    // Freshness window of the created exchange, from the provider adapter.
+    // null TTL (CEX deposit addresses) means no client-side expiry; when set,
+    // the Transfer screen and sendFunds block past quoteCreatedAt + TTL.
+    quoteCreatedAt: null,
+    quoteTtlSeconds: null,
   },
   pendingTransferData: {
     isLoading: false,
@@ -247,6 +253,14 @@ export const calculateEstimateFee = createAsyncThunk(
     } catch (e) {
       dispatch(setCurrentTransferSuccess(false));
       console.error('Error in calculateEstimateFee', e);
+      if (isSwapBlockingError(e?.message)) {
+        // Expired quote caught by the fee simulation (e.g. the Transfer
+        // screen's 10s poll while the user idles). Surface it on-screen and
+        // rethrow — unlike other estimate errors — so awaiting flows
+        // (estimateExchangeFee, the approval thunks) stop before Transfer.
+        dispatch(setCurrentTransferCustomError(e?.message));
+        throw e;
+      }
       if (e?.message?.startsWith('The')) {
         dispatch(setCurrentTransferCustomError(e?.message));
       }

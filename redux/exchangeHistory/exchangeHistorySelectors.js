@@ -20,5 +20,10 @@ export const selectCurrentExchangeTransaction = state =>
 export const selectExchangeDetailLoading = state =>
   state.exchangeHistory?.detailLoading;
 
+// Coerced: RefreshControl's `refreshing` prop requires a strict boolean,
+// and rehydrated state from before this flag existed leaves it undefined.
+export const selectExchangeDetailRefreshing = state =>
+  !!state.exchangeHistory?.detailRefreshing;
+
 export const selectExchangeDetailError = state =>
   state.exchangeHistory?.detailError;
