@@ -8,18 +8,31 @@ import axios from 'axios';
 import qs from 'qs';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
+  fetchRequest,
   getExplorerTxUrl,
   isValidStringWithValue,
 } from 'dok-wallet-blockchain-networks/helper';
 
 export const StellarChain = () => {
-  let stellarProvider;
-  try {
-    stellarProvider = new StellarSdk.Horizon.Server(getRPCUrl('stellar'));
-  } catch (e) {
-    console.error(`error creating StellarChain ${e}`);
-    throw e;
-  }
+  // Created on first SDK use so balance-only sessions never load stellar-sdk.
+  let stellarProviderInstance;
+  const stellarProvider = () => {
+    if (!stellarProviderInstance) {
+      try {
+        stellarProviderInstance = new StellarSdk.Horizon.Server(
+          getRPCUrl('stellar'),
+        );
+      } catch (e) {
+        console.error(`error creating StellarChain ${e}`);
+        throw e;
+      }
+    }
+    return stellarProviderInstance;
+  };
+
+  const fetchStellarApi = path =>
+    fetchRequest(`${getRPCUrl('stellar')}${path}`);
+
   return {
     isValidAddress: ({address}) => {
       return StrKey.isValidEd25519PublicKey(address);
@@ -47,7 +60,7 @@ export const StellarChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const account = await stellarProvider.loadAccount(address);
+        const account = await fetchStellarApi(`/accounts/${address}`);
         const balances = account.balances;
         const nativeBalance = balances.find(
           item => item.asset_type === 'native',
@@ -65,8 +78,8 @@ export const StellarChain = () => {
     },
     getEstimateFeeForToken: async ({toAddress, contractAddress, symbol}) => {
       try {
-        const receiver = await stellarProvider.loadAccount(toAddress);
-        const fee = await stellarProvider.fetchBaseFee();
+        const receiver = await stellarProvider().loadAccount(toAddress);
+        const fee = await stellarProvider().fetchBaseFee();
         const balances = receiver.balances;
         const assetData = balances.find(
           item =>
@@ -88,7 +101,7 @@ export const StellarChain = () => {
     },
     getEstimateFee: async () => {
       try {
-        const fee = await stellarProvider.fetchBaseFee();
+        const fee = await stellarProvider().fetchBaseFee();
         return {
           fee: new BigNumber(fee).dividedBy(10000000).toString(),
         };
@@ -99,15 +112,14 @@ export const StellarChain = () => {
     },
     getTransactions: async ({address}) => {
       try {
-        const transaction = await stellarProvider
-          .transactions()
-          .forAccount(address)
-          .limit(20)
-          .order('desc')
-          .call();
-        const records = transaction?.records;
+        const transaction = await fetchStellarApi(
+          `/accounts/${address}/transactions?limit=20&order=desc`,
+        );
+        const records = transaction?._embedded?.records;
         const allTransactionsOperations = records.map(item =>
-          stellarProvider.operations().forTransaction(item.id).call(),
+          fetchStellarApi(`/transactions/${item.id}/operations`).then(
+            resp => resp?._embedded,
+          ),
         );
         const allOperations = await Promise.all(allTransactionsOperations);
         if (Array.isArray(records)) {
@@ -141,7 +153,7 @@ export const StellarChain = () => {
               to: receiver,
               totalCourse: '0$',
               transactionType: 'regular',
-              blockNumber: item?.ledger_attr,
+              blockNumber: item?.ledger,
             };
           });
         }
@@ -154,18 +166,14 @@ export const StellarChain = () => {
     getTransaction: async ({txHash}) => {
       try {
         const [item, latestLedgerResp] = await Promise.all([
-          stellarProvider.transactions().transaction(txHash).call(),
-          stellarProvider
-            .ledgers()
-            .order('desc')
-            .limit(1)
-            .call()
+          fetchStellarApi(`/transactions/${txHash}`),
+          fetchStellarApi('/ledgers?order=desc&limit=1')
+            .then(resp => resp?._embedded)
             .catch(() => null),
         ]);
-        const operations = await stellarProvider
-          .operations()
-          .forTransaction(item.id)
-          .call();
+        const operations = (
+          await fetchStellarApi(`/transactions/${item.id}/operations`)
+        )?._embedded;
         const foundOperation = operations.records.find(operation => {
           const type = operation?.type;
           return type === 'create_account' || type === 'payment';
@@ -174,7 +182,7 @@ export const StellarChain = () => {
         const receiver = foundOperation?.to || foundOperation?.account;
         const amount =
           foundOperation?.amount || foundOperation?.starting_balance || '0';
-        const blockNumber = item?.ledger_attr ?? null;
+        const blockNumber = item?.ledger ?? null;
         const latestLedger = latestLedgerResp?.records?.[0]?.sequence ?? null;
         const confirmations =
           blockNumber !== null && latestLedger !== null
@@ -203,9 +211,9 @@ export const StellarChain = () => {
     },
     send: async ({to, from, amount, privateKey, memo}) => {
       try {
-        const fee = await stellarProvider.fetchBaseFee();
+        const fee = await stellarProvider().fetchBaseFee();
         const sourceKeypair = StellarSdk.Keypair.fromSecret(privateKey);
-        const sourceAccount = await stellarProvider.loadAccount(from);
+        const sourceAccount = await stellarProvider().loadAccount(from);
         const isExist = await StellarChain().checkUserExistOrNot(to);
         const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
           fee,
@@ -256,7 +264,7 @@ export const StellarChain = () => {
     },
     checkUserExistOrNot: async address => {
       try {
-        return await stellarProvider.loadAccount(address);
+        return await stellarProvider().loadAccount(address);
       } catch (e) {
         console.error('Error account not exist.So creating new account');
         return false;

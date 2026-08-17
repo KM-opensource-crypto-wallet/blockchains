@@ -9,6 +9,12 @@ const allRPCUrl = {
     mainnet: 'wss://xrplcluster.com',
     testnet: 'wss://s.altnet.rippletest.net:51233',
   },
+  // Same providers over HTTPS JSON-RPC — balance/transaction reads; the wss
+  // url above is only usable through the xrpl SDK's websocket client.
+  ripple_rest: {
+    mainnet: 'https://xrplcluster.com',
+    testnet: 'https://s.altnet.rippletest.net:51234',
+  },
   tezos: {
     mainnet: 'https://mainnet.tezos.ecadinfra.com',
     testnet: 'https://ghostnet.ecadinfra.com',
@@ -32,6 +38,14 @@ const allRPCUrl = {
   cosmos: {
     mainnet: 'https://cosmos-rpc.publicnode.com:443',
     testnet: 'https://cosmos-rpc.publicnode.com:443',
+  },
+  cosmos_rest: {
+    mainnet: 'https://cosmos-rest.publicnode.com',
+    testnet: 'https://cosmos-rest.publicnode.com',
+  },
+  aptos: {
+    mainnet: 'https://fullnode.mainnet.aptoslabs.com/v1',
+    testnet: 'https://fullnode.testnet.aptoslabs.com/v1',
   },
   polkadot: {
     mainnet: 'https://dot-rpc.stakeworld.io/assethub',

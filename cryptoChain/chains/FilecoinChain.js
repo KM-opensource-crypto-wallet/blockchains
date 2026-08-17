@@ -4,6 +4,7 @@ import BigNumber from 'bignumber.js';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
+  fetchRPCRequest,
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -28,6 +29,23 @@ export const FilecoinChain = chain_name => {
         const lotusClient = new LotusClient(connector);
         const wallet = new LotusWalletProvider(lotusClient);
         return await cb({wallet, lotusClient});
+      } catch (e) {
+        console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
+        if (i === allRpcUrls.length - 1) {
+          if (defaultResponse) {
+            return defaultResponse;
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
+  };
+
+  const rpcRequest = async (method, params, defaultResponse) => {
+    for (let i = 0; i < allRpcUrls.length; i++) {
+      try {
+        return await fetchRPCRequest(allRpcUrls[i], method, params);
       } catch (e) {
         console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
@@ -94,16 +112,14 @@ export const FilecoinChain = chain_name => {
         return null;
       }
     },
-    getBalance: async ({address}) =>
-      retryFunc(async ({wallet}) => {
-        try {
-          const balance = await wallet.getBalance(address);
-          return balance.toString();
-        } catch (e) {
-          console.error('Error in get balance from filecoin', e);
-          throw e;
-        }
-      }, '0'),
+    getBalance: async ({address}) => {
+      const balance = await rpcRequest(
+        'Filecoin.WalletBalance',
+        [address],
+        '0',
+      );
+      return balance?.toString() || '0';
+    },
     getEstimateFee: async ({toAddress, fromAddress, amount}) =>
       retryFunc(async ({wallet}) => {
         try {

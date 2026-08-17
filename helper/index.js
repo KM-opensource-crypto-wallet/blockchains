@@ -1,11 +1,5 @@
 import BigNumber from 'bignumber.js';
-import {
-  ethers,
-  formatUnits,
-  isHexString,
-  parseUnits,
-  toUtf8String,
-} from 'ethers';
+import {ethers, isHexString, parseUnits, toUtf8String} from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import {APP_VERSION} from 'utils/common';
@@ -16,6 +10,8 @@ import {
 } from 'dok-wallet-blockchain-networks/config/config';
 import bs58 from 'bs58';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import axios from 'axios';
 dayjs.extend(duration);
 
 export const getTokenLogoUrl = contractAddress => {
@@ -158,6 +154,20 @@ export function validateSupportedChain(chain_name) {
 
 export function generateUniqueKeyForChain(chainData) {
   return `${chainData?.chain_name?.toLowerCase()}_${chainData?.symbol?.toUpperCase()}`;
+}
+function formatUnits(value, decimals) {
+  let digits = BigInt(value).toString();
+  const sign = digits.startsWith('-') ? '-' : '';
+  if (sign) {
+    digits = digits.slice(1);
+  }
+  if (!decimals) {
+    return sign + digits;
+  }
+  digits = digits.padStart(decimals + 1, '0');
+  const whole = digits.slice(0, -decimals);
+  const fraction = digits.slice(-decimals).replace(/0+$/, '') || '0';
+  return `${sign}${whole}.${fraction}`;
 }
 
 export function parseBalance(tokenPrice, tokenDecimals) {
@@ -1457,6 +1467,43 @@ export function customFetchWithTimeout(url, options = {}) {
       clearTimeout(timeoutId);
       throw error;
     });
+}
+
+export async function fetchRequest(url, options) {
+  try {
+    const response = await axios.request({
+      url,
+      timeout: 20000, // Timeout duration in milliseconds (5 seconds)
+      ...options,
+    });
+    return response.data;
+  } catch (e) {
+    // Surface the provider's own error message instead of a bare status code
+    const body = e?.response?.data;
+    const detail =
+      body?.error?.message ||
+      body?.message ||
+      body?.detail ||
+      body?.title ||
+      body?.error ||
+      (typeof body === 'string' && body.trim().slice(0, 200));
+    if (detail) {
+      e.message = `${detail} (status ${e.response.status})`;
+    }
+    throw e;
+  }
+}
+
+export async function fetchRPCRequest(url, method, params) {
+  const data = await fetchRequest(url, {
+    method: 'post',
+    data: {jsonrpc: '2.0', id: 1, method, params},
+    adapter: rpcSessionAdapter,
+  });
+  if (data?.error) {
+    throw new Error(data.error?.message || 'RPC error');
+  }
+  return data?.result;
 }
 
 export const isNewerVersion = (v1, v2) => {

@@ -5,18 +5,39 @@ import {encodeForSigning} from 'ripple-binary-codec';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
+  fetchRequest,
   getExplorerTxUrl,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 
 export const RippleChain = () => {
-  let rippleProvider;
-  try {
-    rippleProvider = new Client(getRPCUrl('ripple'));
-  } catch (e) {
-    console.error(`error creating RippleChain ${e}`);
-    throw e;
-  }
+  // Created on first SDK use so merely resolving the chain never loads xrpl.
+  let rippleProviderInstance;
+  const rippleProvider = () => {
+    if (!rippleProviderInstance) {
+      try {
+        rippleProviderInstance = new Client(getRPCUrl('ripple'));
+      } catch (e) {
+        console.error(`error creating RippleChain ${e}`);
+        throw e;
+      }
+    }
+    return rippleProviderInstance;
+  };
+
+  // Balance and transaction reads go over plain HTTPS JSON-RPC (api v2, the
+  // same shape the SDK returns) so read-only sessions never load xrpl.
+  const rpcRequest = async (method, params) => {
+    const data = await fetchRequest(getRPCUrl('ripple_rest'), {
+      method: 'post',
+      data: {method, params: [{...params, api_version: 2}]},
+    });
+    if (data?.result?.error) {
+      throw new Error(data.result.error_message || data.result.error);
+    }
+    return data?.result;
+  };
+
   return {
     isValidAddress: ({address}) => {
       return !(
@@ -27,14 +48,13 @@ export const RippleChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        await rippleProvider.connect();
-        const balances = await rippleProvider.getBalances(address);
-        if (!balances[0]?.value) {
-          return '0';
-        }
-        return new BigNumber(balances[0].value)
-          .multipliedBy(new BigNumber(1000000))
-          .toString();
+        const result = await rpcRequest('account_info', {
+          account: address,
+          ledger_index: 'validated',
+        });
+        // account_data.Balance is already in drops (the SDK's getBalances
+        // returned decimal XRP, which is why it was multiplied by 1e6)
+        return result?.account_data?.Balance || '0';
       } catch (e) {
         console.error('error in get balance from ripple', e);
         return '0';
@@ -52,8 +72,8 @@ export const RippleChain = () => {
             `The account does not exist on the ripple so transaction must be greater than or equal to ${localMinimumBalance} XRP`,
           );
         }
-        await rippleProvider.connect();
-        const data = await rippleProvider.request({command: 'server_info'});
+        await rippleProvider().connect();
+        const data = await rippleProvider().request({command: 'server_info'});
         const loadFactor = data?.result?.info?.load_factor || 1;
         const baseFee =
           data?.result?.info?.validated_ledger?.base_fee_xrp || 0.00001;
@@ -69,9 +89,7 @@ export const RippleChain = () => {
     },
     getTransactions: async ({address}) => {
       try {
-        await rippleProvider.connect();
-        const data = await rippleProvider.request({
-          command: 'account_tx',
+        const result = await rpcRequest('account_tx', {
           account: address,
           ledger_index_min: -1,
           ledger_index_max: -1,
@@ -79,8 +97,8 @@ export const RippleChain = () => {
           limit: 20,
           forward: false,
         });
-        if (Array.isArray(data?.result?.transactions)) {
-          return data?.result?.transactions.map(item => {
+        if (Array.isArray(result?.transactions)) {
+          return result?.transactions.map(item => {
             const tx = item;
             const bnValue = BigInt(tx?.tx_json?.DeliverMax || 0);
             const txHash = tx?.hash;
@@ -106,19 +124,13 @@ export const RippleChain = () => {
     },
     getTransaction: async ({txHash}) => {
       try {
-        await rippleProvider.connect();
-        const [data, ledgerData] = await Promise.all([
-          rippleProvider.request({
-            command: 'tx',
-            transaction: txHash,
-            binary: false,
-          }),
-          rippleProvider.request({command: 'ledger_current'}).catch(() => null),
+        const [tx, ledgerData] = await Promise.all([
+          rpcRequest('tx', {transaction: txHash, binary: false}),
+          rpcRequest('ledger_current', {}).catch(() => null),
         ]);
-        const tx = data?.result;
         const bnValue = BigInt(tx?.tx_json?.DeliverMax || 0);
         const blockNumber = tx?.ledger_index ?? null;
-        const currentLedger = ledgerData?.result?.ledger_current_index ?? null;
+        const currentLedger = ledgerData?.ledger_current_index ?? null;
         const confirmations =
           blockNumber !== null && currentLedger !== null
             ? currentLedger - blockNumber
@@ -144,7 +156,7 @@ export const RippleChain = () => {
     },
     send: async ({to, from, amount, privateKey, publicKey, gasFee, memo}) => {
       try {
-        await rippleProvider.connect();
+        await rippleProvider().connect();
         const transaction = {
           TransactionType: 'Payment',
           Account: from,
@@ -155,14 +167,16 @@ export const RippleChain = () => {
         if (validateNumber(memo)) {
           transaction.DestinationTag = Number(memo);
         }
-        const preparedTransaction = await rippleProvider.autofill(transaction);
+        const preparedTransaction = await rippleProvider().autofill(
+          transaction,
+        );
         preparedTransaction.SigningPubKey = publicKey; // HERE: move this up above the encoding
         const preparedTransactionHex = encodeForSigning(preparedTransaction);
         preparedTransaction.TxnSignature = sign(
           preparedTransactionHex,
           privateKey,
         );
-        return await rippleProvider.submitAndWait(preparedTransaction);
+        return await rippleProvider().submitAndWait(preparedTransaction);
       } catch (e) {
         console.error('Error in send ripple transaction', e);
       }
@@ -172,9 +186,11 @@ export const RippleChain = () => {
     },
     isAccountExist: async address => {
       try {
-        await rippleProvider.connect();
-        const balances = await rippleProvider.getBalances(address);
-        return !!balances;
+        const result = await rpcRequest('account_info', {
+          account: address,
+          ledger_index: 'validated',
+        });
+        return !!result?.account_data;
       } catch (e) {
         return false;
       }

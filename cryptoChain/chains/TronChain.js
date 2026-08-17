@@ -6,8 +6,11 @@ import {
 import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {
   convertToSmallAmount,
+  fetchRequest,
   getExplorerTxUrl,
 } from 'dok-wallet-blockchain-networks/helper';
+import bs58 from 'bs58';
+import {sha256} from 'js-sha256';
 import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
@@ -30,6 +33,20 @@ const withRpcSession = tronWeb => {
   return tronWeb;
 };
 
+const tronAddressToEvmHex = address => {
+  const decoded = bs58.decode(address);
+  const payload = decoded.slice(1, decoded.length - 4);
+  return Array.from(payload)
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+const tronAddressFromHex = hexAddress => {
+  const bytes = hexAddress.match(/.{2}/g).map(byte => parseInt(byte, 16));
+  const checksum = sha256.array(sha256.array(bytes)).slice(0, 4);
+  return bs58.encode(Uint8Array.from([...bytes, ...checksum]));
+};
+
 export const TronChain = () => {
   const buildTronProviders = () => {
     const premiumUrl = getPremiumRPCUrl('tron');
@@ -43,25 +60,60 @@ export const TronChain = () => {
     ];
   };
 
-  let defaultTronWeb = null;
-
-  try {
-    const options = {
-      fullHost: getRPCUrl('tron_full_host'),
-      solidityNode: getRPCUrl('tron_solidity_node'),
-      eventServer: getRPCUrl('tron_event_server'),
-    };
-    defaultTronWeb = new TronWeb(options);
-  } catch (e) {
-    console.error(`error creating tronWeb ${e}`);
-    throw e;
-  }
+  // Created on first SDK use so balance-only sessions never load tronweb.
+  let defaultTronWebInstance = null;
+  const defaultTronWeb = () => {
+    if (!defaultTronWebInstance) {
+      try {
+        defaultTronWebInstance = new TronWeb({
+          fullHost: getRPCUrl('tron_full_host'),
+          solidityNode: getRPCUrl('tron_solidity_node'),
+          eventServer: getRPCUrl('tron_event_server'),
+        });
+      } catch (e) {
+        console.error(`error creating tronWeb ${e}`);
+        throw e;
+      }
+    }
+    return defaultTronWebInstance;
+  };
 
   const retryFunc = async (cb, defaultResponse) => {
     const providers = buildTronProviders();
     for (let i = 0; i < providers.length; i++) {
       try {
         return await cb(withRpcSession(new TronWeb(providers[i])));
+      } catch (e) {
+        console.error(
+          'Error for tron provider',
+          i,
+          providers[i].fullHost,
+          'Errors:',
+          e,
+        );
+        if (i === providers.length - 1) {
+          if (defaultResponse) {
+            return defaultResponse;
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
+  };
+
+  const rpcRequest = async (path, body, defaultResponse) => {
+    const providers = buildTronProviders();
+    for (let i = 0; i < providers.length; i++) {
+      try {
+        const json = await fetchRequest(`${providers[i].fullHost}/${path}`, {
+          ...(body ? {method: 'post', data: body} : {}),
+          adapter: rpcSessionAdapter,
+        });
+        if (json?.Error) {
+          throw new Error(json.Error);
+        }
+        return json;
       } catch (e) {
         console.error(
           'Error for tron provider',
@@ -289,13 +341,13 @@ export const TronChain = () => {
       return 'TRX';
     },
     isValidAddress: ({address}) => {
-      return defaultTronWeb?.isAddress(address);
+      return defaultTronWeb().isAddress(address);
     },
     isValidPrivateKey: ({privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const address = defaultTronWeb.address.toHex(
-          defaultTronWeb.address.fromPrivateKey(updatePrivateKey),
+        const address = defaultTronWeb().address.toHex(
+          defaultTronWeb().address.fromPrivateKey(updatePrivateKey),
         );
         return !!address;
       } catch (e) {
@@ -305,12 +357,12 @@ export const TronChain = () => {
 
     createWalletByPrivateKey: ({privateKey}) => {
       const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-      const address = defaultTronWeb.address.toHex(
-        defaultTronWeb.address.fromPrivateKey(updatePrivateKey),
+      const address = defaultTronWeb().address.toHex(
+        defaultTronWeb().address.fromPrivateKey(updatePrivateKey),
       );
       return {
         privateKey: updatePrivateKey,
-        address: defaultTronWeb.address.fromHex(address),
+        address: defaultTronWeb().address.fromHex(address),
       };
     },
     getContract: async ({contractAddress}) =>
@@ -339,18 +391,14 @@ export const TronChain = () => {
           throw e;
         }
       }, {}),
-    getBalance: async ({address}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const json = await getAccount({tronWeb, address});
-          const bal = json?.balance || 0;
-
-          return bal?.toString() || '0';
-        } catch (e) {
-          console.error('error in get balance from tron', e);
-          throw e;
-        }
-      }, '0'),
+    getBalance: async ({address}) => {
+      const json = await rpcRequest(
+        'wallet/getaccount',
+        {address, visible: true},
+        {balance: 0}, // default response if all providers fail
+      );
+      return (json?.balance || 0).toString();
+    },
     getStakingBalance: async ({address}) =>
       retryFunc(
         async tronWeb => {
@@ -713,218 +761,208 @@ export const TronChain = () => {
           throw e;
         }
       }, null),
-    getTokenBalance: async ({address, contractAddress}) =>
-      retryFunc(async tronWeb => {
-        try {
-          tronWeb.setAddress(address);
-          const contract = tronWeb.contract(trc20Abi, contractAddress);
-          const balance = await contract.balanceOf(address).call();
-          return balance.toString();
-        } catch (e) {
-          console.error(`error getting token balance tron ${e}`);
-          throw e;
-        }
-      }, '0'),
-    getTransactions: async ({address}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const resp = await tronWeb.fullNode.request(
-            `v1/accounts/${address}/transactions`,
-            {limit: 20},
-            'get',
-          );
-          return await Promise.all(
-            resp?.data?.map(async transaction => {
-              const contract = transaction.raw_data.contract[0];
-              const contractType = contract?.type;
-              const raw = contract.parameter.value;
-              const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-              let amount, transactionType, to, contractAddress;
-
-              if (contractType === 'FreezeBalanceV2Contract') {
-                amount = raw?.frozen_balance?.toString();
-                transactionType = 'stake';
-                to = fromAddress;
-              } else if (contractType === 'UnfreezeBalanceV2Contract') {
-                amount = raw?.unfreeze_balance?.toString();
-                transactionType = 'unstake';
-                to = fromAddress;
-              } else if (contractType === 'WithdrawExpireUnfreezeContract') {
-                const txInfo = await tronWeb.fullNode.request(
-                  'wallet/gettransactioninfobyid',
-                  {value: transaction.txID},
-                  'post',
-                );
-                amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
-                transactionType = 'withdraw';
-                to = fromAddress;
-              } else if (contractType === 'WithdrawBalanceContract') {
-                const txInfo = await tronWeb.fullNode.request(
-                  'wallet/gettransactioninfobyid',
-                  {value: transaction.txID},
-                  'post',
-                );
-                amount = txInfo?.withdraw_amount?.toString() ?? '0';
-                transactionType = 'withdraw';
-                to = fromAddress;
-              } else if (contractType === 'TriggerSmartContract') {
-                const callData = raw?.data ?? '';
-                contractAddress = raw?.contract_address
-                  ? tronWeb.address.fromHex(raw.contract_address)
-                  : null;
-                if (callData.startsWith('a9059cbb') && callData.length >= 136) {
-                  // TRC-20 transfer(address,uint256) — decode recipient only;
-                  // amount is blanked because token decimal/symbol is unknown here
-                  const recipientHex = '41' + callData.slice(32, 72);
-                  try {
-                    to = tronWeb.address.fromHex(recipientHex);
-                  } catch {
-                    to = fromAddress;
-                  }
-                  amount = '';
-                } else {
-                  amount = '';
-                  to = contractAddress ?? fromAddress;
-                }
-                transactionType = 'smartContract';
-              } else if (contractType === 'VoteWitnessContract') {
-                amount = '';
-                transactionType = 'smartContract';
-                to = fromAddress;
-              } else {
-                amount = raw?.amount?.toString();
-                transactionType = 'regular';
-                to = raw.to_address
-                  ? tronWeb.address.fromHex(raw.to_address)
-                  : fromAddress;
-              }
-
-              return {
-                amount,
-                link: transaction.txID,
-                url: getExplorerTxUrl('tron', transaction.txID),
-                date: transaction.raw_data.timestamp,
-                status: transaction.ret?.[0]?.contractRet,
-                from: fromAddress,
-                to,
-                contractAddress,
-                blockNumber: transaction.blockNumber,
-                totalCourse: '0',
-                transactionType,
-              };
-            }),
-          );
-        } catch (e) {
-          console.error(`error getting transactions ${e}`);
-          throw e;
-        }
-      }, []),
-    getTransaction: async ({txHash}) =>
-      retryFunc(
-        async tronWeb => {
-          try {
-            if (!txHash) return {data: null};
-            const [transaction, txInfo, nowBlock] = await Promise.all([
-              tronWeb.fullNode.request(
-                'wallet/gettransactionbyid',
-                {value: txHash},
-                'post',
-              ),
-              tronWeb.fullNode.request(
-                'wallet/gettransactioninfobyid',
-                {value: txHash},
-                'post',
-              ),
-              tronWeb.fullNode.request('wallet/getnowblock', {}, 'post'),
-            ]);
-            if (!transaction?.raw_data?.contract?.[0]) return {data: null};
+    getTokenBalance: async ({address, contractAddress}) => {
+      const json = await rpcRequest(
+        'wallet/triggerconstantcontract',
+        {
+          owner_address: address,
+          contract_address: contractAddress,
+          function_selector: 'balanceOf(address)',
+          parameter: tronAddressToEvmHex(address).padStart(64, '0'),
+          visible: true,
+        },
+        {},
+      );
+      const balanceHex = json?.constant_result?.[0];
+      return balanceHex ? BigInt(`0x${balanceHex}`).toString() : '0';
+    },
+    getTransactions: async ({address}) => {
+      try {
+        const resp = await rpcRequest(
+          `v1/accounts/${address}/transactions?limit=20`,
+          null,
+          {data: []},
+        );
+        return await Promise.all(
+          resp?.data?.map(async transaction => {
             const contract = transaction.raw_data.contract[0];
             const contractType = contract?.type;
             const raw = contract.parameter.value;
-            const fromAddress = tronWeb.address.fromHex(raw.owner_address);
-            let amount, toAddress, contractAddress, transactionType;
+            const fromAddress = tronAddressFromHex(raw.owner_address);
+            let amount, transactionType, to, contractAddress;
 
             if (contractType === 'FreezeBalanceV2Contract') {
               amount = raw?.frozen_balance?.toString();
-              toAddress = fromAddress;
               transactionType = 'stake';
+              to = fromAddress;
             } else if (contractType === 'UnfreezeBalanceV2Contract') {
               amount = raw?.unfreeze_balance?.toString();
-              toAddress = fromAddress;
               transactionType = 'unstake';
+              to = fromAddress;
             } else if (contractType === 'WithdrawExpireUnfreezeContract') {
+              const txInfo = await rpcRequest(
+                'wallet/gettransactioninfobyid',
+                {value: transaction.txID},
+                {},
+              );
               amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
-              toAddress = fromAddress;
               transactionType = 'withdraw';
+              to = fromAddress;
             } else if (contractType === 'WithdrawBalanceContract') {
+              const txInfo = await rpcRequest(
+                'wallet/gettransactioninfobyid',
+                {value: transaction.txID},
+                {},
+              );
               amount = txInfo?.withdraw_amount?.toString() ?? '0';
-              toAddress = fromAddress;
               transactionType = 'withdraw';
+              to = fromAddress;
             } else if (contractType === 'TriggerSmartContract') {
               const callData = raw?.data ?? '';
               contractAddress = raw?.contract_address
-                ? tronWeb.address.fromHex(raw.contract_address)
+                ? tronAddressFromHex(raw.contract_address)
                 : null;
               if (callData.startsWith('a9059cbb') && callData.length >= 136) {
-                // TRC-20 transfer(address,uint256)
-                // Return raw amount — getSingleTransaction applies parseBalance
-                // with the correct token decimal from coinDef
+                // TRC-20 transfer(address,uint256) — decode recipient only;
+                // amount is blanked because token decimal/symbol is unknown here
                 const recipientHex = '41' + callData.slice(32, 72);
                 try {
-                  toAddress = tronWeb.address.fromHex(recipientHex);
+                  to = tronAddressFromHex(recipientHex);
                 } catch {
-                  toAddress = null;
+                  to = fromAddress;
                 }
-                amount = BigInt('0x' + callData.slice(72, 136)).toString();
+                amount = '';
               } else {
                 amount = '';
-                toAddress = contractAddress ?? null;
+                to = contractAddress ?? fromAddress;
               }
               transactionType = 'smartContract';
             } else if (contractType === 'VoteWitnessContract') {
               amount = '';
-              toAddress = fromAddress;
               transactionType = 'smartContract';
+              to = fromAddress;
             } else {
               amount = raw?.amount?.toString();
-              toAddress = raw.to_address
-                ? tronWeb.address.fromHex(raw.to_address)
-                : undefined;
               transactionType = 'regular';
+              to = raw.to_address
+                ? tronAddressFromHex(raw.to_address)
+                : fromAddress;
             }
 
-            const blockNumber = txInfo?.blockNumber ?? null;
-            const latestBlockNumber =
-              nowBlock?.block_header?.raw_data?.number ?? null;
-            const confirmations =
-              blockNumber !== null && latestBlockNumber !== null
-                ? Math.max(0, latestBlockNumber - blockNumber)
-                : null;
             return {
-              data: {
-                amount,
-                link: txHash,
-                url: getExplorerTxUrl('tron', txHash),
-                date: transaction.raw_data.timestamp,
-                status: transaction.ret?.[0]?.contractRet,
-                fee: txInfo?.fee?.toString() ?? transaction.ret?.[0]?.fee,
-                net_fee: txInfo?.receipt?.net_fee ?? transaction.net_fee,
-                from: fromAddress,
-                to: toAddress,
-                contractAddress,
-                transactionType,
-                blockNumber,
-                confirmations,
-                totalCourse: '0',
-              },
+              amount,
+              link: transaction.txID,
+              url: getExplorerTxUrl('tron', transaction.txID),
+              date: transaction.raw_data.timestamp,
+              status: transaction.ret?.[0]?.contractRet,
+              from: fromAddress,
+              to,
+              contractAddress,
+              blockNumber: transaction.blockNumber,
+              totalCourse: '0',
+              transactionType,
             };
-          } catch (e) {
-            console.error(`error getting transaction ${e}`);
-            throw e;
+          }),
+        );
+      } catch (e) {
+        console.error(`error getting transactions ${e}`);
+        return [];
+      }
+    },
+    getTransaction: async ({txHash}) => {
+      try {
+        if (!txHash) return {data: null};
+        const [transaction, txInfo, nowBlock] = await Promise.all([
+          rpcRequest('wallet/gettransactionbyid', {value: txHash}, {}),
+          rpcRequest('wallet/gettransactioninfobyid', {value: txHash}, {}),
+          rpcRequest('wallet/getnowblock', {visible: true}, {}),
+        ]);
+        if (!transaction?.raw_data?.contract?.[0]) return {data: null};
+        const contract = transaction.raw_data.contract[0];
+        const contractType = contract?.type;
+        const raw = contract.parameter.value;
+        const fromAddress = tronAddressFromHex(raw.owner_address);
+        let amount, toAddress, contractAddress, transactionType;
+
+        if (contractType === 'FreezeBalanceV2Contract') {
+          amount = raw?.frozen_balance?.toString();
+          toAddress = fromAddress;
+          transactionType = 'stake';
+        } else if (contractType === 'UnfreezeBalanceV2Contract') {
+          amount = raw?.unfreeze_balance?.toString();
+          toAddress = fromAddress;
+          transactionType = 'unstake';
+        } else if (contractType === 'WithdrawExpireUnfreezeContract') {
+          amount = txInfo?.withdraw_expire_amount?.toString() ?? '0';
+          toAddress = fromAddress;
+          transactionType = 'withdraw';
+        } else if (contractType === 'WithdrawBalanceContract') {
+          amount = txInfo?.withdraw_amount?.toString() ?? '0';
+          toAddress = fromAddress;
+          transactionType = 'withdraw';
+        } else if (contractType === 'TriggerSmartContract') {
+          const callData = raw?.data ?? '';
+          contractAddress = raw?.contract_address
+            ? tronAddressFromHex(raw.contract_address)
+            : null;
+          if (callData.startsWith('a9059cbb') && callData.length >= 136) {
+            // TRC-20 transfer(address,uint256)
+            // Return raw amount — getSingleTransaction applies parseBalance
+            // with the correct token decimal from coinDef
+            const recipientHex = '41' + callData.slice(32, 72);
+            try {
+              toAddress = tronAddressFromHex(recipientHex);
+            } catch {
+              toAddress = null;
+            }
+            amount = BigInt('0x' + callData.slice(72, 136)).toString();
+          } else {
+            amount = '';
+            toAddress = contractAddress ?? null;
           }
-        },
-        {data: null},
-      ),
+          transactionType = 'smartContract';
+        } else if (contractType === 'VoteWitnessContract') {
+          amount = '';
+          toAddress = fromAddress;
+          transactionType = 'smartContract';
+        } else {
+          amount = raw?.amount?.toString();
+          toAddress = raw.to_address
+            ? tronAddressFromHex(raw.to_address)
+            : undefined;
+          transactionType = 'regular';
+        }
+
+        const blockNumber = txInfo?.blockNumber ?? null;
+        const latestBlockNumber =
+          nowBlock?.block_header?.raw_data?.number ?? null;
+        const confirmations =
+          blockNumber !== null && latestBlockNumber !== null
+            ? Math.max(0, latestBlockNumber - blockNumber)
+            : null;
+        return {
+          data: {
+            amount,
+            link: txHash,
+            url: getExplorerTxUrl('tron', txHash),
+            date: transaction.raw_data.timestamp,
+            status: transaction.ret?.[0]?.contractRet,
+            fee: txInfo?.fee?.toString() ?? transaction.ret?.[0]?.fee,
+            net_fee: txInfo?.receipt?.net_fee ?? transaction.net_fee,
+            from: fromAddress,
+            to: toAddress,
+            contractAddress,
+            transactionType,
+            blockNumber,
+            confirmations,
+            totalCourse: '0',
+          },
+        };
+      } catch (e) {
+        console.error(`error getting transaction ${e}`);
+        return {data: null};
+      }
+    },
     getStakingInfo: async ({staking, stakingBalance, address}) =>
       retryFunc(async tronWeb => {
         try {
@@ -1058,34 +1096,33 @@ export const TronChain = () => {
         }
       }, []),
 
-    getTokenTransactions: async ({address, contractAddress}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const res = await tronWeb.fullNode.request(
-            `v1/accounts/${address}/transactions/trc20`,
-            {limit: 20, contract_address: contractAddress},
-            'get',
-          );
-          const data = res?.data;
-          return data.map(transaction => {
-            const raw = transaction.value;
-            const fromAddress = transaction?.from;
-            return {
-              amount: raw?.toString(),
-              link: transaction.transaction_id,
-              url: getExplorerTxUrl('tron', transaction.transaction_id),
-              status: 'SUCCESS',
-              date: transaction?.block_timestamp, //new Date(transaction.raw_data.timestamp),
-              from: fromAddress,
-              to: transaction?.to,
-              totalCourse: '0$',
-            };
-          });
-        } catch (e) {
-          console.error(`error getting getTokenTransactions ${e}`);
-          throw e;
-        }
-      }, []),
+    getTokenTransactions: async ({address, contractAddress}) => {
+      try {
+        const res = await rpcRequest(
+          `v1/accounts/${address}/transactions/trc20?limit=20&contract_address=${contractAddress}`,
+          null,
+          {data: []},
+        );
+        const data = res?.data;
+        return data.map(transaction => {
+          const raw = transaction.value;
+          const fromAddress = transaction?.from;
+          return {
+            amount: raw?.toString(),
+            link: transaction.transaction_id,
+            url: getExplorerTxUrl('tron', transaction.transaction_id),
+            status: 'SUCCESS',
+            date: transaction?.block_timestamp, //new Date(transaction.raw_data.timestamp),
+            from: fromAddress,
+            to: transaction?.to,
+            totalCourse: '0$',
+          };
+        });
+      } catch (e) {
+        console.error(`error getting getTokenTransactions ${e}`);
+        return [];
+      }
+    },
     send: async ({to, from, amount, memo, privateKey}) =>
       retryFunc(async tronWeb => {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);

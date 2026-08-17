@@ -1,6 +1,7 @@
 import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
+  fetchRequest,
   getCosmosRequiredFeeAmount,
   getExplorerTxUrl,
   isValidStringWithValue,
@@ -9,7 +10,6 @@ import {
 import {
   coins,
   SigningStargateClient,
-  StargateClient,
   assertIsDeliverTxSuccess,
 } from '@cosmjs/stargate';
 import {DirectSecp256k1Wallet} from '@cosmjs/proto-signing';
@@ -55,9 +55,10 @@ export const CosmosChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const client = await StargateClient.connect(getRPCUrl('cosmos'));
-        const balances = await client.getAllBalances(address);
-        const atomObj = balances?.find(item => item.denom === 'uatom');
+        const data = await fetchRequest(
+          `${getRPCUrl('cosmos_rest')}/cosmos/bank/v1beta1/balances/${address}`,
+        );
+        const atomObj = data?.balances?.find(item => item.denom === 'uatom');
         return atomObj?.amount || '0';
       } catch (e) {
         console.error('error in get balance from cosmos', e);

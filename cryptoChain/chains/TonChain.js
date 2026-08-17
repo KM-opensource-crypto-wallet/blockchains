@@ -1,5 +1,6 @@
 import {
   convertToSmallAmount,
+  fetchRPCRequest,
   getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
@@ -25,7 +26,7 @@ import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
 import {WL_APP_NAME} from 'utils/wlData';
 
 const findTxHashBySeqno = async (tonClient, address, seqno) => {
-  const txs = await tonClient.getTransactions(address, {limit: 20});
+  const txs = await tonClient().getTransactions(address, {limit: 20});
   for (const tx of txs) {
     if (!tx.inMessage?.body) {
       continue;
@@ -48,12 +49,16 @@ const findTxHashBySeqno = async (tonClient, address, seqno) => {
 
 export const TonChain = () => {
   const tonProxyBase = buildRpcProxyUrl('ton');
-  const tonClient = new TonClient({
-    endpoint: tonProxyBase
-      ? `${tonProxyBase}/api/v2/jsonRPC`
-      : getRPCUrl('ton'),
-    httpAdapter: rpcSessionAdapter,
-  });
+  const tonEndpoint = tonProxyBase
+    ? `${tonProxyBase}/api/v2/jsonRPC`
+    : getRPCUrl('ton');
+  // Created on first SDK use so balance-only sessions never load @ton/ton.
+  let tonClientInstance;
+  const tonClient = () =>
+    (tonClientInstance ??= new TonClient({
+      endpoint: tonEndpoint,
+      httpAdapter: rpcSessionAdapter,
+    }));
 
   return {
     isValidAddress: ({address}) => {
@@ -85,7 +90,13 @@ export const TonChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const balance = await tonClient.getBalance(address);
+        const balance = await fetchRPCRequest(
+          tonEndpoint,
+          'getAddressBalance',
+          {
+            address,
+          },
+        );
         return balance?.toString() || '0';
       } catch (e) {
         console.error('error in get balance from ton', e);
@@ -96,13 +107,13 @@ export const TonChain = () => {
       try {
         const parseContractAddress = Address.parse(contractAddress);
         const parseAddress = Address.parse(address);
-        const jettonMaster = tonClient.open(
+        const jettonMaster = tonClient().open(
           JettonMaster.create(parseContractAddress),
         );
         const myJettonWalletAddr = await jettonMaster.getWalletAddress(
           parseAddress,
         );
-        const jettonData = await tonClient.runMethod(
+        const jettonData = await tonClient().runMethod(
           myJettonWalletAddr,
           'get_wallet_data',
         );
@@ -122,7 +133,7 @@ export const TonChain = () => {
           workchain: 0,
         });
 
-        const walletContract = tonClient.open(wallet);
+        const walletContract = tonClient().open(wallet);
         const seqno = await walletContract.getSeqno();
         const transfer = walletContract.createTransfer({
           sendMode: SendMode.PAY_GAS_SEPARATELY,
@@ -139,7 +150,7 @@ export const TonChain = () => {
             }),
           ],
         });
-        const fees = await tonClient.estimateExternalMessageFee(
+        const fees = await tonClient().estimateExternalMessageFee(
           wallet.address,
           {body: transfer},
         );
@@ -174,10 +185,10 @@ export const TonChain = () => {
           publicKey: keyPair.publicKey,
           workchain: 0,
         });
-        const walletContract = tonClient.open(wallet);
+        const walletContract = tonClient().open(wallet);
         const jettonWalletAddress = Address.parse(contractAddress);
         const toParseAddress = Address.parse(toAddress);
-        const jettonMaster = tonClient.open(
+        const jettonMaster = tonClient().open(
           JettonMaster.create(jettonWalletAddress),
         );
         const myJettonWalletAddr = await jettonMaster.getWalletAddress(
@@ -218,7 +229,7 @@ export const TonChain = () => {
           ],
         });
         transfer.hash();
-        const fees = await tonClient.estimateExternalMessageFee(
+        const fees = await tonClient().estimateExternalMessageFee(
           wallet.address,
           {body: transfer},
         );
@@ -241,7 +252,7 @@ export const TonChain = () => {
     },
     getTransactions: async ({address}) => {
       try {
-        const transactions = await tonClient.getTransactions(address, {
+        const transactions = await tonClient().getTransactions(address, {
           limit: 20,
         });
         // const transactionsss = await TonScan.getTonTransactions(address);
@@ -390,7 +401,7 @@ export const TonChain = () => {
         );
         const balance = await TonChain().getBalance({address: from});
         const parsedBalance = new BigNumber(parseBalance(balance, 9));
-        const walletContract = tonClient.open(wallet);
+        const walletContract = tonClient().open(wallet);
         const seqno = await walletContract.getSeqno();
 
         const transfer = walletContract.createTransfer({
@@ -432,10 +443,10 @@ export const TonChain = () => {
           publicKey: keyPair.publicKey,
           workchain: 0,
         });
-        const walletContract = tonClient.open(wallet);
+        const walletContract = tonClient().open(wallet);
         const jettonWalletAddress = Address.parse(contractAddress);
         const toParseAddress = Address.parse(to);
-        const jettonMaster = tonClient.open(
+        const jettonMaster = tonClient().open(
           JettonMaster.create(jettonWalletAddress),
         );
         const myJettonWalletAddr = await jettonMaster.getWalletAddress(

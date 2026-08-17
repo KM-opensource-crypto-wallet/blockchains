@@ -12,15 +12,19 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {CardanoChainService} from 'dok-wallet-blockchain-networks/service/cardanoChain';
 
-const provider = new BlockfrostProvider(config.BLOCKFROST_API_KEY);
+// Created on first SDK use so balance/transaction reads — which are plain
+// HTTP — never load @meshsdk/core.
+let providerInstance;
+const provider = () =>
+  (providerInstance ??= new BlockfrostProvider(config.BLOCKFROST_API_KEY));
 
 export const CardanoChain = () => {
   const recall = async key => {
     const wallet = new MeshWallet({
       key,
       networkId: 1,
-      fetcher: provider,
-      submitter: provider,
+      fetcher: provider(),
+      submitter: provider(),
     });
     await wallet.init();
     return wallet;
@@ -148,7 +152,7 @@ export const CardanoChain = () => {
     },
     waitForConfirmation: async ({transaction}) => {
       return new Promise(resolve => {
-        provider.onTxConfirmed(transaction, () => {
+        provider().onTxConfirmed(transaction, () => {
           resolve(true);
         });
         setTimeout(() => {
