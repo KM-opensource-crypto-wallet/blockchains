@@ -14,12 +14,12 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
+import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   fetchBitcoinBalances,
   fetchBitcoinTransactionDetails,
   fetchBitcoinUTXO,
-  getBitcoinAddresses,
-} from 'dok-wallet-blockchain-networks/service/dokApi';
+} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
 bitcoin.initEccLib(ecc);
 
