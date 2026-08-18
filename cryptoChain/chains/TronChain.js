@@ -126,6 +126,98 @@ export const TronChain = () => {
     }
   };
 
+  // ---- Broadcast idempotency layer -----------------------------------
+  // Tron's nonce-equivalent is the txID = sha256(raw_data). raw_data embeds
+  // a timestamp + expiration, so re-broadcasting the SAME signed transaction
+  // is deduplicated by the network (DUP_TRANSACTION_ERROR), while REBUILDING
+  // stamps a new timestamp — a new txID that can land alongside the old one.
+  // Everything state-changing below therefore builds and signs exactly once
+  // and only ever retries the broadcast of that same payload.
+
+  // True when a node already knows the transaction (mempool or block).
+  const isTronTxKnown = async (tronWeb, txid) => {
+    try {
+      const resp = await tronWeb.fullNode.request(
+        'wallet/gettransactionbyid',
+        {value: txid},
+        'post',
+      );
+      return !!resp?.raw_data;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Broadcasts the SAME signed payload across providers. A DUP rejection or
+  // a node that already has the txid is success — never a reason to rebuild.
+  const broadcastSignedTronTx = async ({signedTx, signedHex, txid}) => {
+    const providers = buildTronProviders();
+    let lastError = null;
+    for (let i = 0; i < providers.length; i++) {
+      const tronWeb = new TronWeb(providers[i]);
+      try {
+        const broadcast = signedHex
+          ? await tronWeb.trx.sendHexTransaction(signedHex)
+          : await tronWeb.trx.sendRawTransaction(signedTx);
+        if (broadcast?.result) {
+          return {...broadcast, txid: broadcast?.txid || txid};
+        }
+        if (broadcast?.code === 'DUP_TRANSACTION_ERROR') {
+          // A previous attempt landed; the fixed txID makes this a success.
+          return {
+            result: true,
+            txid: broadcast?.txid || txid,
+            duplicated: true,
+          };
+        }
+        let message;
+        try {
+          message = broadcast?.message
+            ? tronWeb.toUtf8(broadcast.message)
+            : broadcast?.code || 'Tron broadcast failed';
+        } catch (decodeError) {
+          // A non-hex message must not replace the real error.
+          message = broadcast?.code || 'Tron broadcast failed';
+        }
+        lastError = new Error(message);
+      } catch (e) {
+        console.error('Error broadcasting tron tx on provider', i, e);
+        lastError = e;
+      }
+      // The response failed or was ambiguous (e.g. a lost HTTP response
+      // after the node accepted the tx) — check whether it actually reached
+      // the network before trying the next provider.
+      if (txid && (await isTronTxKnown(tronWeb, txid))) {
+        return {result: true, txid};
+      }
+    }
+    throw lastError ?? new Error('Failed to broadcast Tron transaction');
+  };
+
+  // Polls for the receipt of a broadcast transaction; transport errors keep
+  // polling (rotating providers) instead of aborting into any retry path.
+  // getTransactionInfo returns {} until the tx is confirmed. Returns null
+  // when no receipt appeared within the window.
+  const waitForTronReceipt = async (
+    txid,
+    {retries = 15, interval = 3000} = {},
+  ) => {
+    const providers = buildTronProviders();
+    for (let i = 0; i < retries; i++) {
+      await new Promise(resolve => setTimeout(resolve, interval));
+      try {
+        const tronWeb = new TronWeb(providers[i % providers.length]);
+        const info = await tronWeb.trx.getTransactionInfo(txid);
+        if (info?.receipt) {
+          return info;
+        }
+      } catch (e) {
+        console.error('Error polling tron receipt', e);
+      }
+    }
+    return null;
+  };
+
   const getAccount = async ({tronWeb, address}) => {
     if (
       accountInfo?.address !== tronWeb?.address.toHex(address) ||
@@ -288,9 +380,8 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction = await tronWeb.transactionBuilder.withdrawExpireUnfreeze(
-      fromAddress,
-    );
+    const transaction =
+      await tronWeb.transactionBuilder.withdrawExpireUnfreeze(fromAddress);
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
   const createStakingTransactionForRewards = async (
@@ -299,9 +390,8 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction = await tronWeb.transactionBuilder.withdrawBlockRewards(
-      fromAddress,
-    );
+    const transaction =
+      await tronWeb.transactionBuilder.withdrawBlockRewards(fromAddress);
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
 
@@ -525,9 +615,8 @@ export const TronChain = () => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
 
-          const {transactionFee, energyFee, memoFee} = await getChainData(
-            tronWeb,
-          );
+          const {transactionFee, energyFee, memoFee} =
+            await getChainData(tronWeb);
           const sunAmount = convertToSmallAmount(amount, decimals);
           const {bandwidth: availableBandwidth, energy: currentAccountEnergy} =
             await getAccountResourcesData(tronWeb, fromAddress);
@@ -1163,27 +1252,26 @@ export const TronChain = () => {
           throw e;
         }
       }, []),
-    send: async ({to, from, amount, memo, privateKey}) =>
-      retryFunc(async tronWeb => {
-        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        let transaction = await tronWeb.transactionBuilder.sendTrx(
+    send: async ({to, from, amount, memo, privateKey}) => {
+      const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+      // Build via read-retry; nothing broadcast yet, so replays are harmless.
+      const nexTxn = await retryFunc(async tronWeb => {
+        const transaction = await tronWeb.transactionBuilder.sendTrx(
           to,
           tronWeb.toSun(amount), // 10 TRX, for example.
           from,
         );
-        const nexTxn = await addUpdateData(tronWeb, transaction, memo);
-        let signedTransaction = await tronWeb.trx.sign(
-          nexTxn,
-          updatePrivateKey,
-        );
-
-        const tr = await tronWeb.trx.sendRawTransaction(signedTransaction);
-        if (!tr?.result) {
-          console.error('tron transaction response', tr);
-          throw new Error('Something went wrong');
-        }
-        return tr;
-      }, null),
+        return await addUpdateData(tronWeb, transaction, memo);
+      }, null);
+      // Sign ONCE (offline) — the txID is now fixed; only the broadcast
+      // retries, so a transient error can never double-send.
+      const signer = new TronWeb(buildTronProviders()[0]);
+      const signedTransaction = await signer.trx.sign(nexTxn, updatePrivateKey);
+      return await broadcastSignedTronTx({
+        signedTx: signedTransaction,
+        txid: signedTransaction?.txID,
+      });
+    },
     sendToken: async ({
       contractAddress,
       to,
@@ -1192,15 +1280,14 @@ export const TronChain = () => {
       privateKey,
       decimal,
       memo,
-    }) =>
-      retryFunc(async tronWeb => {
-        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-
+    }) => {
+      const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+      // Build via read-retry; nothing broadcast yet, so replays are harmless.
+      const nexTxn = await retryFunc(async tronWeb => {
         const options = {
           feeLimit: 1000000000,
           callValue: 0,
         };
-
         const tx = await tronWeb.transactionBuilder.triggerSmartContract(
           contractAddress,
           'transfer(address,uint256)',
@@ -1217,10 +1304,16 @@ export const TronChain = () => {
           ],
           tronWeb.address.toHex(from),
         );
-        const nexTxn = await addUpdateData(tronWeb, tx.transaction, memo);
-        const signedTx = await tronWeb.trx.sign(nexTxn, updatePrivateKey);
-        return await tronWeb.trx.sendRawTransaction(signedTx);
-      }, null),
+        return await addUpdateData(tronWeb, tx.transaction, memo);
+      }, null);
+      // Sign ONCE (offline) — txID fixed; only the broadcast retries.
+      const signer = new TronWeb(buildTronProviders()[0]);
+      const signedTx = await signer.trx.sign(nexTxn, updatePrivateKey);
+      return await broadcastSignedTronTx({
+        signedTx,
+        txid: signedTx?.txID,
+      });
+    },
     // ── DEX swap support (LI.FI / Relay) ─────────────────────────────
     // TRC20 allowance read for the swap-approval flow. Return shape mirrors
     // EVMChain.readAllowance. Tron USDT has no Ethereum-USDT-style
@@ -1254,6 +1347,10 @@ export const TronChain = () => {
       }, null),
     // TRC20 approve for the swap spender. Waits for on-chain confirmation
     // like EVMChain.approve so the subsequent swap never races the approval.
+    // Build/sign happen exactly once — the old shape ran the whole method
+    // inside retryFunc, so a receipt failure or a transport error AFTER the
+    // broadcast rebuilt a fresh transaction (new timestamp → new txID) and
+    // re-approved on the next provider.
     approve: async ({
       spenderAddress,
       contractAddress,
@@ -1261,45 +1358,40 @@ export const TronChain = () => {
       allowance,
       from,
       privateKey,
-    }) =>
-      retryFunc(async tronWeb => {
-        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const required = BigInt(amountInWei?.toString() || '0');
-        if (allowance != null && BigInt(allowance.toString()) >= required) {
-          return {confirmTransaction: null, alreadyApproved: true};
-        }
-        const tx = await tronWeb.transactionBuilder.triggerSmartContract(
-          tronWeb.address.toHex(contractAddress),
-          'approve(address,uint256)',
-          {feeLimit: 1000000000, callValue: 0},
-          [
-            {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
-            {type: 'uint256', value: required.toString()},
-          ],
-          tronWeb.address.toHex(from),
-        );
-        const signedTx = await tronWeb.trx.sign(
-          tx.transaction,
-          updatePrivateKey,
-        );
-        const broadcast = await tronWeb.trx.sendRawTransaction(signedTx);
-        if (!broadcast?.result && !broadcast?.txid) {
-          throw new Error(broadcast?.code || 'Tron approve broadcast failed');
-        }
-        const txid = broadcast?.txid || signedTx?.txID;
-        // getTransactionInfo returns {} until the tx is confirmed.
-        for (let i = 0; i < 15; i++) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          const info = await tronWeb.trx.getTransactionInfo(txid);
-          if (info?.receipt) {
-            if (info.receipt.result && info.receipt.result !== 'SUCCESS') {
-              throw new Error(`Tron approve failed: ${info.receipt.result}`);
-            }
-            break;
-          }
-        }
-        return {confirmTransaction: broadcast, transaction1: broadcast};
-      }, null),
+    }) => {
+      const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+      const required = BigInt(amountInWei?.toString() || '0');
+      if (allowance != null && BigInt(allowance.toString()) >= required) {
+        return {confirmTransaction: null, alreadyApproved: true};
+      }
+      // Build via read-retry; nothing broadcast yet, so replays are harmless.
+      const tx = await retryFunc(
+        async tronWeb =>
+          tronWeb.transactionBuilder.triggerSmartContract(
+            tronWeb.address.toHex(contractAddress),
+            'approve(address,uint256)',
+            {feeLimit: 1000000000, callValue: 0},
+            [
+              {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
+              {type: 'uint256', value: required.toString()},
+            ],
+            tronWeb.address.toHex(from),
+          ),
+        null,
+      );
+      // Sign ONCE (offline) — txID fixed; only the broadcast retries.
+      const signer = new TronWeb(buildTronProviders()[0]);
+      const signedTx = await signer.trx.sign(tx.transaction, updatePrivateKey);
+      const txid = signedTx?.txID;
+      const broadcast = await broadcastSignedTronTx({signedTx, txid});
+      const info = await waitForTronReceipt(txid);
+      if (info?.receipt?.result && info.receipt.result !== 'SUCCESS') {
+        // The approval landed and failed on-chain — retrying or rebuilding
+        // would only burn more fees; surface it as a terminal failure.
+        throw new Error(`Tron approve failed: ${info.receipt.result}`);
+      }
+      return {confirmTransaction: broadcast, transaction1: broadcast};
+    },
     getEstimateFeForAllowanceApprove: async ({
       from,
       contractAddress,
@@ -1355,12 +1447,20 @@ export const TronChain = () => {
     // adapters): Relay sends the exact /wallet/triggersmartcontract body
     // ({parameter, type}); LI.FI sends a pre-built protobuf raw_data as
     // '0x' hex, whose txID is sha256(raw_data).
-    swap: async ({swapData, from, privateKey}) =>
-      retryFunc(async tronWeb => {
-        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        let transaction;
-        if (swapData?.type === 'TriggerSmartContract' && swapData?.parameter) {
-          const parameter = swapData.parameter;
+    //
+    // Idempotency contract: the transaction is built and signed exactly
+    // once (fixing its txID), then only the broadcast of that same payload
+    // retries across providers — the old shape ran everything inside
+    // retryFunc, so a transient error after the node accepted the tx
+    // rebuilt the Relay transaction with a fresh timestamp (new txID) and
+    // could execute the swap twice.
+    swap: async ({swapData, from, privateKey}) => {
+      const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+      if (swapData?.type === 'TriggerSmartContract' && swapData?.parameter) {
+        const parameter = swapData.parameter;
+        // Build via read-retry (simulate + node-side build); nothing has
+        // been broadcast yet, so replays here are harmless.
+        const transaction = await retryFunc(async tronWeb => {
           await simulateTronSwapOrThrow(tronWeb, parameter);
           const resp = await tronWeb.fullNode.request(
             'wallet/triggersmartcontract',
@@ -1379,15 +1479,29 @@ export const TronChain = () => {
               : 'Tron swap transaction build failed';
             throw new Error(message);
           }
-          transaction = resp.transaction;
-        } else if (
-          typeof swapData?.data === 'string' &&
-          swapData.data.startsWith('0x')
-        ) {
-          // Pre-built protobuf raw_data (LI.FI). trx.sign() can't handle it —
-          // its txCheck requires JSON raw_data.contract — so sign the txID
-          // directly and broadcast the framed protobuf via wallet/broadcasthex.
-          const rawDataHex = swapData.data.slice(2);
+          return resp.transaction;
+        }, null);
+        // Sign ONCE (offline) — txID fixed; only the broadcast retries.
+        const signer = new TronWeb(buildTronProviders()[0]);
+        const signedTx = await signer.trx.sign(transaction, updatePrivateKey);
+        return await broadcastSignedTronTx({
+          signedTx,
+          txid: signedTx?.txID,
+        });
+      }
+      if (
+        typeof swapData?.data === 'string' &&
+        swapData.data.startsWith('0x')
+      ) {
+        // Pre-built protobuf raw_data (LI.FI). trx.sign() can't handle it —
+        // its txCheck requires JSON raw_data.contract — so sign the txID
+        // directly and broadcast the framed protobuf via wallet/broadcasthex.
+        // The txID is sha256(raw_data): deterministic, so this path was
+        // always replay-safe on-chain — but a DUP rejection must read as
+        // the success it is (broadcastSignedTronTx handles that).
+        const rawDataHex = swapData.data.slice(2);
+        // Expiry check + simulation via read-retry; nothing broadcast yet.
+        await retryFunc(async tronWeb => {
           let decodedExpiration = null;
           let decodedContractValue = null;
           try {
@@ -1417,33 +1531,19 @@ export const TronChain = () => {
           ) {
             await simulateTronSwapOrThrow(tronWeb, decodedContractValue);
           }
-          const txID = sha256('0x' + rawDataHex).slice(2);
-          const signature = tronWeb.utils.crypto.ECKeySign(
-            tronWeb.utils.code.hexStr2byteArray(txID),
-            tronWeb.utils.code.hexStr2byteArray(updatePrivateKey),
-          );
-          const signedHex = encodeSignedTronTxHex(rawDataHex, signature);
-          const broadcast = await tronWeb.trx.sendHexTransaction(signedHex);
-          if (!broadcast?.result && !broadcast?.txid) {
-            const message = broadcast?.message
-              ? tronWeb.toUtf8(broadcast.message)
-              : broadcast?.code || 'Tron swap broadcast failed';
-            throw new Error(message);
-          }
-          return {...broadcast, txid: broadcast?.txid || txID};
-        } else {
-          throw new Error('Unsupported Tron swap payload');
-        }
-        const signedTx = await tronWeb.trx.sign(transaction, updatePrivateKey);
-        const broadcast = await tronWeb.trx.sendRawTransaction(signedTx);
-        if (!broadcast?.result && !broadcast?.txid) {
-          const message = broadcast?.message
-            ? tronWeb.toUtf8(broadcast.message)
-            : broadcast?.code || 'Tron swap broadcast failed';
-          throw new Error(message);
-        }
-        return {...broadcast, txid: broadcast?.txid || signedTx?.txID};
-      }, null),
+          return true;
+        }, null);
+        const signer = new TronWeb(buildTronProviders()[0]);
+        const txID = sha256('0x' + rawDataHex).slice(2);
+        const signature = signer.utils.crypto.ECKeySign(
+          signer.utils.code.hexStr2byteArray(txID),
+          signer.utils.code.hexStr2byteArray(updatePrivateKey),
+        );
+        const signedHex = encodeSignedTronTxHex(rawDataHex, signature);
+        return await broadcastSignedTronTx({signedHex, txid: txID});
+      }
+      throw new Error('Unsupported Tron swap payload');
+    },
     getEstimateSwapFee: async ({swapData, fromAddress}) =>
       retryFunc(async tronWeb => {
         const {transactionFee, energyFee} = await getChainData(tronWeb);
@@ -1529,113 +1629,112 @@ export const TronChain = () => {
           nonce: null,
         };
       }, null),
-    createStaking: async ({from, amount, privateKey, resourceType}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+    createStaking: async ({from, amount, privateKey, resourceType}) => {
+      try {
+        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        // Build+sign via read-retry (nothing broadcast yet); the signed tx's
+        // txID is then fixed and only the broadcast retries.
+        const txData = await retryFunc(async tronWeb => {
           const sunAmount = tronWeb.toSun(amount);
-          const txData = await createStakingTransactionFreezeBalance(
+          return await createStakingTransactionFreezeBalance(
             tronWeb,
             from,
             Number(sunAmount),
             updatePrivateKey,
             resourceType,
           );
-          const tx = await tronWeb.trx.sendRawTransaction(txData);
-          if (!tx?.result) {
-            console.error('voteTr tron transaction response', tx);
-            throw new Error('Something went wrong');
-          }
-          return tx;
-        } catch (e) {
-          console.error('Error in tron createStaking', e);
-          throw e;
-        }
-      }, null),
-    createStakingWithValidator: async ({from, privateKey, selectedVotes}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const txData = await createStakingTransactionForVote(
-            tronWeb,
-            from,
-            updatePrivateKey,
-            selectedVotes,
-          );
-          const tx = await tronWeb.trx.sendRawTransaction(txData);
-          if (!tx?.result) {
-            console.error('voteTr tron transaction response', tx);
-            throw new Error('Something went wrong');
-          }
-          return tx;
-        } catch (e) {
-          console.error('Error in tron createStakingWithValidator', e);
-          throw e;
-        }
-      }, null),
-    deactivateStaking: async ({from, amount, privateKey, resourceType}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        }, null);
+        return await broadcastSignedTronTx({
+          signedTx: txData,
+          txid: txData?.txID,
+        });
+      } catch (e) {
+        console.error('Error in tron createStaking', e);
+        throw e;
+      }
+    },
+    createStakingWithValidator: async ({from, privateKey, selectedVotes}) => {
+      try {
+        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        const txData = await retryFunc(
+          async tronWeb =>
+            createStakingTransactionForVote(
+              tronWeb,
+              from,
+              updatePrivateKey,
+              selectedVotes,
+            ),
+          null,
+        );
+        return await broadcastSignedTronTx({
+          signedTx: txData,
+          txid: txData?.txID,
+        });
+      } catch (e) {
+        console.error('Error in tron createStakingWithValidator', e);
+        throw e;
+      }
+    },
+    deactivateStaking: async ({from, amount, privateKey, resourceType}) => {
+      try {
+        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        const txData = await retryFunc(async tronWeb => {
           const sunAmount = tronWeb.toSun(amount);
-          const txData = await createStakingTransactionUnFreezeBalance(
+          return await createStakingTransactionUnFreezeBalance(
             tronWeb,
             from,
             Number(sunAmount),
             updatePrivateKey,
             resourceType,
           );
-          const tx = await tronWeb.trx.sendRawTransaction(txData);
-          if (!tx?.result) {
-            console.error('voteTr tron transaction response', tx);
-            throw new Error('Something went wrong');
-          }
-          return tx;
-        } catch (e) {
-          console.error('Error in tron deactivateStaking', e);
-          throw e;
-        }
-      }, null),
-    withdrawStaking: async ({from, privateKey}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const txData = await createStakingTransactionForWithdraw(
-            tronWeb,
-            from,
-            updatePrivateKey,
-          );
-          const tx = await tronWeb.trx.sendRawTransaction(txData);
-          if (!tx?.result) {
-            console.error('withdrawStaking tron transaction response', tx);
-            throw new Error('Something went wrong');
-          }
-          return tx;
-        } catch (e) {
-          console.error('Error in tron withdrawStaking', e);
-          throw e;
-        }
-      }, null),
-    stakingRewards: async ({from, privateKey}) =>
-      retryFunc(async tronWeb => {
-        try {
-          const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-          const txData = await createStakingTransactionForRewards(
-            tronWeb,
-            from,
-            updatePrivateKey,
-          );
-          const tx = await tronWeb.trx.sendRawTransaction(txData);
-          if (!tx?.result) {
-            console.error('withdrawStaking tron transaction response', tx);
-            throw new Error('Something went wrong');
-          }
-          return tx;
-        } catch (e) {
-          console.error('Error in tron stakingRewards', e);
-          throw e;
-        }
-      }, null),
+        }, null);
+        return await broadcastSignedTronTx({
+          signedTx: txData,
+          txid: txData?.txID,
+        });
+      } catch (e) {
+        console.error('Error in tron deactivateStaking', e);
+        throw e;
+      }
+    },
+    withdrawStaking: async ({from, privateKey}) => {
+      try {
+        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        const txData = await retryFunc(
+          async tronWeb =>
+            createStakingTransactionForWithdraw(
+              tronWeb,
+              from,
+              updatePrivateKey,
+            ),
+          null,
+        );
+        return await broadcastSignedTronTx({
+          signedTx: txData,
+          txid: txData?.txID,
+        });
+      } catch (e) {
+        console.error('Error in tron withdrawStaking', e);
+        throw e;
+      }
+    },
+    stakingRewards: async ({from, privateKey}) => {
+      try {
+        const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
+        const txData = await retryFunc(
+          async tronWeb =>
+            createStakingTransactionForRewards(tronWeb, from, updatePrivateKey),
+          null,
+        );
+        return await broadcastSignedTronTx({
+          signedTx: txData,
+          txid: txData?.txID,
+        });
+      } catch (e) {
+        console.error('Error in tron stakingRewards', e);
+        throw e;
+      }
+    },
     signmessageV2: async ({payload, privateKey}) =>
       retryFunc(async tronWeb => {
         try {

@@ -22,6 +22,14 @@ const initialState = {
   detailLoading: false,
   detailRefreshing: false,
   detailError: null,
+  // Latest-wins guards (same pattern as exchangeSlice.quoteRequestId): the
+  // pending reducer stamps the id, fulfilled/rejected only commit when their
+  // requestId still matches. listRequestId is shared by the first-page and
+  // load-more thunks, so a wallet switch mid-flight invalidates a stale
+  // page append too — without this, a slow response for the previous wallet
+  // overwrites the current wallet's history.
+  listRequestId: null,
+  detailRequestId: null,
 };
 
 /**
@@ -128,6 +136,7 @@ export const exchangeHistorySlice = createSlice({
   extraReducers: builder => {
     builder
       .addCase(fetchExchangeTransactions.pending, (state, action) => {
+        state.listRequestId = action.meta.requestId;
         if (action.meta.arg?.refresh) {
           state.refreshing = true;
         } else {
@@ -136,21 +145,35 @@ export const exchangeHistorySlice = createSlice({
         state.error = null;
       })
       .addCase(fetchExchangeTransactions.fulfilled, (state, action) => {
+        if (state.listRequestId !== action.meta.requestId) {
+          return;
+        }
         state.loading = false;
         state.refreshing = false;
         state.transactions = action.payload?.items || [];
         state.meta = {...initialState.meta, ...action.payload?.meta};
       })
       .addCase(fetchExchangeTransactions.rejected, (state, action) => {
+        if (state.listRequestId !== action.meta.requestId) {
+          return;
+        }
         state.loading = false;
         state.refreshing = false;
         state.error = action.payload || 'Something went wrong';
       })
-      .addCase(fetchMoreExchangeTransactions.pending, state => {
+      .addCase(fetchMoreExchangeTransactions.pending, (state, action) => {
+        state.listRequestId = action.meta.requestId;
         state.loadingMore = true;
       })
       .addCase(fetchMoreExchangeTransactions.fulfilled, (state, action) => {
+        // Clear the flag even for a superseded request — only one load-more
+        // can be in flight (the condition blocks on loadingMore), so this
+        // settle always belongs to it; leaving it set would block pagination
+        // forever after a first-page fetch preempted the page append.
         state.loadingMore = false;
+        if (state.listRequestId !== action.meta.requestId) {
+          return;
+        }
         const existingIds = new Set(state.transactions.map(tx => tx._id));
         const newItems = (action.payload?.items || []).filter(
           tx => !existingIds.has(tx._id),
@@ -162,6 +185,7 @@ export const exchangeHistorySlice = createSlice({
         state.loadingMore = false;
       })
       .addCase(fetchExchangeTransactionDetails.pending, (state, action) => {
+        state.detailRequestId = action.meta.requestId;
         const {id, refresh} = action.meta.arg || {};
         // Keep showing the current data during a refetch of the same tx;
         // a pull-to-refresh keeps the RefreshControl spinner going, the
@@ -175,6 +199,9 @@ export const exchangeHistorySlice = createSlice({
         state.detailError = null;
       })
       .addCase(fetchExchangeTransactionDetails.fulfilled, (state, action) => {
+        if (state.detailRequestId !== action.meta.requestId) {
+          return;
+        }
         state.detailLoading = false;
         state.detailRefreshing = false;
         if (action.payload) {
@@ -189,6 +216,9 @@ export const exchangeHistorySlice = createSlice({
         }
       })
       .addCase(fetchExchangeTransactionDetails.rejected, (state, action) => {
+        if (state.detailRequestId !== action.meta.requestId) {
+          return;
+        }
         state.detailLoading = false;
         state.detailRefreshing = false;
         state.detailError = action.payload || 'Something went wrong';
