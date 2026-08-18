@@ -73,12 +73,13 @@ const parseBlockchainTransactions = (txs, walletAddresses) => {
       return {
         hash: tx.transaction?.hash,
         timestamp: timestamp,
-        status: !!tx.transaction?.block_id, // Has block_id means it's confirmed
+        status: tx.transaction?.block_id > 0, // Blockchair uses block_id -1 for mempool txs
         amount: transferAmount.toString(),
         fee: fee.toString(),
         from: isOutgoing ? senderAddress : inputs[0]?.recipient,
         to: isOutgoing ? primaryRecipient : internalOutputs[0]?.recipient,
-        blockNumber: tx.transaction?.block_id || null,
+        blockNumber:
+          tx.transaction?.block_id > 0 ? tx.transaction.block_id : null,
       };
     })
     .sort(

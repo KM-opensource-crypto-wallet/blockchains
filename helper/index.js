@@ -352,6 +352,34 @@ const EVM_CHAINS = [
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
 
+// Chains whose DEX swaps need an on-chain token allowance before the swap:
+// EVM (ERC20) and Tron (TRC20). Solana bundles the whole route into the
+// signed transaction itself, so it never needs an approval step.
+export const isSwapApprovalChain = chain_name =>
+  isEVMChain(chain_name) || chain_name === 'tron';
+
+// The single definition of "this exchange is a DEX swap" (provider returned
+// executable calldata) vs a deposit-address provider (plain send). Keep every
+// layer on this predicate instead of re-deriving it inline.
+export const isDexSwap = swapData => Boolean(swapData);
+
+// A DEX quote needs the allowance flow only when the provider named a
+// spender AND the source is a token on an approval chain (ERC20/TRC20).
+// Native-coin sources and Solana bundle everything into the signed tx.
+export const swapNeedsApproval = ({swapData, asset}) =>
+  Boolean(swapData?.spender) &&
+  isSwapApprovalChain(asset?.chain_name) &&
+  Boolean(asset?.contractAddress);
+
+// Shared across chains so the UI can treat an expired quote uniformly:
+// sendFunds matches on this exact message to toast and route the user back
+// to the Exchange screen for a fresh quote.
+export const SWAP_QUOTE_EXPIRED_ERROR =
+  'Swap simulation failed — the quote may have expired or the provider route is currently failing. Please refresh the quote or try another provider.';
+
+export const isSwapBlockingError = message =>
+  message === SWAP_QUOTE_EXPIRED_ERROR;
+
 const OPTIONS_GAS_FEES_CHAIN = [
   'ethereum',
   'binance_smart_chain',
@@ -1336,8 +1364,8 @@ export const commonRetryFunc = async (
       return await cb(provider);
     } catch (e) {
       console.log(`Error in provider:  ${providerName || ''} `, 'Errors:', e);
-      if (i === providers - 1) {
-        if (defaultResponse) {
+      if (i === providers.length - 1) {
+        if (defaultResponse !== undefined) {
           return defaultResponse;
         } else {
           throw e;

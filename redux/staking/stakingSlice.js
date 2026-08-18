@@ -6,6 +6,7 @@ import {
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
+import {applyApproveGasPrice} from 'dok-wallet-blockchain-networks/helper/approveFees';
 import {
   selectCurrentCoin,
   selectCurrentWallet,
@@ -13,7 +14,7 @@ import {
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {ethers} from 'ethers';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
-import BigNumber from 'bignumber.js';
+import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 import {showToast} from 'utils/toast';
 
 const initialState = {
@@ -42,10 +43,16 @@ export const fetchStakingAllowance = createAsyncThunk(
     const amountInWei = BigInt(
       convertToSmallAmount(payload.amount.toString(), decimals),
     );
+    const {stakingProviderAddress} = await EvmStakingProvider.getStakingAddress(
+      {
+        contractAddress: currentCoin?.contractAddress,
+        stakingProviderName: payload.stakingProviderName,
+      },
+    );
     const result = await chain.readAllowance({
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderName: payload.stakingProviderName,
+      spenderAddress: stakingProviderAddress,
       amountInWei,
     });
     return {
@@ -81,15 +88,24 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
     const allowance = BigInt(
       convertToSmallAmount(allowanceData?.allowanceFormatted, decimals) || '0',
     );
+    const {stakingProviderAddress} = await EvmStakingProvider.getStakingAddress(
+      {
+        contractAddress: currentCoin?.contractAddress,
+        stakingProviderName: payload.stakingProviderName,
+      },
+    );
     const result = await chain.getEstimateFeForAllowanceApprove({
       isFetchNonce: payload.isFetchNonce,
       from: currentCoin?.address,
       contractAddress: currentCoin?.contractAddress,
-      stakingProviderName: payload.stakingProviderName,
+      spenderAddress: stakingProviderAddress,
       amountInWei,
       feesType: payload.feesType,
       nonce: payload.nonce,
       allowance: allowance,
+      // executeApprove sends a zero-first reset for these tokens, so the quote
+      // has to cover both transactions. The exchange flow already passes this.
+      needsReset: allowanceData?.needsReset,
     });
     return {
       gasFee: result.gasFee?.toString() ?? null,
@@ -99,7 +115,10 @@ export const fetchStakingApproveEstimationFee = createAsyncThunk(
       nonce: result.nonce ?? null,
       transactionFee: result.fee,
       l1Fees: result.l1Fees?.toString() ?? null,
-      needsAllowanceReset: !!result.allowance,
+      // Accurate on-chain flag from readAllowance. Storing !!result.allowance
+      // here would over-double the fee on a custom gas edit for tokens that
+      // have a non-zero allowance but need no reset-to-zero.
+      needsReset: allowanceData?.needsReset,
     };
   },
 );
@@ -250,11 +269,17 @@ export const executeApprove = createAsyncThunk(
         }
       };
 
+      const {stakingProviderAddress} =
+        await EvmStakingProvider.getStakingAddress({
+          contractAddress: currentCoin?.contractAddress,
+          stakingProviderName: payload.stakingProviderName,
+        });
+
       const {confirmTransaction} = await chain.approve({
         from: currentCoin?.address,
         contractAddress: currentCoin?.contractAddress,
         privateKey,
-        stakingProviderName: payload.stakingProviderName,
+        spenderAddress: stakingProviderAddress,
         amountInWei,
         nonce: payload?.nonce,
         gasFee: toWeiBigInt(payload.gasFee),
@@ -262,6 +287,10 @@ export const executeApprove = createAsyncThunk(
         maxPriorityFeePerGas: toWeiBigInt(payload.maxPriorityFeePerGas),
         feesType: payload.feesType,
         allowance,
+        // Detected by fetchStakingAllowance via simulation. Without it, tokens
+        // that revert approve() while a non-zero allowance exists (USDT-style)
+        // can never be approved for staking.
+        needsReset: allowanceData?.needsReset,
       });
 
       if (confirmTransaction === 'pending') {
@@ -305,46 +334,7 @@ export const stakingSlice = createSlice({
       state.selectedVotes = payload;
     },
     updateApproveFees(state, {payload}) {
-      const gasPrice = payload?.gasPrice;
-      const l1Fees = state.allowanceData?.l1Fees;
-      if (!gasPrice || !state.allowanceData) {
-        return;
-      }
-      const isEVM = payload?.convertedChainName === 'ethereum';
-      const gasPriceBN = new BigNumber(
-        isEVM
-          ? convertToSmallAmount(gasPrice?.toString(), 9)?.toString()
-          : gasPrice?.toString(),
-      );
-      const estimateGasBN = new BigNumber(
-        state.allowanceData?.estimateGas || 0,
-      );
-      const l1FeesBn = new BigNumber(l1Fees || 0);
-      let transactionFeeBN = gasPriceBN
-        .multipliedBy(estimateGasBN)
-        .plus(l1FeesBn);
-      // Reset path sends two txs (reset-to-0 + approve), so the estimation
-      // doubles the fee. Match it so the local recompute stays consistent.
-      if (state.allowanceData?.needsAllowanceReset) {
-        transactionFeeBN = transactionFeeBN.multipliedBy(2);
-      }
-      const transactionFee = parseBalance(
-        transactionFeeBN?.toString(),
-        isEVM ? 18 : 8,
-      );
-      state.allowanceData.gasFee = gasPriceBN.toString();
-      state.allowanceData.transactionFee = transactionFee;
-      // Keep the EIP-1559 tip consistent with the new max fee: the priority fee
-      // must stay below maxFeePerGas (gasPrice), otherwise the tx is rejected.
-      // Clamp to gasPrice - 1 when the (stale) tip now exceeds the custom max fee.
-      if (isEVM && state.allowanceData?.maxPriorityFeePerGas != null) {
-        const priorityFeeBN = new BigNumber(
-          state.allowanceData.maxPriorityFeePerGas.toString(),
-        );
-        state.allowanceData.maxPriorityFeePerGas = priorityFeeBN.gte(gasPriceBN)
-          ? BigNumber.max(gasPriceBN.minus(1), 0).toFixed(0)
-          : priorityFeeBN.toFixed(0);
-      }
+      applyApproveGasPrice(state.allowanceData, payload);
     },
   },
   extraReducers: builder => {

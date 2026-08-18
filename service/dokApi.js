@@ -404,6 +404,47 @@ export const createExchange = async payload => {
   }
 };
 
+export const getExchangeTransactions = async ({
+  walletClientId,
+  page,
+  limit,
+  status,
+}) => {
+  try {
+    const params = {walletClientId, page, limit};
+    if (status) {
+      params.status = status;
+    }
+    const resp = await DokApi.get('/exchange-transactions', {params});
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in getExchangeTransactions', JSON.stringify(e));
+    throw e;
+  }
+};
+
+export const getExchangeTransactionById = async (id, walletClientId) => {
+  try {
+    const resp = await DokApi.get(`/exchange-transactions/${id}`, {
+      params: {walletClientId},
+    });
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in getExchangeTransactionById', JSON.stringify(e));
+    throw e;
+  }
+};
+
+export const reportExchangeTransactionHash = async (id, payload) => {
+  try {
+    const resp = await DokApi.patch(`/exchange-transactions/${id}`, payload);
+    return {status: resp?.status, data: resp?.data?.data};
+  } catch (e) {
+    console.error('Error in reportExchangeTransactionHash', JSON.stringify(e));
+    throw e;
+  }
+};
+
 export const createSubscription = async payload => {
   try {
     const resp = await DokApi.post('/notification-subscriptions', payload);
