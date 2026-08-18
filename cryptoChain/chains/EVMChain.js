@@ -2970,14 +2970,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             delete builtTx.maxPriorityFeePerGas;
             delete builtTx.maxFeePerGas;
             builtTx.gasPrice = finalGasPrice;
-          } else {
-            // Some providers' quoted swapData (e.g. ParaSwap) includes its own
-            // gasPrice field. Spreading it in above alongside the type-2
-            // maxFeePerGas/maxPriorityFeePerGas fields we set here produces a
-            // transaction with both legacy and EIP-1559 fee fields at once,
-            // which ethers rejects with "eip-1559 transaction do not support
-            // gasPrice". Strip it so only the EIP-1559 fields remain.
-            delete builtTx.gasPrice;
           }
           return builtTx;
         });
