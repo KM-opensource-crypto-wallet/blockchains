@@ -16,6 +16,7 @@ import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
   registerUserAPI,
+  reportExchangeTransactionHash,
 } from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   addExistingDeriveAddress,
@@ -65,6 +66,9 @@ import {
   delay,
   getExplorerTxUrl,
   getStakignKey,
+  isDexSwap,
+  isSwapBlockingError,
+  SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   fetchEVMNftApi,
@@ -555,7 +559,11 @@ export const refreshCurrentCoin = createAsyncThunk(
   'wallets/refreshCurrentCoin',
   async (refreshData, thunkAPI) => {
     const currentState = thunkAPI.getState();
-    const currentWallet = selectCurrentWallet(currentState);
+    // Optional wallet override (e.g. the Exchange screen's from-asset can
+    // live in a non-current wallet). Default keeps every existing caller on
+    // the current wallet.
+    const currentWallet =
+      refreshData?.currentWallet || selectCurrentWallet(currentState);
     const currentCoin =
       refreshData?.currentCoin || selectCurrentCoin(currentState);
     const isFetchTransactions = refreshData?.fetchTransaction || false;
@@ -564,7 +572,11 @@ export const refreshCurrentCoin = createAsyncThunk(
     const isFetchUnclaimDeposit = refreshData?.isFetchUnclaimDeposit || false;
     const txHash = refreshData?.txHash || null;
     const isFetchDelegation = refreshData?.isFetchDelegation || false;
-    const allCoins = selectUserCoins(currentState);
+    // The parent (gas) coin must come from the same wallet as the coin
+    // being refreshed.
+    const allCoins = refreshData?.currentWallet
+      ? (refreshData.currentWallet.coins || []).filter(coin => coin?.isInWallet)
+      : selectUserCoins(currentState);
     const parentCoin = getNativeCoinByTokenCoin(allCoins, currentCoin);
     const validatedChainName = validateSupportedChain(currentCoin?.chain_name);
     if (!currentCoin || !validatedChainName) {
@@ -600,7 +612,12 @@ export const refreshCurrentCoin = createAsyncThunk(
         false,
       );
     }
-    return {updatedCurrentCoin, updatedNativeCoin};
+    return {
+      updatedCurrentCoin,
+      updatedNativeCoin,
+      // Lets the reducer write into the wallet that was actually refreshed.
+      walletClientId: currentWallet?.clientId,
+    };
   },
 );
 
@@ -943,6 +960,25 @@ export const sendFunds = createAsyncThunk(
         return null;
       }
       const transferData = getTransferData(currentState);
+      // Last line of client-side quote freshness before anything is signed:
+      // the Transfer screen enforces the same window at its button and
+      // confirm modal, but the user can still race the boundary. The chains'
+      // own broadcast-time simulation remains the authoritative guard.
+      if (
+        txData?.isExchange &&
+        transferData?.quoteCreatedAt &&
+        transferData?.quoteTtlSeconds &&
+        Date.now() >=
+          transferData.quoteCreatedAt + transferData.quoteTtlSeconds * 1000
+      ) {
+        thunkAPI.dispatch(setCurrentTransferSubmitting(false));
+        showToast({
+          type: 'errorToast',
+          title: SWAP_QUOTE_EXPIRED_ERROR,
+        });
+        txData?.navigation?.goBack?.();
+        return;
+      }
       if (txData?.isBatchTransaction && txData?.transactionsData) {
         await fetchBatchTransactionBalances(
           txData?.transactionsData,
@@ -1057,6 +1093,21 @@ export const sendFunds = createAsyncThunk(
             nonce: txData?.nonce ?? transferData?.nonce,
             transactionFee: transferData?.transactionFee,
           })
+        : txData?.isExchange && isDexSwap(transferData?.swapData)
+        ? // The exchange provider quoted calldata to execute (a DEX aggregator
+          // route) rather than a deposit address, so this is a contract call,
+          // not a transfer. Exchanges without swapData fall through to send().
+          await nativeCoin.swap({
+            swapData: transferData?.swapData,
+            to: txData.to,
+            amount: txData.amount,
+            gasFee: transferData?.gasFee,
+            maxPriorityFeePerGas: transferData?.maxPriorityFeePerGas,
+            isMax: transferData?.isMax,
+            estimateGas: transferData?.estimateGas,
+            nonce: txData?.nonce ?? transferData?.nonce,
+            transactionFee: transferData?.transactionFee,
+          })
         : await nativeCoin.send({
             to: txData.to,
             amount: txData.amount,
@@ -1104,6 +1155,22 @@ export const sendFunds = createAsyncThunk(
         }
 
         let tx_hash = getHashString(res, currentCoin?.chain_name);
+        // Fire-and-forget swap-history bookkeeping: reports the broadcast
+        // hash (and later the DEX outcome) against the backend record
+        // created by /create-exchange. Must never block or fail the send.
+        const reportExchangeHistory = payload => {
+          if (txData?.isExchange && transferData?.exchangeHistoryId) {
+            reportExchangeTransactionHash(transferData.exchangeHistoryId, {
+              walletClientId: currentWallet?.clientId,
+              ...payload,
+            }).catch(e =>
+              console.error('Failed to report exchange history', e?.message),
+            );
+          }
+        };
+        if (tx_hash) {
+          reportExchangeHistory({from_tx_hash: tx_hash});
+        }
         const pendingTransaction = {
           amount: txData?.amount,
           to: txData?.to,
@@ -1159,6 +1226,18 @@ export const sendFunds = createAsyncThunk(
                 });
               },
             }),
+            // exchangeHistoryId is the backend record's Mongo _id (historyId
+            // from /create-exchange) — the only id valid for every provider;
+            // it is null when the backend skipped persisting the swap.
+            ...(txData?.isExchange &&
+              transferData?.exchangeHistoryId && {
+                onViewTransaction: () => {
+                  MainNavigation.navigate({
+                    name: 'ExchangeTransactionDetails',
+                    params: {transactionId: transferData.exchangeHistoryId},
+                  });
+                },
+              }),
           },
         });
         if (isPendingTransactionSupportedChain(currentCoin?.chain_name)) {
@@ -1187,6 +1266,12 @@ export const sendFunds = createAsyncThunk(
             toastId,
           });
         } else if (confirmTransaction?.status === 'failed') {
+          // DEX swaps have no provider-side status API (the on-chain result
+          // IS the outcome), so the app is the source of truth here. The
+          // backend only accepts this for DEX providers.
+          if (isDexSwap(transferData?.swapData)) {
+            reportExchangeHistory({status: 'failed'});
+          }
           showToast({
             type: 'errorToast',
             title: 'Transaction Failed',
@@ -1195,6 +1280,9 @@ export const sendFunds = createAsyncThunk(
             toastId,
           });
         } else if (confirmTransaction) {
+          if (isDexSwap(transferData?.swapData)) {
+            reportExchangeHistory({status: 'completed'});
+          }
           if (txData?.to && isEVMChain(currentCoin?.chain_name)) {
             thunkAPI.dispatch(
               recordSentAddress({
@@ -1233,6 +1321,15 @@ export const sendFunds = createAsyncThunk(
                   });
                 },
               }),
+              ...(txData?.isExchange &&
+                transferData?.exchangeHistoryId && {
+                  onViewTransaction: () => {
+                    MainNavigation.navigate({
+                      name: 'ExchangeTransactionDetails',
+                      params: {transactionId: transferData.exchangeHistoryId},
+                    });
+                  },
+                }),
             },
           });
         }
@@ -1260,6 +1357,18 @@ export const sendFunds = createAsyncThunk(
     } catch (e) {
       console.error('Error in send fund', e);
       thunkAPI.dispatch(setCurrentTransferSubmitting(false));
+      if (isSwapBlockingError(e?.message)) {
+        // Expired quote caught before anything was signed/broadcast — same
+        // handling on every chain: no failed-transaction record, back to the
+        // Exchange screen for a fresh quote (the on-chain allowance persists,
+        // so redoing the swap skips the approval sheet).
+        showToast({
+          type: 'errorToast',
+          title: e?.message,
+        });
+        txData?.navigation?.goBack?.();
+        return;
+      }
       if (isEVMChain(txData?.currentCoin?.chain_name)) {
         if (
           e?.message === 'could not coalesce error' ||
@@ -2683,7 +2792,14 @@ export const walletsSlice = createSlice({
     });
     builder.addCase(refreshCurrentCoin.fulfilled, (state, {payload}) => {
       if (payload?.updatedCurrentCoin) {
-        const currentWallet = getCurrentWallet(state);
+        // Same wallet the thunk refreshed — may differ from the current one
+        // when a caller passed a wallet override (Exchange from-asset).
+        const currentWallet = payload?.walletClientId
+          ? getWalletByClientId(state, payload.walletClientId)
+          : getCurrentWallet(state);
+        if (!currentWallet) {
+          return;
+        }
         const allCoins = Array.isArray(currentWallet.coins)
           ? [...currentWallet.coins]
           : [];

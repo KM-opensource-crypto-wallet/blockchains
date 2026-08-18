@@ -193,7 +193,7 @@ export const DogecoinOrLitecoinChain = chain_name => {
         console.error(`No transaction id found for ${chain_name}`);
         return null;
       }
-      return new Promise((resolve, reject) => {
+      return new Promise(resolve => {
         let numberOfRetries = 0;
         let timer = setInterval(async () => {
           try {
@@ -205,17 +205,24 @@ export const DogecoinOrLitecoinChain = chain_name => {
               chain: chainDetails[chain_name],
               transactionId: transactionID,
             });
-            if (isConfirmed?.status) {
+            // status alone is not proof of confirmation: some providers
+            // report mempool txs as confirmed (Blockchair block_id -1),
+            // so also require a real block height.
+            if (isConfirmed?.status && Number(isConfirmed?.blockNumber) > 0) {
               clearInterval(timer);
               resolve(isConfirmed);
-            } else if (numberOfRetries === 15) {
+            } else if (numberOfRetries >= 15) {
               clearInterval(timer);
               resolve('pending');
             }
           } catch (e) {
-            clearInterval(timer);
+            // The tx is already broadcast — a transient provider error must
+            // not fail the flow, keep polling until the retry limit.
             console.error('Error in get tranaction', e);
-            reject(e);
+            if (numberOfRetries >= 15) {
+              clearInterval(timer);
+              resolve('pending');
+            }
           }
         }, 5000);
       });
