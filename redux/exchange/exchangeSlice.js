@@ -2,7 +2,7 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {getExchange} from 'dok-wallet-blockchain-networks/redux/exchange/exchangeSelectors';
 import {
   calculateEstimateFee,
-  setCurrentTransferData,
+  updateCurrentTransferData,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
 import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {
@@ -305,7 +305,7 @@ export const calculateExchange = createAsyncThunk(
             }),
           );
           dispatch(
-            setCurrentTransferData({
+            updateCurrentTransferData({
               toAddress: data?.depositAddress,
               // Null it out explicitly: a deposit-address provider must not
               // inherit calldata left behind by a previous DEX quote.
