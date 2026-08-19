@@ -26,10 +26,13 @@ import {
   customFetchWithTimeout,
   differentInCurrentTime,
   getExplorerTxUrl,
+  isSwapBlockingError,
   isValidStringWithValue,
   parseBalance,
+  SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
 import bs58 from 'bs58';
+import {Buffer} from 'buffer';
 import {getSolanaContract} from 'dok-wallet-blockchain-networks/service/solflare';
 import {nanoid} from 'nanoid';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
@@ -68,7 +71,120 @@ async function getSimulationUnits(
   return {units: simulation?.value?.unitsConsumed || 0, gasFee};
 }
 
-// Example Usage
+// Normalizes the backend's SVM swapData into an ordered list of executable
+// payloads: LI.FI sends one base64-serialized VersionedTransaction under
+// `data`; Relay sends an instruction bundle ({instructions,
+// addressLookupTableAddresses}), or several of them under `svmTransactions`.
+const getSvmExecutables = swapData => {
+  if (Array.isArray(swapData?.svmTransactions)) {
+    return swapData.svmTransactions;
+  }
+  return [swapData];
+};
+
+const isHexString = value =>
+  /^[0-9a-fA-F]+$/.test(value) && !(value.length % 2);
+
+// Relay instruction data is plain hex (verified live); tolerate an 0x prefix
+// and fall back to base64 for any future provider variant.
+const decodeInstructionData = data => {
+  const raw = String(data || '').replace(/^0x/, '');
+  if (raw === '') {
+    return Buffer.alloc(0);
+  }
+  if (isHexString(raw)) {
+    return Buffer.from(raw, 'hex');
+  }
+  return Buffer.from(raw, 'base64');
+};
+
+// Builds a signable VersionedTransaction from one SVM executable.
+// - base64 payloads already contain compute-budget instructions and a
+//   blockhash from quote time; when no third-party signature is present the
+//   blockhash is refreshed so the transaction can't expire in the sheet →
+//   confirm → send window. A partially-signed transaction must be sent
+//   byte-identical, so it is left untouched.
+// - instruction bundles are compiled against the wallet as payer with a
+//   fresh blockhash and the route's address-lookup tables.
+const buildSwapVersionedTransaction = async (
+  executable,
+  fromAddress,
+  solanaProvider,
+) => {
+  if (executable?.data) {
+    const transaction = VersionedTransaction.deserialize(
+      Buffer.from(executable.data, 'base64'),
+    );
+    const hasForeignSignature = transaction.signatures?.some(signature =>
+      signature?.some?.(byte => byte !== 0),
+    );
+    if (!hasForeignSignature) {
+      const {blockhash} = await solanaProvider.getLatestBlockhash();
+      transaction.message.recentBlockhash = blockhash;
+    }
+    return transaction;
+  }
+  if (Array.isArray(executable?.instructions)) {
+    const instructions = executable.instructions.map(
+      instruction =>
+        new TransactionInstruction({
+          programId: new PublicKey(instruction.programId),
+          keys: (instruction.keys || []).map(key => ({
+            pubkey: new PublicKey(key.pubkey),
+            isSigner: !!key.isSigner,
+            isWritable: !!key.isWritable,
+          })),
+          data: decodeInstructionData(instruction.data),
+        }),
+    );
+    const lookupTables = [];
+    for (const tableAddress of executable.addressLookupTableAddresses || []) {
+      const table = await solanaProvider.getAddressLookupTable(
+        new PublicKey(tableAddress),
+      );
+      if (table?.value) {
+        lookupTables.push(table.value);
+      }
+    }
+    const {blockhash} = await solanaProvider.getLatestBlockhash();
+    const message = new TransactionMessage({
+      payerKey: new PublicKey(fromAddress),
+      recentBlockhash: blockhash,
+      instructions,
+    }).compileToV0Message(lookupTables);
+    return new VersionedTransaction(message);
+  }
+  throw new Error('Unsupported Solana swap payload');
+};
+
+const COMPUTE_BUDGET_PROGRAM_ID = 'ComputeBudget111111111111111111111111111111';
+
+// Reads the compute budget the provider baked into the transaction so the
+// fee estimate covers the priority fee, not just the base signature fee.
+// Instruction layout: [2, u32 units] = setComputeUnitLimit,
+// [3, u64 microLamports] = setComputeUnitPrice.
+const readComputeBudget = message => {
+  let units = 0;
+  let microLamports = 0;
+  try {
+    const staticKeys = message.staticAccountKeys || [];
+    for (const instruction of message.compiledInstructions || []) {
+      const programId = staticKeys[instruction.programIdIndex];
+      if (programId?.toString() !== COMPUTE_BUDGET_PROGRAM_ID) {
+        continue;
+      }
+      const data = Buffer.from(instruction.data);
+      if (data[0] === 2 && data.length >= 5) {
+        units = data.readUInt32LE(1);
+      } else if (data[0] === 3 && data.length >= 9) {
+        microLamports = Number(data.readBigUInt64LE(1));
+      }
+    }
+  } catch (e) {
+    console.log('Error reading Solana compute budget', e);
+  }
+  return {units, microLamports};
+};
 
 export const SolanaChain = () => {
   const retryFunc = async (cb, defaultResponse, isTransaction = false) => {
@@ -83,6 +199,12 @@ export const SolanaChain = () => {
         return await cb(solanaProvider);
       } catch (e) {
         console.log('Error for solana rpc', rpcs[i], 'Errors:', e);
+        if (isSwapBlockingError(e?.message)) {
+          // A leg-0 simulation failure is deterministic — retrying on the
+          // next RPC repeats it, and a later RPC's transport error would
+          // replace the message sendFunds keys on.
+          throw e;
+        }
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
             return defaultResponse;
@@ -1061,6 +1183,101 @@ export const SolanaChain = () => {
           }, interval);
         });
       }, null),
+    // Executes a provider-built DEX swap (LI.FI / Relay). Solana needs no
+    // allowance step — the whole route is instruction-bundled into the
+    // transaction(s) signed here. Returns the last signature string (the
+    // wrapper's getHashString expects the raw signature for solana).
+    swap: async ({swapData, from, privateKey}) => {
+      return await retryFunc(
+        async solanaProvider => {
+          const executables = getSvmExecutables(swapData);
+          const secretKey = bs58.decode(privateKey);
+          const keypair = Keypair.fromSecretKey(secretKey, {
+            skipValidation: true,
+          });
+          let lastSignature = null;
+          for (let i = 0; i < executables.length; i++) {
+            const transaction = await buildSwapVersionedTransaction(
+              executables[i],
+              from,
+              solanaProvider,
+            );
+            transaction.sign([keypair]);
+            // The send below skips preflight, so simulate here or an expired
+            // route (stale minOut, or a co-signed transaction whose quote-time
+            // blockhash can't be refreshed) burns the fee on-chain. Only the
+            // first leg is a hard gate: once leg 0 landed, a later leg's
+            // simulation can fail spuriously against RPC state that hasn't
+            // converged on the prior leg, and throwing mid-route would both
+            // strand the user's intermediate tokens and make retryFunc replay
+            // the loop — re-broadcasting leg 0 — on the next RPC.
+            const simulation = await solanaProvider.simulateTransaction(
+              transaction,
+              {commitment: 'confirmed'},
+            );
+            if (simulation?.value?.err) {
+              console.error(
+                'Solana swap simulation failed',
+                JSON.stringify(simulation.value.err),
+                simulation.value.logs?.slice(-5),
+              );
+              if (i === 0) {
+                throw new Error(SWAP_QUOTE_EXPIRED_ERROR);
+              }
+            }
+            lastSignature = await solanaProvider.sendTransaction(transaction, {
+              skipPreflight: true,
+              preflightCommitment: 'processed',
+            });
+            // Sequential routes must land in order — wait for finality
+            // before broadcasting the next transaction.
+            if (i < executables.length - 1) {
+              await solanaProvider.confirmTransaction(
+                lastSignature,
+                'confirmed',
+              );
+            }
+          }
+          return lastSignature;
+        },
+        // null, not undefined: retryFunc returns defaultResponse silently
+        // when it's undefined, which turned real swap failures (including
+        // the expired-quote throw) into a generic success-shaped undefined.
+        null,
+        true,
+      );
+    },
+    // Fee for a provider-built swap: base signature fee via getFeeForMessage
+    // plus the priority fee the provider baked into its compute-budget
+    // instructions. No user-adjustable knobs on Solana → null gas fields
+    // (same contract as Tron transfers, which the transfer UI already
+    // tolerates).
+    getEstimateSwapFee: async ({swapData, fromAddress}) => {
+      return await retryFunc(async solanaProvider => {
+        const executables = getSvmExecutables(swapData);
+        let totalLamports = 0;
+        for (const executable of executables) {
+          const transaction = await buildSwapVersionedTransaction(
+            executable,
+            fromAddress,
+            solanaProvider,
+          );
+          const baseFee = await solanaProvider.getFeeForMessage(
+            transaction.message,
+          );
+          const {units, microLamports} = readComputeBudget(transaction.message);
+          totalLamports +=
+            (baseFee?.value ?? 5000) +
+            Math.ceil((units * microLamports) / 1000000);
+        }
+        return {
+          fee: parseBalance(totalLamports, 9),
+          gasFee: null,
+          estimateGas: null,
+          nonce: null,
+        };
+      });
+    },
     getEpochTime: async () =>
       retryFunc(async solanaProvider => {
         try {
@@ -1170,7 +1387,7 @@ const buildStakingDeactivateTransaction = async (
 const getMemo = (fromAddressPubKey, memo) => {
   return new TransactionInstruction({
     keys: [{pubkey: fromAddressPubKey, isSigner: true, isWritable: true}],
-    // eslint-disable-next-line no-undef
+
     data: Buffer.from(memo, 'utf-8'),
     programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
   });
