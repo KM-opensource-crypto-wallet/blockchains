@@ -53,8 +53,6 @@ import {
   parseBalance,
   validateSupportedChain,
   isDeriveAddressSupportChain,
-  MORALIS_CHAIN_TO_CHAIN,
-  NFT_SUPPORTED_CHAIN,
   isStakingChain,
   moveItem,
   validateNumber,
@@ -70,6 +68,10 @@ import {
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
+import {
+  MORALIS_CHAIN_TO_CHAIN,
+  NFT_SUPPORTED_CHAIN,
+} from 'dok-wallet-blockchain-networks/config/config';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
