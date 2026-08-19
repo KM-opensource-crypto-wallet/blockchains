@@ -730,6 +730,7 @@ const hashObject = {
   ink: 'hash',
   sei: 'hash',
   robinhood: 'hash',
+  hyperliquid: 'hash',
   cardano: '',
   filecoin: '',
 };
