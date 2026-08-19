@@ -657,6 +657,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       );
       let response = null;
       let submitted = false;
+      let maybeSubmitted = false;
       let nonceTooLow = false;
       let firstError = null;
       for (const item of allResp) {
@@ -668,12 +669,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         const message = value?.error?.message?.toLowerCase() || '';
         if (
           message.includes('already known') ||
-          message.includes('already_exists') ||
-          message.includes('missing response for request')
+          message.includes('already_exists')
         ) {
-          // These exact signed bytes are already in a mempool, so
+          // The node explicitly recognized these exact signed bytes, so
           // canonicalHash is the tx's only possible hash.
           submitted = true;
+        } else if (message.includes('missing response for request')) {
+          // Transport timeout after the request went out — the tx may or
+          // may not have reached the node; require visibility below.
+          maybeSubmitted = true;
         } else if (message.includes('nonce too low')) {
           nonceTooLow = true;
         }
@@ -681,10 +685,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           firstError = value.error;
         }
       }
-      return {response, submitted, nonceTooLow, firstError};
+      return {response, submitted, maybeSubmitted, nonceTooLow, firstError};
     };
 
     let submitted = false;
+    let maybeSubmitted = false;
     let nonceTooLow = false;
     let firstError = null;
 
@@ -694,7 +699,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       if (premium.response) {
         return premium.response;
       }
-      ({submitted, nonceTooLow, firstError} = premium);
+      ({submitted, maybeSubmitted, nonceTooLow, firstError} = premium);
       // All premium RPCs failed — fall through to free RPCs
     }
 
@@ -705,13 +710,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       return fallback.response;
     }
     submitted = submitted || fallback.submitted;
+    maybeSubmitted = maybeSubmitted || fallback.maybeSubmitted;
     nonceTooLow = nonceTooLow || fallback.nonceTooLow;
     firstError = firstError || fallback.firstError;
 
-    if (submitted || nonceTooLow) {
-      // 'nonce too low' alone doesn't prove submission — the populate
-      // provider may have handed out a genuinely stale nonce. Only return
-      // the hash once a node can actually see the transaction.
+    if (submitted || maybeSubmitted || nonceTooLow) {
+      // Neither 'nonce too low' nor a transport timeout proves submission —
+      // the populate provider may have handed out a stale nonce, or the
+      // request may never have reached the node. Only 'already known' lets
+      // the hash be returned without a node actually seeing the tx.
       const existing = await safeGetTransactionData(canonicalHash);
       if (existing) {
         return existing;

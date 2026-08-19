@@ -1385,7 +1385,13 @@ export const TronChain = () => {
       const txid = signedTx?.txID;
       const broadcast = await broadcastSignedTronTx({signedTx, txid});
       const info = await waitForTronReceipt(txid);
-      if (info?.receipt?.result && info.receipt.result !== 'SUCCESS') {
+      if (!info?.receipt) {
+        // No receipt within the polling window — the approval is
+        // unconfirmed, and returning success would let the swap race an
+        // approval that may never land.
+        throw new Error('Tron approve was not confirmed on-chain');
+      }
+      if (info.receipt.result && info.receipt.result !== 'SUCCESS') {
         // The approval landed and failed on-chain — retrying or rebuilding
         // would only burn more fees; surface it as a terminal failure.
         throw new Error(`Tron approve failed: ${info.receipt.result}`);

@@ -131,6 +131,12 @@ export const exchangeHistorySlice = createSlice({
     clearCurrentExchangeTransaction(state) {
       state.currentTransaction = null;
       state.detailError = null;
+      // Invalidate any in-flight detail request: dropping the stamped id
+      // makes the requestId guards ignore its late settle, which would
+      // otherwise write the stale transaction/error back after this clear.
+      state.detailRequestId = null;
+      state.detailLoading = false;
+      state.detailRefreshing = false;
     },
   },
   extraReducers: builder => {
