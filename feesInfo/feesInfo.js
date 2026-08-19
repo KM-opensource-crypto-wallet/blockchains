@@ -1,27 +1,26 @@
 import {fetchFeesInfo} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import dayjs from 'dayjs';
-import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  CHAIN_CONFIG,
+  IS_SANDBOX,
+} from 'dok-wallet-blockchain-networks/config/config';
 
 let lastCallTimeStamp;
 
+const feesInfoFromChainConfig = category =>
+  Object.fromEntries(
+    Object.entries(CHAIN_CONFIG)
+      .filter(([, chainConfig]) => chainConfig.fees_info?.[category])
+      .map(([chain_name, chainConfig]) => [
+        chain_name,
+        chainConfig.fees_info[category],
+      ]),
+  );
+
 let feesInfo = {
-  maxPriorityFee: {
-    optimism_binance_smart_chain: {
-      testnet: 1001,
-      mainnet: 1001,
-    },
-  },
-  multiplier: {
-    ethereum: {
-      testnet: 1.3,
-      mainnet: 1.3,
-    },
-    polygon: {
-      testnet: 1.3,
-      mainnet: 1.3,
-    },
-  },
+  maxPriorityFee: {...feesInfoFromChainConfig('max_priority_fee')},
+  multiplier: {...feesInfoFromChainConfig('multiplier')},
 };
 
 function extractFeesInfo(feesObj, isSandbox) {

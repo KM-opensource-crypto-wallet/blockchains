@@ -1,3 +1,4 @@
+import {CHAIN_CONFIG} from 'dok-wallet-blockchain-networks/config/config';
 import {EtherScan} from 'dok-wallet-blockchain-networks/service/etherScan';
 import {VicScan} from 'dok-wallet-blockchain-networks/service/vicScan';
 import {EthereumClassicScan} from 'dok-wallet-blockchain-networks/service/EthereumClassicScan';
@@ -6,24 +7,21 @@ import {PolygonService} from 'dok-wallet-blockchain-networks/service/polygonServ
 import {InkBlockExplorer} from 'dok-wallet-blockchain-networks/service/inkBlockExpolorer';
 import {BlockScout} from 'dok-wallet-blockchain-networks/service/blockScout';
 
-export const EvmServices = {
-  ethereum: EtherScan,
+const SCAN_SERVICES = {
+  etherscan: EtherScan,
   polygon: PolygonService,
-  binance_smart_chain: EtherScan,
-  base: EtherScan,
-  arbitrum: EtherScan,
-  optimism: EtherScan,
-  optimism_binance_smart_chain: EtherScan,
-  avalanche: EtherScan,
-  fantom: EtherScan,
-  gnosis: EtherScan,
-  viction: VicScan,
-  linea: EtherScan,
-  zksync: EtherScan,
+  vicscan: VicScan,
   ethereum_classic: EthereumClassicScan,
   ethereum_pow: EthereumPowScan,
   ink: InkBlockExplorer,
-  sei: EtherScan,
-  hyperliquid: EtherScan,
-  robinhood: BlockScout,
+  blockscout: BlockScout,
 };
+
+export const EvmServices = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.scan_service)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      SCAN_SERVICES[chainConfig.scan_service],
+    ]),
+);

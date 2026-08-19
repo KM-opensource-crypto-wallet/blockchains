@@ -7,30 +7,7 @@ import {
   config,
   SCAN_URL,
   IS_SANDBOX,
-  ethereumChains,
-  supportedChain,
-  BITCOIN_CHAINS,
-  LITECOIN_CHAINS,
-  EVM_CHAINS,
-  OPTIONS_GAS_FEES_CHAIN,
-  EIP_1559_NOT_SUPPORTED,
-  UNCLAIM_DEPOSIT_SUPPORTED_CHAINS,
-  EIP_7702_SUPPORTED_CHAIN,
-  DERIVE_ADDRESS_SUPPORT_CHAIN,
-  STAKING_CHAINS,
-  VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN,
-  SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN,
-  feesOptionsChains,
-  TRANSACTION_LIST_LIMIT_100,
-  EPOCH_TIME_SUPPORT_CHAIN,
-  UNSTAKING_BUTTON_CHAIN,
-  VOTE_BUTTON_CHAIN,
-  MEMO_SUPPORT_CHAIN,
-  NAME_SUPPORT_IN_ADDRESS,
-  TRANSACTION_LIST_NOT_SUPPORTED_CHAINS,
-  CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS,
-  PRIVATE_KEY_NOT_SUPPORTED_CHAINS,
-  DERIVE_INDEX,
+  CHAIN_CONFIG,
 } from 'dok-wallet-blockchain-networks/config/config';
 
 import bs58 from 'bs58';
@@ -290,6 +267,55 @@ export const isValidBigInt = value => {
   }
 };
 
+const chainEntries = Object.entries(CHAIN_CONFIG);
+
+const chainsWith = flag =>
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig[flag])
+    .map(([chain_name]) => chain_name);
+
+const supportedChain = chainsWith('supported');
+const BITCOIN_CHAINS = chainsWith('is_bitcoin');
+const LITECOIN_CHAINS = chainsWith('is_litecoin');
+const EVM_CHAINS = chainsWith('is_evm');
+const ethereumChains = Object.fromEntries(
+  EVM_CHAINS.map(chain_name => [chain_name, 'ethereum']),
+);
+const OPTIONS_GAS_FEES_CHAIN = chainsWith('gas_fee_options');
+const EIP_1559_NOT_SUPPORTED = chainsWith('eip_1559_not_supported');
+const UNCLAIM_DEPOSIT_SUPPORTED_CHAINS = chainsWith('unclaim_deposit');
+const EIP_7702_SUPPORTED_CHAIN = chainsWith('eip_7702');
+const DERIVE_ADDRESS_SUPPORT_CHAIN = [
+  ...EVM_CHAINS,
+  ...chainsWith('derive_address'),
+];
+const STAKING_CHAINS = chainEntries
+  .filter(([, chainConfig]) => chainConfig.staking_keys)
+  .flatMap(([chain_name, chainConfig]) =>
+    chainConfig.staking_keys.map(symbol => `${chain_name}_${symbol}`),
+  );
+const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = chainsWith(
+  'staking_validators_screen',
+);
+const SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN =
+  chainsWith('staking_resources');
+const feesOptionsChains = chainsWith('fees_options');
+const TRANSACTION_LIST_LIMIT_100 = chainsWith('tx_list_limit_100');
+const EPOCH_TIME_SUPPORT_CHAIN = chainsWith('epoch_time');
+const UNSTAKING_BUTTON_CHAIN = chainsWith('unstaking_button');
+const VOTE_BUTTON_CHAIN = chainsWith('vote_button');
+const MEMO_SUPPORT_CHAIN = chainsWith('memo_support');
+const NAME_SUPPORT_IN_ADDRESS = chainsWith('address_name_support');
+const TRANSACTION_LIST_NOT_SUPPORTED_CHAINS = chainsWith(
+  'tx_list_not_supported',
+);
+const CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS = chainsWith(
+  'custom_address_not_supported',
+);
+const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = chainsWith(
+  'private_key_not_supported',
+);
+
 export const isBitcoinChain = chain_name => BITCOIN_CHAINS.includes(chain_name);
 
 export const isLitecoinChain = chain_name =>
@@ -493,6 +519,93 @@ export function getCosmosRequiredFeeAmount(errorString) {
   const match = errorString.match(/required: (\d+)uatom/);
   return match ? match[1] : null;
 }
+
+export const GAS_CURRENCY = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.gas_currency)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.gas_currency]),
+);
+
+export const PrivateKeyList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.private_key_list)
+  .sort(([, a], [, b]) => a.private_key_list.order - b.private_key_list.order)
+  .map(([value, chainConfig]) => ({
+    label: chainConfig.private_key_list.label,
+    value,
+  }));
+
+export const ModalAddTokenList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.add_token)
+  .sort(([, a], [, b]) => a.add_token.order - b.add_token.order)
+  .map(([value, chainConfig]) => {
+    const {label, order, ...rest} = chainConfig.add_token;
+    return {label, value, ...rest};
+  });
+
+export const CustomRPCList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.custom_rpc)
+  .sort(([, a], [, b]) => a.custom_rpc.order - b.custom_rpc.order)
+  .map(([value, chainConfig]) => ({
+    label: chainConfig.custom_rpc.label,
+    value,
+  }));
+
+export const MORALIS_CHAIN_TO_CHAIN = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.moralis)
+    .map(([chain_name, chainConfig]) => [chainConfig.moralis.key, chain_name]),
+);
+
+export const allDerivePath = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.derivation_paths)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.derivation_paths,
+    ]),
+);
+
+const DERIVE_INDEX = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.derive_index)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.derive_index]),
+);
+
+export const resourcesData = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.staking_resources)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.staking_resources,
+    ]),
+);
+
+export const NFT_SUPPORTED_CHAIN = [
+  'Ethereum',
+  'BSC',
+  'Polygon',
+  'Solana',
+  'Arbitrum',
+  'Base',
+  'Optimism',
+];
+
+// Custom-derivation path templates and chain logos — both apps consume these
+// (each app's 'assets' alias resolves the logo files to its own bundle).
+export const DERIVATION_CONFIG = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.custom_derivation)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.custom_derivation,
+    ]),
+);
+
+export const chainLogoMap = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.logo)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.logo]),
+);
 export const AUTO_LOCK = [
   {
     label: 'Immediate',

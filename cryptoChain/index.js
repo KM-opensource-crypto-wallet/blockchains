@@ -4,7 +4,10 @@ import {
   mergeUniqueAccounts,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
-import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  CHAIN_CONFIG,
+  IS_SANDBOX,
+} from 'dok-wallet-blockchain-networks/config/config';
 import {createWallet} from 'myWallet/wallet.service';
 import {APP_VERSION} from 'utils/common';
 
@@ -28,49 +31,34 @@ const loadHederaChain = () => require('./chains/HederaChain').HederaChain;
 const loadCardanoChain = () => require('./chains/CardanoChain').CardanoChain;
 const loadFilecoinChain = () => require('./chains/FilecoinChain').FilecoinChain;
 
-const chainLoaders = {
+const CHAIN_LOADERS = {
+  evm: loadEVMChain,
+  bitcoin: loadBitcoinChain,
+  doge_ltc: loadDogecoinOrLitecoinChain,
+  lightning: loadBitcoinLightningChain,
   tron: loadTronChain,
-  ethereum: loadEVMChain,
-  hyperliquid: loadEVMChain,
-  binance_smart_chain: loadEVMChain,
-  bitcoin: loadBitcoinChain, // this is native segwit
-  bitcoin_legacy: loadBitcoinChain,
-  bitcoin_segwit: loadBitcoinChain,
-  bitcoin_lightning: loadBitcoinLightningChain,
-  // bitcoin_taproot: loadBitcoinChain,
   solana: loadSolanaChain,
-  polygon: loadEVMChain,
-  base: loadEVMChain,
-  arbitrum: loadEVMChain,
-  optimism: loadEVMChain,
-  litecoin: loadDogecoinOrLitecoinChain,
   stellar: loadStellarChain,
   ripple: loadRippleChain,
   thorchain: loadThorChain,
   tezos: loadTezosChain,
-  optimism_binance_smart_chain: loadEVMChain,
-  avalanche: loadEVMChain,
   cosmos: loadCosmosChain,
-  fantom: loadEVMChain,
-  gnosis: loadEVMChain,
-  viction: loadEVMChain,
   polkadot: loadPolkadotChain,
   ton: loadTonChain,
-  dogecoin: loadDogecoinOrLitecoinChain,
   aptos: loadAptosChain,
-  linea: loadEVMChain,
-  zksync: loadEVMChain,
-  ethereum_classic: loadEVMChain,
-  ethereum_pow: loadEVMChain,
-  kava: loadEVMChain,
-  bitcoin_cash: loadDogecoinOrLitecoinChain,
   hedera: loadHederaChain,
-  ink: loadEVMChain,
-  sei: loadEVMChain,
-  robinhood: loadEVMChain,
   cardano: loadCardanoChain,
   filecoin: loadFilecoinChain,
 };
+
+const chainLoaders = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.chain_loader)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      CHAIN_LOADERS[chainConfig.chain_loader],
+    ]),
+);
 
 export const getChain = (chain, phrase, customRpcUrl) => {
   const loadChain = chainLoaders[chain];
@@ -700,46 +688,11 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
   return coinWrapper;
 };
 
-const hashObject = {
-  tron: 'txid',
-  ethereum: 'hash',
-  binance_smart_chain: 'hash',
-  bitcoin: '',
-  bitcoin_legacy: '',
-  bitcoin_segwit: '',
-  solana: '',
-  polygon: 'hash',
-  base: 'hash',
-  arbitrum: 'hash',
-  optimism: 'hash',
-  litecoin: '',
-  stellar: '',
-  ripple: 'result.hash',
-  thorchain: '',
-  tezos: 'opHash',
-  optimism_binance_smart_chain: 'hash',
-  avalanche: 'hash',
-  cosmos: '',
-  fantom: 'hash',
-  gnosis: 'hash',
-  viction: 'hash',
-  // ! polkadot: 'hash',
-  ton: 'hash',
-  dogecoin: '',
-  aptos: '',
-  linea: 'hash',
-  zksync: 'hash',
-  ethereum_classic: 'hash',
-  ethereum_pow: 'hash',
-  kava: 'hash',
-  bitcoin_cash: '',
-  hedera: 'transactionHash',
-  ink: 'hash',
-  sei: 'hash',
-  robinhood: 'hash',
-  cardano: '',
-  filecoin: '',
-};
+const hashObject = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.tx_hash_path)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.tx_hash_path]),
+);
 
 export const createWalletForChain = async (
   phrase,
