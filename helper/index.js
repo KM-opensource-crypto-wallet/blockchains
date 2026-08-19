@@ -1516,30 +1516,22 @@ export async function sleep(timeMs) {
   });
 }
 
-export function extractHashFromEVMError(error) {
-  // Try to extract transaction hash from error message
-  const hashMatch = error.message?.match(/0x[a-fA-F0-9]{64}/);
-  return hashMatch ? hashMatch[0] : null;
-}
-
-export function extractTxHashFromEVMMissingError(error) {
-  // Check if error has the expected structure
-  if (!error.value || !Array.isArray(error.value)) {
-    return null;
+// Chain-agnostic sanity check for a tx hash about to be reported to the
+// backend exchange history. Non-EVM chains report base58/base64/plain-hex
+// hashes of varying lengths, so only 0x-prefixed values get the strict EVM
+// shape check; everything else just has to be a single clean token.
+export const isPlausibleTxHash = hash => {
+  if (typeof hash !== 'string') {
+    return false;
   }
-
-  // Look for a result that looks like a transaction hash (64 hex characters)
-  for (const response of error.value) {
-    if (response.result && typeof response.result === 'string') {
-      // Transaction hashes are 32 bytes = 64 hex characters + '0x' prefix = 66 characters
-      if (response.result.length === 66 && response.result.startsWith('0x')) {
-        return response.result;
-      }
-    }
+  if (/[\s,]/.test(hash) || hash.length < 10 || hash.length > 120) {
+    return false;
   }
-
-  return null;
-}
+  if (hash.startsWith('0x')) {
+    return isValidEVMTransactionHash(hash);
+  }
+  return true;
+};
 
 /**
  * Merges newAccounts into oldAccounts, deduplicating by address OR derivePath.

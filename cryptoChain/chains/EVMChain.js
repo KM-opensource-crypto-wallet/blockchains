@@ -20,8 +20,6 @@ import {
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
-  extractHashFromEVMError,
-  extractTxHashFromEVMMissingError,
   getExplorerTxUrl,
   isEip1559NotSupported,
   isEip7702SupportedChain,
@@ -632,94 +630,113 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }
   };
 
-  const createSendTransactionsPromises = (finalWallet, tx, rpcUrls) => {
-    return rpcUrls.map(async rpcUrl => {
-      try {
-        const tempProvider = createRpcProvider(rpcUrl);
-        const finalWal = finalWallet.connect(tempProvider);
-        const tr = await finalWal.sendTransaction(tx);
-        return {resp: tr, error: null};
-      } catch (e) {
-        if (
-          e.message?.includes('already known') ||
-          e.message?.includes('ALREADY_EXISTS')
-        ) {
-          const txHash = extractHashFromEVMError(e);
-          console.log(
-            `[EVM] Duplicate transaction detected for RPC ${rpcUrl}, hash: ${txHash}`,
-          );
-          if (txHash) {
-            return {resp: txHash, error: null};
-          }
-        } else if (
-          e.message?.toLowerCase()?.includes('missing response for request')
-        ) {
-          const txHash = extractTxHashFromEVMMissingError(e);
-          console.log(
-            `[EVM] Missing response but transaction likely submitted, hash: ${txHash}`,
-          );
-          if (txHash) {
-            return {resp: txHash, error: null};
-          }
-        }
-        return {resp: null, error: e};
-      }
-    });
-  };
-
   const createSendTransaction = async (wallet, tx) => {
-    const extractResult = allResp => {
-      const submittedTxs = [];
+    // Populate and sign ONCE so every RPC receives byte-identical raw bytes.
+    // Signing per-RPC lets each endpoint resolve its own pending nonce when
+    // the caller left it unset — a lagging node then signs a divergent
+    // sibling tx, and the hash returned here may belong to the sibling that
+    // never mines instead of the one that does.
+    const populated = await retryFunc(async evmProvider =>
+      wallet.connect(evmProvider).populateTransaction(tx),
+    );
+    const signedRaw = await wallet.signTransaction(populated);
+    const canonicalHash = Transaction.from(signedRaw).hash;
+
+    const broadcastToAll = async rpcUrls => {
+      const allResp = await Promise.allSettled(
+        rpcUrls.map(async rpcUrl => {
+          try {
+            const resp = await createRpcProvider(rpcUrl).broadcastTransaction(
+              signedRaw,
+            );
+            return {resp, error: null};
+          } catch (e) {
+            return {resp: null, error: e};
+          }
+        }),
+      );
+      let response = null;
+      let submitted = false;
+      let maybeSubmitted = false;
+      let nonceTooLow = false;
+      let firstError = null;
       for (const item of allResp) {
-        const txData = item?.value?.resp;
-        if (txData?.hash) {
-          return {result: txData};
+        const value = item?.value;
+        if (value?.resp?.hash && !response) {
+          response = value.resp;
+          continue;
         }
+        const message = value?.error?.message?.toLowerCase() || '';
         if (
-          txData &&
-          typeof txData === 'string' &&
-          !submittedTxs.includes(txData)
+          message.includes('already known') ||
+          message.includes('already_exists')
         ) {
-          submittedTxs.push(txData);
+          // The node explicitly recognized these exact signed bytes, so
+          // canonicalHash is the tx's only possible hash.
+          submitted = true;
+        } else if (message.includes('missing response for request')) {
+          // Transport timeout after the request went out — the tx may or
+          // may not have reached the node; require visibility below.
+          maybeSubmitted = true;
+        } else if (message.includes('nonce too low')) {
+          nonceTooLow = true;
+        }
+        if (value?.error && !firstError) {
+          firstError = value.error;
         }
       }
-      if (submittedTxs.length > 0) {
-        return {result: submittedTxs};
-      }
-      return null;
+      return {response, submitted, maybeSubmitted, nonceTooLow, firstError};
     };
+
+    let submitted = false;
+    let maybeSubmitted = false;
+    let nonceTooLow = false;
+    let firstError = null;
 
     // Phase 1: Try premium RPCs first (skipped when customRpcUrl is set)
     if (!customRpcUrl && premiumRpcUrls.length > 0) {
-      const premiumResp = await Promise.allSettled(
-        createSendTransactionsPromises(wallet, tx, premiumRpcUrls),
-      );
-      const premiumResult = extractResult(premiumResp);
-      if (premiumResult) {
-        return premiumResult.result;
+      const premium = await broadcastToAll(premiumRpcUrls);
+      if (premium.response) {
+        return premium.response;
       }
+      ({submitted, maybeSubmitted, nonceTooLow, firstError} = premium);
       // All premium RPCs failed — fall through to free RPCs
     }
 
     // Phase 2: Free RPCs (or sole customRpcUrl)
     const fallbackUrls = customRpcUrl ? [customRpcUrl] : freeRpcUrls;
-    const allResp = await Promise.allSettled(
-      createSendTransactionsPromises(wallet, tx, fallbackUrls),
-    );
-    const freeResult = extractResult(allResp);
-    if (freeResult) {
-      return freeResult.result;
+    const fallback = await broadcastToAll(fallbackUrls);
+    if (fallback.response) {
+      return fallback.response;
+    }
+    submitted = submitted || fallback.submitted;
+    maybeSubmitted = maybeSubmitted || fallback.maybeSubmitted;
+    nonceTooLow = nonceTooLow || fallback.nonceTooLow;
+    firstError = firstError || fallback.firstError;
+
+    if (submitted || maybeSubmitted || nonceTooLow) {
+      // Neither 'nonce too low' nor a transport timeout proves submission —
+      // the populate provider may have handed out a stale nonce, or the
+      // request may never have reached the node. Only 'already known' lets
+      // the hash be returned without a node actually seeing the tx.
+      const existing = await safeGetTransactionData(canonicalHash);
+      if (existing) {
+        return existing;
+      }
+      if (submitted) {
+        console.log(
+          `[EVM] Transaction already in mempool, hash: ${canonicalHash}`,
+        );
+        return canonicalHash;
+      }
     }
 
-    // All RPCs failed — throw first error found
-    for (const item of allResp) {
-      if (item?.value?.error) {
-        console.error(
-          '[EVM] All RPC endpoints failed, throwing error:',
-          item.value.error.message,
-        );
-        throw item.value.error;
-      }
+    if (firstError) {
+      console.error(
+        '[EVM] All RPC endpoints failed, throwing error:',
+        firstError.message,
+      );
+      throw firstError;
     }
   };
 
