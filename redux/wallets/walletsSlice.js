@@ -65,6 +65,7 @@ import {
   getExplorerTxUrl,
   getStakignKey,
   isDexSwap,
+  isPlausibleTxHash,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
   MORALIS_CHAIN_TO_CHAIN,
@@ -976,7 +977,11 @@ export const sendFunds = createAsyncThunk(
           type: 'errorToast',
           title: SWAP_QUOTE_EXPIRED_ERROR,
         });
-        txData?.navigation?.goBack?.();
+        if (navigation) {
+          navigation?.goBack?.();
+        } else if (router) {
+          router.back();
+        }
         return;
       }
       if (txData?.isBatchTransaction && txData?.transactionsData) {
@@ -1168,7 +1173,10 @@ export const sendFunds = createAsyncThunk(
             );
           }
         };
-        if (tx_hash) {
+        // Broadcast can yield a non-hash value (e.g. an array of mempool
+        // candidates) — never report those; the confirmation report below
+        // carries the receipt's hash instead.
+        if (isPlausibleTxHash(tx_hash)) {
           reportExchangeHistory({from_tx_hash: tx_hash});
         }
         const pendingTransaction = {
@@ -1258,6 +1266,17 @@ export const sendFunds = createAsyncThunk(
           interval: 5000,
           retries: 15,
         });
+        // The receipt's hash is the tx that actually mined — on a replaced
+        // (sped-up / same-nonce sibling) transaction it differs from the
+        // broadcast hash reported above, and the backend accepts it as the
+        // authoritative correction alongside the terminal status.
+        const confirmedHash =
+          typeof confirmTransaction === 'object'
+            ? confirmTransaction?.hash
+            : undefined;
+        const confirmedHashPayload = isPlausibleTxHash(confirmedHash)
+          ? {from_tx_hash: confirmedHash}
+          : {};
         if (confirmTransaction === 'pending') {
           showToast({
             type: 'warningToast',
@@ -1270,7 +1289,7 @@ export const sendFunds = createAsyncThunk(
           // IS the outcome), so the app is the source of truth here. The
           // backend only accepts this for DEX providers.
           if (isDexSwap(transferData?.swapData)) {
-            reportExchangeHistory({status: 'failed'});
+            reportExchangeHistory({status: 'failed', ...confirmedHashPayload});
           }
           showToast({
             type: 'errorToast',
@@ -1281,7 +1300,10 @@ export const sendFunds = createAsyncThunk(
           });
         } else if (confirmTransaction) {
           if (isDexSwap(transferData?.swapData)) {
-            reportExchangeHistory({status: 'completed'});
+            reportExchangeHistory({
+              status: 'completed',
+              ...confirmedHashPayload,
+            });
           }
           if (txData?.to && isEVMChain(currentCoin?.chain_name)) {
             thunkAPI.dispatch(
@@ -1366,7 +1388,13 @@ export const sendFunds = createAsyncThunk(
           type: 'errorToast',
           title: e?.message,
         });
-        txData?.navigation?.goBack?.();
+        // navigation/router consts live inside the try block — read from
+        // txData here in the catch.
+        if (txData?.navigation) {
+          txData.navigation.goBack?.();
+        } else if (txData?.router) {
+          txData.router.back();
+        }
         return;
       }
       if (isEVMChain(txData?.currentCoin?.chain_name)) {

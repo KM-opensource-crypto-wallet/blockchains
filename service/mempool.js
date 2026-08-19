@@ -188,7 +188,9 @@ export const Mempool = {
           'Content-Type': 'text/plain',
         },
       });
-      return resp?.data;
+      // Plain-text body IS the txid — strip any stray whitespace/newline so
+      // downstream hash validation never rejects it.
+      return typeof resp?.data === 'string' ? resp.data.trim() : resp?.data;
     } catch (e) {
       console.error(
         `Error in ${chain} for create transactions`,

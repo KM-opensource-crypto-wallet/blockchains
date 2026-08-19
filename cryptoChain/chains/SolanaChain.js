@@ -115,6 +115,11 @@ const decodeInstructionData = data => {
 //   byte-identical, so it is left untouched.
 // - instruction bundles are compiled against the wallet as payer with a
 //   fresh blockhash and the route's address-lookup tables.
+// Returns {transaction, lastValidBlockHeight}. lastValidBlockHeight is the
+// hard deadline after which the transaction can provably never land — the
+// only condition under which a caller may safely rebuild after a broadcast
+// attempt. It is null for co-signed payloads whose quote-time blockhash we
+// cannot refresh (their deadline is unknown to us).
 const buildSwapVersionedTransaction = async (
   executable,
   fromAddress,
@@ -127,11 +132,13 @@ const buildSwapVersionedTransaction = async (
     const hasForeignSignature = transaction.signatures?.some(signature =>
       signature?.some?.(byte => byte !== 0),
     );
+    let lastValidBlockHeight = null;
     if (!hasForeignSignature) {
-      const {blockhash} = await solanaProvider.getLatestBlockhash();
-      transaction.message.recentBlockhash = blockhash;
+      const latest = await solanaProvider.getLatestBlockhash();
+      transaction.message.recentBlockhash = latest.blockhash;
+      lastValidBlockHeight = latest.lastValidBlockHeight;
     }
-    return transaction;
+    return {transaction, lastValidBlockHeight};
   }
   if (Array.isArray(executable?.instructions)) {
     const instructions = executable.instructions.map(
@@ -155,13 +162,16 @@ const buildSwapVersionedTransaction = async (
         lookupTables.push(table.value);
       }
     }
-    const {blockhash} = await solanaProvider.getLatestBlockhash();
+    const latest = await solanaProvider.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: new PublicKey(fromAddress),
-      recentBlockhash: blockhash,
+      recentBlockhash: latest.blockhash,
       instructions,
     }).compileToV0Message(lookupTables);
-    return new VersionedTransaction(message);
+    return {
+      transaction: new VersionedTransaction(message),
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    };
   }
   throw new Error('Unsupported Solana swap payload');
 };
@@ -312,11 +322,118 @@ export const SolanaChain = () => {
     };
   };
 
-  const sendTransaction = async ({
-    transactionMessage,
-    privateKey,
-    solanaProvider,
+  // ---- Broadcast idempotency layer -----------------------------------
+  // Solana's nonce-equivalent is the signature over fixed bytes: once a
+  // transaction is signed, re-broadcasting the SAME serialized bytes can
+  // never land twice (the cluster dedupes the signature while its blockhash
+  // is valid, and after lastValidBlockHeight it can never land at all).
+  // Everything state-changing below therefore signs exactly once and only
+  // ever retries the broadcast of those bytes — never a rebuild, which
+  // would refresh the blockhash, change the signature and double-spend.
+
+  // Sends the SAME bytes to every transaction RPC in turn. "Already
+  // processed" from a node that saw a previous attempt is success.
+  const broadcastRawTransaction = async ({serializedTx, signature}) => {
+    const rpcs = getFreeRPCUrl(isWeb ? 'solana' : 'tx_solana');
+    let lastError = null;
+    for (let i = 0; i < rpcs.length; i++) {
+      try {
+        const solanaProvider = new Connection(rpcs[i], {
+          fetch: customFetchWithTimeout,
+        });
+        await solanaProvider.sendRawTransaction(serializedTx, {
+          skipPreflight: true,
+          preflightCommitment: 'processed',
+        });
+        return signature;
+      } catch (e) {
+        if (`${e?.message || ''}`.includes('already been processed')) {
+          // A previous attempt landed (or reached the node via gossip).
+          return signature;
+        }
+        console.log('Error broadcasting solana tx on rpc', rpcs[i], e);
+        lastError = e;
+      }
+    }
+    throw lastError ?? new Error('Failed to broadcast Solana transaction');
+  };
+
+  // Read-only status probe; undefined default so a total RPC outage reads
+  // as "unknown" rather than throwing (the caller decides what to do).
+  const getSignatureStatus = async signature =>
+    retryFunc(
+      async solanaProvider => {
+        const resp = await solanaProvider.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        });
+        return resp?.value?.[0] ?? null;
+      },
+      undefined,
+      true,
+    );
+
+  // Polls a signature until it reaches the commitment. Never rebuilds:
+  // resolves 'confirmed' when landed, throws when the transaction failed
+  // on-chain, resolves 'expired' when the blockhash provably died without
+  // the signature landing (the only state in which a rebuild is safe), and
+  // resolves 'pending' when the bounded poll ran out without a verdict.
+  //
+  // The 'expired' verdict authorizes a re-send, so it demands hard evidence:
+  // an RPC must have POSITIVELY answered "signature unknown" (null — an
+  // undefined status means every status RPC errored and proves nothing),
+  // the cluster height must be past lastValidBlockHeight with a margin that
+  // absorbs RPC lag, and both must hold on two consecutive polls.
+  const EXPIRY_MARGIN_BLOCKS = 15;
+  const confirmSignature = async ({
+    signature,
+    lastValidBlockHeight,
+    commitment = 'confirmed',
+    interval = 3000,
+    maxAttempts = 20,
   }) => {
+    const okStatuses =
+      commitment === 'finalized' ? ['finalized'] : ['confirmed', 'finalized'];
+    let expiredEvidence = 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const status = await getSignatureStatus(signature);
+      if (status?.err) {
+        throw new Error(
+          `Solana transaction failed on-chain: ${JSON.stringify(status.err)}`,
+        );
+      }
+      if (status && okStatuses.includes(status.confirmationStatus)) {
+        return 'confirmed';
+      }
+      if (status === null && lastValidBlockHeight) {
+        const blockHeight = await retryFunc(
+          async solanaProvider => solanaProvider.getBlockHeight('confirmed'),
+          undefined,
+          true,
+        );
+        if (
+          typeof blockHeight === 'number' &&
+          blockHeight > lastValidBlockHeight + EXPIRY_MARGIN_BLOCKS
+        ) {
+          expiredEvidence += 1;
+          if (expiredEvidence >= 2) {
+            return 'expired';
+          }
+        } else {
+          expiredEvidence = 0;
+        }
+      } else {
+        // Unknown status (all status RPCs failed) is not evidence of expiry.
+        expiredEvidence = 0;
+      }
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+    return 'pending';
+  };
+
+  // Sign once, then broadcast idempotently. Replaces the old pattern of
+  // signing inside the per-RPC retry callback, where each retry re-signed
+  // with a fresh blockhash and could double-send.
+  const signAndBroadcastMessage = async ({transactionMessage, privateKey}) => {
     const secretKey = bs58.decode(privateKey);
     const fromKeypair = Keypair.fromSecretKey(secretKey, {
       skipValidation: true,
@@ -325,9 +442,10 @@ export const SolanaChain = () => {
       transactionMessage.compileToV0Message(),
     );
     transaction.sign([fromKeypair]);
-    return await solanaProvider.sendTransaction(transaction, {
-      skipPreflight: true,
-      preflightCommitment: 'processed',
+    const signature = bs58.encode(transaction.signatures[0]);
+    return await broadcastRawTransaction({
+      serializedTx: transaction.serialize(),
+      signature,
     });
   };
 
@@ -1019,28 +1137,30 @@ export const SolanaChain = () => {
         throw e;
       }
     },
-    send: async ({to, from, amount, privateKey, memo, gasFee, estimateGas}) =>
-      retryFunc(async solanaProvider => {
-        try {
-          const transactionMessage = await prepareTransferMessage({
-            fromAddress: from,
-            toAddress: to,
-            amount,
-            memo,
-            solanaProvider,
-            gasFee,
-            estimateGas,
-          });
-          return await sendTransaction({
-            transactionMessage,
-            privateKey,
-            solanaProvider,
-          });
-        } catch (e) {
-          console.error('Error in send solana transaction', e);
-          throw e;
-        }
-      }, null),
+    send: async ({to, from, amount, privateKey, memo, gasFee, estimateGas}) => {
+      try {
+        // Prepare (reads only) may retry across RPCs; sign+broadcast happens
+        // exactly once outside the retry so no replay can re-sign.
+        const transactionMessage = await retryFunc(
+          async solanaProvider =>
+            prepareTransferMessage({
+              fromAddress: from,
+              toAddress: to,
+              amount,
+              memo,
+              solanaProvider,
+              gasFee,
+              estimateGas,
+            }),
+          null,
+          true,
+        );
+        return await signAndBroadcastMessage({transactionMessage, privateKey});
+      } catch (e) {
+        console.error('Error in send solana transaction', e);
+        throw e;
+      }
+    },
     createStaking: async ({
       validatorPubKey,
       from,
@@ -1048,53 +1168,53 @@ export const SolanaChain = () => {
       privateKey,
       gasFee,
       estimateGas,
-    }) =>
-      retryFunc(async solanaProvider => {
-        try {
-          const transactionMessage = await prepareCreateStaking({
-            from,
-            validatorPubKey,
-            amount,
-            solanaProvider,
-            gasFee,
-            estimateGas,
-          });
-          return await sendTransaction({
-            transactionMessage,
-            privateKey,
-            solanaProvider,
-          });
-        } catch (e) {
-          console.error('Error in create solana staking', e);
-          throw e;
-        }
-      }, null),
+    }) => {
+      try {
+        const transactionMessage = await retryFunc(
+          async solanaProvider =>
+            prepareCreateStaking({
+              from,
+              validatorPubKey,
+              amount,
+              solanaProvider,
+              gasFee,
+              estimateGas,
+            }),
+          null,
+          true,
+        );
+        return await signAndBroadcastMessage({transactionMessage, privateKey});
+      } catch (e) {
+        console.error('Error in create solana staking', e);
+        throw e;
+      }
+    },
     deactivateStaking: async ({
       from,
       stakingAddress,
       privateKey,
       gasFee,
       estimateGas,
-    }) =>
-      retryFunc(async solanaProvider => {
-        try {
-          const tx = await buildStakingDeactivateTransaction(
-            solanaProvider,
-            stakingAddress,
-            from,
-            gasFee,
-            estimateGas,
-          );
-          return await sendTransaction({
-            transactionMessage: tx,
-            privateKey,
-            solanaProvider,
-          });
-        } catch (e) {
-          console.error('Error in solana deactivateStaking', e);
-          throw e;
-        }
-      }, null),
+    }) => {
+      try {
+        const transactionMessage = await retryFunc(
+          async solanaProvider =>
+            buildStakingDeactivateTransaction(
+              solanaProvider,
+              stakingAddress,
+              from,
+              gasFee,
+              estimateGas,
+            ),
+          null,
+          true,
+        );
+        return await signAndBroadcastMessage({transactionMessage, privateKey});
+      } catch (e) {
+        console.error('Error in solana deactivateStaking', e);
+        throw e;
+      }
+    },
     withdrawStaking: async ({
       from,
       amount,
@@ -1102,27 +1222,27 @@ export const SolanaChain = () => {
       privateKey,
       gasFee,
       estimateGas,
-    }) =>
-      retryFunc(async solanaProvider => {
-        try {
-          const tx = await buildStakingWithdrawTransaction(
-            solanaProvider,
-            stakingAddress,
-            from,
-            amount,
-            gasFee,
-            estimateGas,
-          );
-          return await sendTransaction({
-            transactionMessage: tx,
-            privateKey,
-            solanaProvider,
-          });
-        } catch (e) {
-          console.error('Error in solana withdrawStaking', e);
-          throw e;
-        }
-      }, null),
+    }) => {
+      try {
+        const transactionMessage = await retryFunc(
+          async solanaProvider =>
+            buildStakingWithdrawTransaction(
+              solanaProvider,
+              stakingAddress,
+              from,
+              amount,
+              gasFee,
+              estimateGas,
+            ),
+          null,
+          true,
+        );
+        return await signAndBroadcastMessage({transactionMessage, privateKey});
+      } catch (e) {
+        console.error('Error in solana withdrawStaking', e);
+        throw e;
+      }
+    },
     sendToken: async ({
       to,
       amount,
@@ -1134,32 +1254,32 @@ export const SolanaChain = () => {
       memo,
       gasFee,
       estimateGas,
-    }) =>
-      retryFunc(async solanaProvider => {
-        try {
-          const {transactionMessage} = await prepareTokenTransferMessage({
-            toAddress: to,
-            contractAddress,
-            amount,
-            decimals: decimal,
-            tokenAmount,
-            mint,
-            memo,
-            solanaProvider: solanaProvider,
-            privateKey,
-            estimateGas,
-            gasFee,
-          });
-          return await sendTransaction({
-            transactionMessage,
-            privateKey,
-            solanaProvider,
-          });
-        } catch (e) {
-          console.error('Error in send solana token transaction', e);
-          throw e;
-        }
-      }, null),
+    }) => {
+      try {
+        const {transactionMessage} = await retryFunc(
+          async solanaProvider =>
+            prepareTokenTransferMessage({
+              toAddress: to,
+              contractAddress,
+              amount,
+              decimals: decimal,
+              tokenAmount,
+              mint,
+              memo,
+              solanaProvider: solanaProvider,
+              privateKey,
+              estimateGas,
+              gasFee,
+            }),
+          null,
+          true,
+        );
+        return await signAndBroadcastMessage({transactionMessage, privateKey});
+      } catch (e) {
+        console.error('Error in send solana token transaction', e);
+        throw e;
+      }
+    },
     sendNFT: async props => {
       return await SolanaChain().sendToken(props);
     },
@@ -1216,32 +1336,40 @@ export const SolanaChain = () => {
     // allowance step — the whole route is instruction-bundled into the
     // transaction(s) signed here. Returns the last signature string (the
     // wrapper's getHashString expects the raw signature for solana).
+    //
+    // Idempotency contract: each leg is built and signed exactly once; only
+    // the broadcast of those bytes retries across RPCs. A leg may be rebuilt
+    // only when confirmSignature proves the original can never land
+    // ('expired'), and then exactly once — the old shape (the whole loop
+    // inside retryFunc) re-signed with a fresh blockhash on every transient
+    // error and could execute a landed leg twice.
     swap: async ({swapData, from, privateKey}) => {
-      return await retryFunc(
-        async solanaProvider => {
-          const executables = getSvmExecutables(swapData);
-          const secretKey = bs58.decode(privateKey);
-          const keypair = Keypair.fromSecretKey(secretKey, {
-            skipValidation: true,
-          });
-          let lastSignature = null;
-          for (let i = 0; i < executables.length; i++) {
-            const transaction = await buildSwapVersionedTransaction(
-              executables[i],
+      const executables = getSvmExecutables(swapData);
+      const secretKey = bs58.decode(privateKey);
+      const keypair = Keypair.fromSecretKey(secretKey, {
+        skipValidation: true,
+      });
+
+      const executeSwapLeg = async (legIndex, allowRebuild) => {
+        // Prepare (reads only): build + simulate may retry across RPCs —
+        // nothing has been broadcast yet, so replays here are harmless.
+        const {transaction, lastValidBlockHeight} = await retryFunc(
+          async solanaProvider => {
+            const built = await buildSwapVersionedTransaction(
+              executables[legIndex],
               from,
               solanaProvider,
             );
-            transaction.sign([keypair]);
             // The send below skips preflight, so simulate here or an expired
-            // route (stale minOut, or a co-signed transaction whose quote-time
-            // blockhash can't be refreshed) burns the fee on-chain. Only the
-            // first leg is a hard gate: once leg 0 landed, a later leg's
-            // simulation can fail spuriously against RPC state that hasn't
-            // converged on the prior leg, and throwing mid-route would both
-            // strand the user's intermediate tokens and make retryFunc replay
-            // the loop — re-broadcasting leg 0 — on the next RPC.
+            // route (stale minOut, or a co-signed transaction whose
+            // quote-time blockhash can't be refreshed) burns the fee
+            // on-chain. Only the first leg is a hard gate: once leg 0
+            // landed, a later leg's simulation can fail spuriously against
+            // RPC state that hasn't converged on the prior leg, and
+            // throwing mid-route would strand the user's intermediate
+            // tokens.
             const simulation = await solanaProvider.simulateTransaction(
-              transaction,
+              built.transaction,
               {commitment: 'confirmed'},
             );
             if (simulation?.value?.err) {
@@ -1250,31 +1378,49 @@ export const SolanaChain = () => {
                 JSON.stringify(simulation.value.err),
                 simulation.value.logs?.slice(-5),
               );
-              if (i === 0) {
+              if (legIndex === 0) {
                 throw new Error(SWAP_QUOTE_EXPIRED_ERROR);
               }
             }
-            lastSignature = await solanaProvider.sendTransaction(transaction, {
-              skipPreflight: true,
-              preflightCommitment: 'processed',
-            });
-            // Sequential routes must land in order — wait for finality
-            // before broadcasting the next transaction.
-            if (i < executables.length - 1) {
-              await solanaProvider.confirmTransaction(
-                lastSignature,
-                'confirmed',
-              );
-            }
+            return built;
+          },
+          null,
+          true,
+        );
+        // Sign ONCE. From here the signature is this leg's fixed identity —
+        // no code below may rebuild or re-sign this transaction.
+        transaction.sign([keypair]);
+        const signature = bs58.encode(transaction.signatures[0]);
+        await broadcastRawTransaction({
+          serializedTx: transaction.serialize(),
+          signature,
+        });
+        // Sequential routes must land in order — verify by signature status
+        // before broadcasting the next transaction (never by rebuilding).
+        if (legIndex < executables.length - 1) {
+          const outcome = await confirmSignature({
+            signature,
+            lastValidBlockHeight,
+          });
+          if (outcome === 'expired' && allowRebuild) {
+            // Provably never landed (blockhash died with no trace of the
+            // signature) — the one case a rebuild cannot double-send.
+            return await executeSwapLeg(legIndex, false);
           }
-          return lastSignature;
-        },
-        // null, not undefined: retryFunc returns defaultResponse silently
-        // when it's undefined, which turned real swap failures (including
-        // the expired-quote throw) into a generic success-shaped undefined.
-        null,
-        true,
-      );
+          if (outcome !== 'confirmed') {
+            throw new Error(
+              'Solana swap transaction was broadcast but its confirmation could not be verified. Check the transaction status before retrying.',
+            );
+          }
+        }
+        return signature;
+      };
+
+      let lastSignature = null;
+      for (let i = 0; i < executables.length; i++) {
+        lastSignature = await executeSwapLeg(i, true);
+      }
+      return lastSignature;
     },
     // Fee for a provider-built swap: base signature fee via getFeeForMessage
     // plus the priority fee the provider baked into its compute-budget
@@ -1286,7 +1432,7 @@ export const SolanaChain = () => {
         const executables = getSvmExecutables(swapData);
         let totalLamports = 0;
         for (const executable of executables) {
-          const transaction = await buildSwapVersionedTransaction(
+          const {transaction} = await buildSwapVersionedTransaction(
             executable,
             fromAddress,
             solanaProvider,
