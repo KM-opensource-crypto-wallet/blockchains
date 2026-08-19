@@ -1,13 +1,14 @@
 import axios from 'axios';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const BlockScoutAPI = axios.create({
-  baseURL: config.BLOCKSCOUT_BASE_URL,
+  baseURL: buildScanProxyUrl('blockscout'),
   headers: {
     'Content-Type': 'application/json',
   },
-  params: {
-    apikey: config.BLOCKSCOUT_API_KEY,
-  },
+  adapter: rpcSessionAdapter,
   timeout: 30000,
 });

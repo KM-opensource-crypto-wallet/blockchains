@@ -1,11 +1,15 @@
 import axios from 'axios';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const TronScanAPI = axios.create({
-  baseURL: config.TRON_SCAN_BASE_URL,
+  baseURL: buildScanProxyUrl('tron'),
   headers: {
     'Content-Type': 'application/json',
-    'TRON-PRO-API-KEY': config.TRON_SCAN_API_KEY,
+    'x-rpc-type': 'scan',
   },
+  adapter: rpcSessionAdapter,
   timeout: 30000,
 });

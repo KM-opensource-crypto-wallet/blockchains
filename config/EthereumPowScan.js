@@ -1,11 +1,14 @@
 import axios from 'axios';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const EthereumPowScanAPI = axios.create({
-  baseURL: config.ETHEREUM_POW_SCAN_API_URL,
+  baseURL: buildScanProxyUrl('ethereum_pow'),
   headers: {
     'Content-Type': 'application/json',
-    'OK-ACCESS-KEY': config.ETHEREUM_POW_SCAN_API_KEY,
   },
+  adapter: rpcSessionAdapter,
   timeout: 30000,
 });

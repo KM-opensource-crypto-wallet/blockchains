@@ -31,12 +31,14 @@ let inFlightRequest = null;
 const getProxyBaseUrl = () =>
   config.DOK_WALLET_BASE_URL?.replace(/\/$/, '') || '';
 
-export const buildRpcProxyUrl = chain_name => {
+export const buildRpcProxyUrl = chain_name =>
+  PREMIUM_CHAINS[NETWORK].includes(chain_name)
+    ? buildScanProxyUrl(chain_name)
+    : '';
+
+export const buildScanProxyUrl = name => {
   const baseUrl = getProxyBaseUrl();
-  if (!baseUrl || !PREMIUM_CHAINS[NETWORK].includes(chain_name)) {
-    return '';
-  }
-  return `${baseUrl}/rpc/${chain_name}`;
+  return baseUrl ? `${baseUrl}/rpc/${name}` : '';
 };
 
 export const isRpcProxyUrl = url => {
@@ -104,6 +106,26 @@ export const withRpcSessionFetch =
       ? send({'x-rpc-session': freshToken, 'x-rpc-network': NETWORK})
       : response;
   };
+
+// attaches the axios interceptor for moralis
+let moralisInterceptorInstalled = false;
+export const installRpcSessionForMoralis = () => {
+  if (moralisInterceptorInstalled) {
+    return;
+  }
+  moralisInterceptorInstalled = true;
+  const moralisBases = [
+    buildScanProxyUrl('moralis'),
+    buildScanProxyUrl('moralis_solana'),
+  ].filter(Boolean);
+  axios.interceptors.request.use(requestConfig => {
+    const url = `${requestConfig.baseURL ?? ''}${requestConfig.url ?? ''}`;
+    if (moralisBases.some(base => url.startsWith(base))) {
+      requestConfig.adapter = rpcSessionAdapter;
+    }
+    return requestConfig;
+  });
+};
 
 export const rpcSessionAdapter = async requestConfig => {
   const url = `${requestConfig.baseURL ?? ''}${requestConfig.url ?? ''}`;

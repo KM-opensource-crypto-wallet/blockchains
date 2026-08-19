@@ -1,11 +1,14 @@
 import axios from 'axios';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const PolkadotScanApi = axios.create({
-  baseURL: config.POLKADOT_SCAN_BASE_URL,
+  baseURL: buildScanProxyUrl('polkadot'),
   headers: {
     'Content-Type': 'application/json',
-    'x-api-key': config.POLKADOT_SCAN_API_KEY,
   },
+  adapter: rpcSessionAdapter,
   timeout: 30000,
 });

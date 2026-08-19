@@ -1,59 +1,6 @@
 // CHANE BELOW FLAG TO false
 export const IS_SANDBOX = false;
 
-export function getSecureRandomValues(length = 16) {
-  const result = new Uint8Array(length);
-
-  // Browser or React Native with polyfill
-  // eslint-disable-next-line no-undef
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    // eslint-disable-next-line no-undef
-    return crypto.getRandomValues(result);
-  }
-
-  // React Native fallback
-  if (
-    typeof global !== 'undefined' &&
-    global.crypto &&
-    global.crypto.getRandomValues
-  ) {
-    return global.crypto.getRandomValues(result);
-  }
-
-  // Node.js environment (Next.js SSR)
-  if (
-    typeof process !== 'undefined' &&
-    process.versions &&
-    process.versions.node
-  ) {
-    // Dynamic import to avoid issues with Next.js
-    const nodeCrypto = require('crypto');
-    const randomBytes = nodeCrypto.randomBytes(length);
-    for (let i = 0; i < length; i++) {
-      result[i] = randomBytes[i];
-    }
-    return result;
-  }
-  return result;
-}
-
-export function shuffleArray(array) {
-  // Create a copy of the array to avoid mutating the original array
-  const newArray = array.slice();
-
-  // Use secure random values for the shuffle
-  for (let i = newArray.length - 1; i > 0; i--) {
-    // Get a single random value for each swap
-    const randomBytes = getSecureRandomValues(1);
-    // Convert to a number and get modulo to stay in range
-    const j = randomBytes[0] % (i + 1);
-    // Swap elements
-    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-  }
-
-  return newArray;
-}
-
 const CHAIN_CONFIG = {
   ethereum: {
     chain_id: {sandbox: 11155111, production: 1},
@@ -232,8 +179,6 @@ const CHAIN_CONFIG = {
       production: 'https://www.oklink.com/ethw',
       txPath: 'tx',
     },
-    scan_api_url: 'https://www.oklink.com',
-    scan_api_key: process.env.ETHEREUM_POW_SCAN_API_KEY,
   },
   kava: {
     chain_id: {sandbox: 2221, production: 2222},
@@ -300,11 +245,6 @@ const CHAIN_CONFIG = {
       txPath: 'transaction',
     },
     full_host: 'https://api.trongrid.io',
-    scan_api_base_url: {
-      sandbox: 'https://nileapi.tronscan.org',
-      production: 'https://apilist.tronscanapi.com',
-    },
-    scan_api_key: process.env.TRON_SCAN_API_KEY,
   },
   solana: {
     moralis: {key: 'Solana', sandbox: 'DEVNET', production: 'MAINNET'},
@@ -403,8 +343,6 @@ const CHAIN_CONFIG = {
       production: 'https://polkadot.subscan.io',
       txPath: 'extrinsic',
     },
-    scan_api_base_url: 'https://polkadot.api.subscan.io',
-    scan_api_key: process.env.POLKADOT_SCAN_API_KEY,
   },
   tezos: {
     scan: {
@@ -521,11 +459,6 @@ export const BATCH_TRANSACTION_CONTRACT_ADDRESS = Object.fromEntries(
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.batch_contract)]),
 );
 
-const ETHER_API_KEYS = shuffleArray([
-  process.env.ETHERSCAN_API_KEY_1,
-  process.env.ETHERSCAN_API_KEY_2,
-]);
-
 let moralisChain;
 
 export const config = {
@@ -533,14 +466,9 @@ export const config = {
   TRON_EVENT_SERVER: CHAIN_CONFIG.tron.full_host,
   TRON_FULL_HOST: CHAIN_CONFIG.tron.full_host,
   BLOCK_CYPHER_BASE_URL: 'https://api.blockcypher.com',
-  BLOCK_CYPHER_API_KEY: process.env.BLOCK_CYPHER_API_KEY,
   TRONWEB_BASE_URL: CHAIN_CONFIG.tron.full_host,
 
   ETHEREUM_SCAN_BASE_URL: 'https://api.etherscan.io/v2',
-  ETHEREUM_SCAN_API_KEY_1: ETHER_API_KEYS[0],
-  ETHEREUM_SCAN_API_KEY_2: ETHER_API_KEYS[1],
-  BLOCKSCOUT_BASE_URL: 'https://api.blockscout.com',
-  BLOCKSCOUT_API_KEY: process.env.BLOCKSCOUT_API_KEY,
   INK_BLOCK_EXPLORER_BASE_URL: forEnv(CHAIN_CONFIG.ink.scan_api_url),
 
   KAVA_SCAN_BASE_URL: scanBase('kava'),
@@ -561,12 +489,6 @@ export const config = {
   SOLANA_RPC_CONTRACT_CHAIN_ID: forEnv(
     CHAIN_CONFIG.solana.rpc_contract_chain_id,
   ),
-  COIN_MARKET_CAP_API_KEYS: [
-    process.env.COIN_MARKET_CAP_API_KEY_1,
-    process.env.COIN_MARKET_CAP_API_KEY_2,
-    process.env.COIN_MARKET_CAP_API_KEY_3,
-    process.env.COIN_MARKET_CAP_API_KEY_4,
-  ],
   WALLET_CONNECT_SUPPORTED_CHAIN,
   SOLANA_SCAN_URL: scanBase('solana'),
 
@@ -587,8 +509,6 @@ export const config = {
     }
     return moralisChain;
   },
-  MORALIS_API_KEY: process.env.MORALIS_API_KEY,
-  BLOCKFROST_API_KEY: process.env.BLOCKFROST_API_KEY,
   get STELLAR_NETWORK() {
     const {Networks} = require('@stellar/stellar-sdk');
     return IS_SANDBOX ? Networks.TESTNET : Networks.PUBLIC;
@@ -608,16 +528,10 @@ export const config = {
   COSMOS_REST_BASE_URL: CHAIN_CONFIG.cosmos.rest_base_url,
   AVAX_SCAN_API_URL: CHAIN_CONFIG.avalanche.scan_api_url,
   VICTION_SCAN_API_URL: forEnv(CHAIN_CONFIG.viction.scan_api_url),
-  POLKADOT_SCAN_BASE_URL: CHAIN_CONFIG.polkadot.scan_api_base_url,
   POLKADOT_SCAN_URL: scanBase('polkadot'),
-  POLKADOT_SCAN_API_KEY: CHAIN_CONFIG.polkadot.scan_api_key,
   TON_SCAN_URL: scanBase('ton'),
-  TRON_SCAN_BASE_URL: forEnv(CHAIN_CONFIG.tron.scan_api_base_url),
-  TRON_SCAN_API_KEY: CHAIN_CONFIG.tron.scan_api_key,
   TRON_SCAN_URL: scanBase('tron'),
   ETHEREUM_CLASSIC_SCAN_API_URL: scanBase('ethereum_classic'),
-  ETHEREUM_POW_SCAN_API_URL: CHAIN_CONFIG.ethereum_pow.scan_api_url,
-  ETHEREUM_POW_SCAN_API_KEY: CHAIN_CONFIG.ethereum_pow.scan_api_key,
   DOGECOIN_NETWORK_STRING: CHAIN_CONFIG.dogecoin.network_string,
   DOGECOIN_SCAN_URL: scanBase('dogecoin'),
   APTOS_SCAN_URL: scanBase('aptos'),

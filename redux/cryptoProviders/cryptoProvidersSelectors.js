@@ -15,7 +15,6 @@ export const getSellCryptoAllProviders = state =>
 export const getMessageAllowUrls = state =>
   state?.cryptoProvider?.messageAllowUrls || [];
 
-export const getCmcApiKeys = state => state?.cryptoProvider?.cmc_api_keys || [];
 export const getBitcoinFeeMultiplier = state =>
   state?.cryptoProvider?.bitcoin_fee_multiplier || {};
 

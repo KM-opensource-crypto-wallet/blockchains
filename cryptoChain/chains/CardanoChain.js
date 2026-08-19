@@ -4,19 +4,27 @@ import {
   MeshWallet,
   Transaction,
 } from '@meshsdk/core';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {CardanoChainService} from 'dok-wallet-blockchain-networks/service/cardanoChain';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 // Created on first SDK use so balance/transaction reads — which are plain
 // HTTP — never load @meshsdk/core.
 let providerInstance;
-const provider = () =>
-  (providerInstance ??= new BlockfrostProvider(config.BLOCKFROST_API_KEY));
+const provider = () => {
+  if (!providerInstance) {
+    providerInstance = new BlockfrostProvider(buildScanProxyUrl('cardano'));
+    providerInstance._axiosInstance.defaults.adapter = rpcSessionAdapter;
+  }
+  return providerInstance;
+};
 
 export const CardanoChain = () => {
   const recall = async key => {

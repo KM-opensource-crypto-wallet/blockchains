@@ -22,7 +22,6 @@ const initialState = {
   disableMessage: '',
   google_analytics_key: '',
   exchangeProviders: '',
-  cmc_api_keys: [],
   bitcoin_fee_multiplier: {
     normal: 1.4,
     recommended: 1.65,
@@ -71,7 +70,6 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       disableMessage: data?.disableMessage,
       google_analytics_key: data?.google_analytics_key,
       exchangeProviders: data?.exchangeProviders,
-      cmc_api_keys: data?.cmc_api_keys,
       bitcoin_fee_multiplier: data?.bitcoin_fee_multiplier || {},
       litecoin_fee_multiplier: data?.litecoin_fee_multiplier || {},
       dogecoin_fee_multiplier: data?.dogecoin_fee_multiplier || {},
@@ -150,9 +148,6 @@ export const cryptoProviderSlice = createSlice({
         state.messageAllowUrls = payload?.messageAllowUrls;
         state.disableMessage = payload?.disableMessage?.toString();
         state.google_analytics_key = payload?.google_analytics_key?.toString();
-        state.cmc_api_keys = Array.isArray(payload?.cmc_api_keys)
-          ? payload?.cmc_api_keys
-          : [];
         state.bitcoin_fee_multiplier = {
           ...state.bitcoin_fee_multiplier,
           ...payload?.bitcoin_fee_multiplier,

@@ -1,5 +1,9 @@
 import axios from 'axios';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
 export const EtherScanAPIFree = axios.create({
   baseURL: config.ETHEREUM_SCAN_BASE_URL,
@@ -9,23 +13,11 @@ export const EtherScanAPIFree = axios.create({
   timeout: 30000,
 });
 
-export const EtherScanAPI1 = axios.create({
-  baseURL: config.ETHEREUM_SCAN_BASE_URL,
+export const EtherScanAPI = axios.create({
+  baseURL: buildScanProxyUrl('etherscan'),
   headers: {
     'Content-Type': 'application/json',
   },
-  params: {
-    apikey: config.ETHEREUM_SCAN_API_KEY_1,
-  },
-  timeout: 30000,
-});
-export const EtherScanAPI2 = axios.create({
-  baseURL: config.ETHEREUM_SCAN_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  params: {
-    apikey: config.ETHEREUM_SCAN_API_KEY_2,
-  },
+  adapter: rpcSessionAdapter,
   timeout: 30000,
 });
