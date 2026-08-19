@@ -23,6 +23,17 @@ const PREMIUM_CHAINS = {
   testnet: ['tron', 'ton'],
 };
 
+const SCAN_ONLY_CHAINS = [
+  'polkadot',
+  'ethereum_pow',
+  'cardano',
+  'etherscan',
+  'blockscout',
+  'coinmarketcap',
+  'moralis',
+  'blockdaemon',
+];
+
 const NETWORK = IS_SANDBOX ? 'testnet' : 'mainnet';
 
 let sessionToken = '';
@@ -127,6 +138,11 @@ export const installRpcSessionForMoralis = () => {
   });
 };
 
+const isScanProxyUrl = url =>
+  SCAN_ONLY_CHAINS.some(chain =>
+    url.startsWith(`${getProxyBaseUrl()}/rpc/${chain}`),
+  );
+
 export const rpcSessionAdapter = async requestConfig => {
   const url = `${requestConfig.baseURL ?? ''}${requestConfig.url ?? ''}`;
   const isProxied = isRpcProxyUrl(url);
@@ -137,6 +153,9 @@ export const rpcSessionAdapter = async requestConfig => {
       Object.entries(sessionHeaders).forEach(([key, value]) =>
         requestConfig.headers.set(key, value),
       );
+    }
+    if (isProxied && isScanProxyUrl(url)) {
+      requestConfig.headers.set('x-rpc-type', 'scan');
     }
     return axios.getAdapter(axios.defaults.adapter)(requestConfig);
   };

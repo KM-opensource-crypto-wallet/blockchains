@@ -45,7 +45,10 @@ const tronAddressToEvmHex = address => {
 
 const tronAddressFromHex = hexAddress => {
   const bytes = hexAddress.match(/.{2}/g).map(byte => parseInt(byte, 16));
-  const checksum = sha256.array(sha256.array(bytes)).slice(0, 4);
+  const checksum = sha256(sha256('0x' + hexAddress))
+    .slice(2, 10)
+    .match(/.{2}/g)
+    .map(byte => parseInt(byte, 16));
   return bs58.encode(Uint8Array.from([...bytes, ...checksum]));
 };
 const protoVarintHex = len => {
