@@ -20,6 +20,11 @@ const ELECTRUM_SERVERS = IS_SANDBOX
       {host: 'testnet.aranguren.org', port: 51002},
     ]
   : [
+      // Own Fulcrum server (primary). Public servers below are fallbacks,
+      // used automatically if this one is unreachable.
+      // TODO: switch to a hostname once DNS exists, so the server can move
+      // without shipping an app release.
+      {host: '116.202.117.216', port: 50002},
       {host: 'mainnet.foundationdevices.com', port: 50002},
       {host: 'electrum1.bluewallet.io', port: 443},
       {host: 'electrum.blockstream.info', port: 50002},
