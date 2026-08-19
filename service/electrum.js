@@ -22,9 +22,9 @@ const ELECTRUM_SERVERS = IS_SANDBOX
   : [
       // Own Fulcrum server (primary). Public servers below are fallbacks,
       // used automatically if this one is unreachable.
-      // TODO: switch to a hostname once DNS exists, so the server can move
-      // without shipping an app release.
-      {host: '116.202.117.216', port: 50002},
+      // Note: the DNS record must stay "DNS only" in Cloudflare - proxying it
+      // breaks port 50002, which the proxy does not forward.
+      {host: 'electrum.kimlwallet.com', port: 50002},
       {host: 'mainnet.foundationdevices.com', port: 50002},
       {host: 'electrum1.bluewallet.io', port: 443},
       {host: 'electrum.blockstream.info', port: 50002},
