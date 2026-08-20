@@ -11,6 +11,7 @@ import {
   isNameSupportChain,
   convertToSmallAmount,
   parseBalance,
+  validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import {applyApproveGasPrice} from 'dok-wallet-blockchain-networks/helper/approveFees';
 import {
@@ -296,10 +297,29 @@ export const calculateExchange = createAsyncThunk(
       if (resp?.status === 201 || resp?.status === 200) {
         const data = resp?.data;
         if (data) {
+          // The provider may echo the amounts back as numbers, or omit them
+          // entirely. Coerce through BigNumber (a Number would round-trip
+          // into exponent notation for small values) and fall back to the
+          // user-entered amount — `undefined + ''` would otherwise write the
+          // literal string 'undefined' into amountFrom AND
+          // transferData.amount, which the fee estimate and send would then
+          // try to convert to wei. The type check matters: validateNumber
+          // coerces null/''/true to numbers, and BigNumber would then write
+          // 'NaN'/'1' — only real string/number amounts are usable.
+          const isUsableAmount = value =>
+            (typeof value === 'string' || typeof value === 'number') &&
+            value !== '' &&
+            validateNumber(value) !== null;
+          const finalAmount = isUsableAmount(data?.amount)
+            ? new BigNumber(data.amount).toFixed()
+            : amountFrom;
+          const finalAmountTo = isUsableAmount(data?.amountTo)
+            ? new BigNumber(data.amountTo).toFixed()
+            : '';
           dispatch(
             setExchangeFields({
-              amountFrom: data?.amount + '',
-              amountTo: data?.amountTo + '',
+              amountFrom: finalAmount,
+              amountTo: finalAmountTo,
               exchangeToName: validName,
               exchangeToAddress: finalCustomAddress || selectedToAsset?.address,
             }),
@@ -314,7 +334,7 @@ export const calculateExchange = createAsyncThunk(
               exchangeHistoryId: data?.historyId || null,
               memo: data?.memo || null,
               currentCoin: selectedFromAsset,
-              amount: data?.amount + '',
+              amount: finalAmount,
               isSendFunds: false,
               // Freshness window for the created transaction, enforced at
               // every commit point on the Transfer screen and in sendFunds.
