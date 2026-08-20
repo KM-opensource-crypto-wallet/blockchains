@@ -334,7 +334,7 @@ export const SolanaChain = () => {
   // Sends the SAME bytes to every transaction RPC in turn. "Already
   // processed" from a node that saw a previous attempt is success.
   const broadcastRawTransaction = async ({serializedTx, signature}) => {
-    const rpcs = getFreeRPCUrl(isWeb ? 'solana' : 'tx_solana');
+    const rpcs = getFreeRPCUrl('solana');
     let lastError = null;
     for (let i = 0; i < rpcs.length; i++) {
       try {
@@ -361,16 +361,12 @@ export const SolanaChain = () => {
   // Read-only status probe; undefined default so a total RPC outage reads
   // as "unknown" rather than throwing (the caller decides what to do).
   const getSignatureStatus = async signature =>
-    retryFunc(
-      async solanaProvider => {
-        const resp = await solanaProvider.getSignatureStatuses([signature], {
-          searchTransactionHistory: true,
-        });
-        return resp?.value?.[0] ?? null;
-      },
-      undefined,
-      true,
-    );
+    retryFunc(async solanaProvider => {
+      const resp = await solanaProvider.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
+      return resp?.value?.[0] ?? null;
+    }, undefined);
 
   // Polls a signature until it reaches the commitment. Never rebuilds:
   // resolves 'confirmed' when landed, throws when the transaction failed
@@ -408,7 +404,6 @@ export const SolanaChain = () => {
         const blockHeight = await retryFunc(
           async solanaProvider => solanaProvider.getBlockHeight('confirmed'),
           undefined,
-          true,
         );
         if (
           typeof blockHeight === 'number' &&

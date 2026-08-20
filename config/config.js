@@ -952,6 +952,7 @@ export const CHAIN_CONFIG = {
       order: 18,
     },
     scan_service: 'etherscan',
+    tx_hash_path: 'hash',
     private_key_list: {
       label: 'Hyperliquid',
       order: 17,
@@ -1412,7 +1413,7 @@ export const CHAIN_CONFIG = {
       },
       rest: {
         mainnet: 'https://xrplcluster.com',
-        testnet: 'https://s.altnet.rippletest.net:51234',
+        testnet: 'https://testnet.xrpl-labs.com',
       },
     },
     scan: {

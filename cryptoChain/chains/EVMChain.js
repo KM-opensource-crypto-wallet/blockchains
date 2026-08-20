@@ -26,8 +26,6 @@ import {
   convertToSmallAmount,
   deleteItemAtIndex,
   fetchRPCRequest,
-  extractHashFromEVMError,
-  extractTxHashFromEVMMissingError,
   getExplorerTxUrl,
   isEip1559NotSupported,
   isEip7702SupportedChain,
@@ -711,41 +709,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       gasUsed: receipt.gasUsed ? BigInt(receipt.gasUsed) : null,
     };
 
-  const createSendTransactionsPromises = (finalWallet, tx, rpcUrls) => {
-    return rpcUrls.map(async rpcUrl => {
-      try {
-        const tempProvider = createRpcProvider(rpcUrl, true);
-        const finalWal = finalWallet.connect(tempProvider);
-        const tr = await finalWal.sendTransaction(tx);
-        return {resp: tr, error: null};
-      } catch (e) {
-        if (
-          e.message?.includes('already known') ||
-          e.message?.includes('ALREADY_EXISTS')
-        ) {
-          const txHash = extractHashFromEVMError(e);
-          console.log(
-            `[EVM] Duplicate transaction detected for RPC ${rpcUrl}, hash: ${txHash}`,
-          );
-          if (txHash) {
-            return {resp: txHash, error: null};
-          }
-        } else if (
-          e.message?.toLowerCase()?.includes('missing response for request')
-        ) {
-          const txHash = extractTxHashFromEVMMissingError(e);
-          console.log(
-            `[EVM] Missing response but transaction likely submitted, hash: ${txHash}`,
-          );
-          if (txHash) {
-            return {resp: txHash, error: null};
-          }
-        }
-        return {resp: null, error: e};
-      }
-    });
-  };
-
   const createSendTransaction = async (wallet, tx) => {
     // Populate and sign ONCE so every RPC receives byte-identical raw bytes.
     // Signing per-RPC lets each endpoint resolve its own pending nonce when
@@ -762,9 +725,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       const allResp = await Promise.allSettled(
         rpcUrls.map(async rpcUrl => {
           try {
-            const resp = await createRpcProvider(rpcUrl).broadcastTransaction(
-              signedRaw,
-            );
+            const resp = await createRpcProvider(
+              rpcUrl,
+              true,
+            ).broadcastTransaction(signedRaw);
             return {resp, error: null};
           } catch (e) {
             return {resp: null, error: e};
@@ -811,12 +775,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
     // Phase 1: Try premium RPCs first (skipped when customRpcUrl is set)
     if (!customRpcUrl && premiumRpcUrl) {
-      const premiumResp = await Promise.allSettled(
-        createSendTransactionsPromises(wallet, tx, [premiumRpcUrl]),
-      );
-      const premiumResult = extractResult(premiumResp);
-      if (premiumResult) {
-        return premiumResult.result;
+      const premium = await broadcastToAll([premiumRpcUrl]);
+      if (premium.response) {
+        return premium.response;
       }
       ({submitted, maybeSubmitted, nonceTooLow, firstError} = premium);
       // All premium RPCs failed — fall through to free RPCs
