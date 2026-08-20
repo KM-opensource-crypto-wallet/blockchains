@@ -14,6 +14,8 @@ import {
   electrumGetFeeRate,
 } from 'dok-wallet-blockchain-networks/service/electrum';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
+import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {callWebElectrum} from 'dok-wallet-blockchain-networks/service/bitcoinWebElectrum';
 
 /**
  * Bitcoin data source: Electrum first (direct server connection, like
@@ -21,7 +23,23 @@ import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
  * sockets are unavailable.
  */
 
-const withFallback = (electrumFn, dokFn, label) => async payload => {
+const isBrowser = () => typeof window !== 'undefined';
+
+// `op` names the operation for the web bridge (see bitcoinWebElectrum).
+// Web (browser): own server -> BlueWallet via /api/bitcoin, then dokFn.
+// Native (mobile): direct Electrum sockets, then dokFn.
+const withFallback = (electrumFn, dokFn, label, op) => async payload => {
+  if (isWeb && isBrowser()) {
+    try {
+      return await callWebElectrum(op, payload);
+    } catch (e) {
+      console.warn(
+        `Web Electrum ${label} failed, falling back to API:`,
+        e?.message,
+      );
+    }
+    return dokFn(payload);
+  }
   if (isElectrumAvailable()) {
     try {
       return await electrumFn(payload);
@@ -39,11 +57,13 @@ export const fetchBitcoinBalances = withFallback(
   electrumFetchBitcoinBalances,
   dokFetchBitcoinBalances,
   'balances',
+  'balances',
 );
 
 export const fetchBitcoinUTXO = withFallback(
   electrumFetchBitcoinUTXO,
   dokFetchBitcoinUTXO,
+  'utxo',
   'utxo',
 );
 
@@ -51,12 +71,14 @@ export const fetchBitcoinTransactionDetails = withFallback(
   electrumFetchBitcoinTransactionDetails,
   dokFetchBitcoinTransactionDetails,
   'transaction details',
+  'txdetails',
 );
 
 export const fetchBitcoinTransactions = withFallback(
   electrumFetchBitcoinTransactions,
   ({address, derive_addresses}) =>
     BitcoinFork.getTransactions({chain: 'btc', address, derive_addresses}),
+  'transactions',
   'transactions',
 );
 
@@ -70,11 +92,13 @@ export const fetchBitcoinTransaction = withFallback(
       derive_addresses,
     }),
   'transaction',
+  'transaction',
 );
 
 export const broadcastBitcoinTransaction = withFallback(
   electrumBroadcastTransaction,
   ({txHex}) => BitcoinFork.createTransaction({chain: 'btc', txHex}),
+  'broadcast',
   'broadcast',
 );
 
@@ -82,4 +106,5 @@ export const fetchBitcoinFeeRate = withFallback(
   electrumGetFeeRate,
   () => BitcoinFork.getTransactionFees({chain: 'btc'}),
   'fee rate',
+  'feerate',
 );
