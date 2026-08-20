@@ -75,7 +75,11 @@ import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  config,
+  WalletConnectMethods,
+} from 'dok-wallet-blockchain-networks/config/config';
+// import {ETH_WALLET_SEND_CALLS} from 'dok-wallet-blockchain-networks/service/walletConnect/etherWalletConnect';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -95,6 +99,7 @@ import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/c
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
+const ETH_WALLET_SEND_CALLS = 'wallet_sendCalls';
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
     return newAccounts;
@@ -934,6 +939,158 @@ export const handleUnclaimedData = createAsyncThunk(
         type: 'errorToast',
         title: 'Something went wrong',
         message: e?.message || e,
+      });
+      return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
+    }
+  },
+);
+
+export const walletConnect = createAsyncThunk(
+  'wallets/walletConnect',
+  async (payload, thunkAPI) => {
+    const {
+      chain_name,
+      expectedSignerAddress,
+      id,
+      method,
+      signTypeData,
+      topic,
+      transactionData,
+      walletAddress,
+      domain,
+      privateKey,
+    } = payload;
+    const {
+      getWalletConnect,
+    } = require('dok-wallet-blockchain-networks/service/walletconnect');
+    const connector = getWalletConnect();
+    let toastId;
+    if (
+      expectedSignerAddress &&
+      walletAddress &&
+      expectedSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
+    ) {
+      const message =
+        'The dApp requested a signature from a different address than the connected wallet.';
+      console.error('Error in walletConnect', message);
+      showToast({
+        type: 'errorToast',
+        title: 'Wrong account',
+        message,
+      });
+      await connector?.respondSessionRequest({
+        topic,
+        response: {
+          id,
+          jsonrpc: '2.0',
+          error: {code: 5000, message},
+        },
+      });
+      return thunkAPI.rejectWithValue(message);
+    }
+
+    try {
+      const currentState = thunkAPI.getState();
+      const currentWallet = selectCurrentWallet(currentState);
+      const walletCoins = currentWallet?.coins || [];
+      const currentCoin =
+        walletCoins.find(
+          item =>
+            item?.chain_name === chain_name &&
+            item?.type === 'coin' &&
+            walletAddress &&
+            item?.address?.toLowerCase() === walletAddress.toLowerCase(),
+        ) ||
+        walletCoins.find(
+          item => item?.chain_name === chain_name && item?.type === 'coin',
+        ) ||
+        selectCurrentCoin(currentState);
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        currentCoin,
+        currentWallet,
+      );
+      if (!nativeCoin) {
+        console.error('native coin not found');
+        return null;
+      }
+
+      toastId = showToast({
+        type: 'progressToast',
+        title: 'Sending transaction',
+        message: 'Please wait...',
+        autoHide: false,
+      });
+
+      let tx;
+      if (method === ETH_WALLET_SEND_CALLS) {
+        const calls = (transactionData?.batchCalls || []).map(call => ({
+          to: call.to,
+          value: call.value ? BigInt(call.value) : 0n,
+          data: call.data || '0x',
+        }));
+        if (!calls.length) {
+          throw new Error('No calls supplied');
+        }
+        const {nonce, gasFee, estimateGas, maxPriorityFeePerGas} =
+          await nativeCoin.chain.getEstimateFeeForBatchTransaction({
+            calls,
+            privateKey: nativeCoin.privateKey,
+            isFetchNonce: true,
+          });
+        const res = await nativeCoin.chain.sendBatchTransaction({
+          calls,
+          privateKey: nativeCoin.privateKey,
+          nonce,
+          gasFee,
+          estimateGas,
+          maxPriorityFeePerGas,
+        });
+        tx = getHashString(res, chain_name);
+      } else {
+        const wcMethod = WalletConnectMethods[method];
+        if (typeof nativeCoin.chain?.[wcMethod] !== 'function') {
+          throw new Error(`Unsupported WalletConnect method: ${method}`);
+        }
+        tx = await nativeCoin.chain[wcMethod]({
+          payload,
+          chain_name,
+          xdr: signTypeData,
+          domain,
+          signTypeData: signTypeData,
+          message: signTypeData,
+          privateKey: privateKey,
+        });
+      }
+
+      if (tx) {
+        await connector?.respondSessionRequest({
+          topic,
+          response: {id, result: tx, jsonrpc: '2.0'},
+        });
+      }
+      showToast({
+        type: 'successToast',
+        title: 'Transaction submitted',
+        message: 'Your transaction was sent successfully',
+        toastId,
+      });
+      return tx;
+    } catch (e) {
+      console.error('Error in walletConnect', e);
+      await connector?.respondSessionRequest({
+        topic,
+        response: {
+          id,
+          jsonrpc: '2.0',
+          error: {code: 5000, message: e?.message || 'Transaction error'},
+        },
+      });
+      showToast({
+        type: 'errorToast',
+        title: 'Transaction failed',
+        message: e?.message || 'Transaction error',
+        toastId,
       });
       return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
     }

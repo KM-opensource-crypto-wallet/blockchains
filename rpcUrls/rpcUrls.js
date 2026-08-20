@@ -24,8 +24,8 @@ const allRPCUrl = {
     testnet: 'wss://s.altnet.rippletest.net:51233',
   },
   tezos: {
-    mainnet: 'https://mainnet.tezos.ecadinfra.com',
-    testnet: 'https://rpc.bakingnet.teztnets.com',
+    mainnet: 'https://mainnet.smartpy.io',
+    testnet: 'https://rpc.shadownet.teztnets.com',
   },
   stellar: {
     mainnet: 'https://horizon.stellar.org',

@@ -9,6 +9,14 @@ import {
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 
+const firstOf = data => (Array.isArray(data) ? data[0] : data);
+
+const buildTransferParams = op => ({
+  to: op.destination,
+  amount: Number(op.amount),
+  mutez: true,
+});
+
 export const TezosChain = () => {
   const tezosProvider = new TezosToolkit(getRPCUrl('tezos'));
   return {
@@ -22,6 +30,61 @@ export const TezosChain = () => {
     },
     isValidPrivateKey: ({privateKey}) => {
       return /^edsk[1-9A-HJ-NP-Za-km-z]{50}/.test(privateKey);
+    },
+    getAccounts: async ({privateKey}) => {
+      try {
+        const signer = await getSignerConfigure(privateKey);
+        const address = await signer.publicKeyHash();
+        const pubkey = await signer.publicKey();
+        return [{algo: 'ed25519', address, pubkey}];
+      } catch (e) {
+        console.error('Error in tezos getAccounts', e);
+        throw e;
+      }
+    },
+    signMessage: async ({signTypeData, privateKey}) => {
+      try {
+        const signer = await getSignerConfigure(privateKey);
+        const data = firstOf(signTypeData);
+        const payload = data?.payload ?? data;
+        const {prefixSig} = await signer.sign(payload);
+        return {signature: prefixSig};
+      } catch (e) {
+        console.error('Error in tezos signMessage', e);
+        throw e;
+      }
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        const signer = await getSignerConfigure(privateKey);
+        tezosProvider.setProvider({signer});
+        const data = firstOf(signTypeData);
+        const operations = data?.operations ?? [];
+        const isAllTransactions =
+          operations.length > 0 &&
+          operations.every(op => op?.kind === 'transaction');
+        if (!isAllTransactions) {
+          throw new Error(
+            'tezos_send only supports transaction (transfer) operations',
+          );
+        }
+        let result;
+        if (operations.length === 1) {
+          result = await tezosProvider.contract.transfer(
+            buildTransferParams(operations[0]),
+          );
+        } else {
+          let batch = tezosProvider.contract.batch();
+          operations.forEach(op => {
+            batch = batch.withTransfer(buildTransferParams(op));
+          });
+          result = await batch.send();
+        }
+        return {operationHash: result?.hash};
+      } catch (e) {
+        console.error('Error in tezos sendRawTransaction', e);
+        throw e;
+      }
     },
     getBalance: async ({address}) => {
       try {

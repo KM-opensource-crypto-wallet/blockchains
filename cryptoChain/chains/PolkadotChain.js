@@ -6,24 +6,48 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
+import {u8aToHex, stringToU8a, u8aConcat} from '@polkadot/util';
 import {decodeAddress, encodeAddress} from '@polkadot/util-crypto';
 import {PolkadotScan} from 'dok-wallet-blockchain-networks/service/PolkadotScan';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 
-let polkadotProvider;
-const createOrGetPolkadotProvider = async () => {
-  try {
-    if (polkadotProvider) {
-      return polkadotProvider;
+const POLKADOT_INIT_MAX_ATTEMPTS = 4;
+const POLKADOT_INIT_RETRY_DELAY_MS = 3000;
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const createPolkadotApi = async () => {
+  const rpcUrl = getRPCUrl('polkadot');
+  const isWs = rpcUrl?.startsWith('ws');
+  for (let attempt = 1; attempt <= POLKADOT_INIT_MAX_ATTEMPTS; attempt++) {
+    try {
+      const provider = isWs ? new WsProvider(rpcUrl) : new HttpProvider(rpcUrl);
+      return await ApiPromise.create({provider: provider});
+    } catch (e) {
+      const isRateLimited = e?.message?.includes('429');
+      if (!isRateLimited || attempt === POLKADOT_INIT_MAX_ATTEMPTS) {
+        throw e;
+      }
+      // dot-rpc.stakeworld.io is a shared public endpoint that rate-limits
+      // bursts of state_getMetadata calls during API init; back off and
+      // retry instead of failing the whole sign/send flow immediately.
+      await delay(POLKADOT_INIT_RETRY_DELAY_MS * attempt);
     }
-    const rpcUrl = getRPCUrl('polkadot');
-    const isWs = rpcUrl?.startsWith('ws');
-    const provider = isWs ? new WsProvider(rpcUrl) : new HttpProvider(rpcUrl);
-    polkadotProvider = await ApiPromise.create({provider: provider});
-    return polkadotProvider;
-  } catch (e) {
-    console.error('Error in createOrGetPolkadotProvider', e);
   }
+};
+
+let polkadotProviderPromise;
+const createOrGetPolkadotProvider = () => {
+  if (!polkadotProviderPromise) {
+    polkadotProviderPromise = createPolkadotApi().catch(e => {
+      // Reset so a later call can retry against a fresh provider instead
+      // of staying stuck on a rejected promise.
+      polkadotProviderPromise = undefined;
+      console.error('Error in createOrGetPolkadotProvider', e);
+      throw e;
+    });
+  }
+  return polkadotProviderPromise;
 };
 
 export const PolkadotChain = () => {
@@ -58,6 +82,53 @@ export const PolkadotChain = () => {
         address: keypair.address,
         privateKey: privateKey,
       };
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        const provider = await createOrGetPolkadotProvider();
+        const keyring = new Keyring({ss58Format: 0});
+        const keypair = keyring.addFromSeed(
+          // eslint-disable-next-line no-undef
+          Buffer.from(privateKey, 'hex'),
+        );
+        const transactionPayload =
+          signTypeData?.transactionPayload ?? signTypeData;
+        if (transactionPayload?.signedExtensions) {
+          provider.registry.setSignedExtensions(
+            transactionPayload.signedExtensions,
+          );
+        }
+        const payload = provider.registry.createType(
+          'ExtrinsicPayload',
+          transactionPayload,
+          {version: transactionPayload?.version ?? 4},
+        );
+        const {signature} = payload.sign(keypair);
+        return {id: 1, signature};
+      } catch (e) {
+        console.error('Error in polkadot signTransaction', e);
+        throw e;
+      }
+    },
+    signMessage: async ({signTypeData, privateKey}) => {
+      try {
+        const keyring = new Keyring({ss58Format: 0});
+        const keypair = keyring.addFromSeed(
+          // eslint-disable-next-line no-undef
+          Buffer.from(privateKey, 'hex'),
+        );
+        const message = signTypeData?.message ?? signTypeData;
+        const wrappedMessage = u8aConcat(
+          stringToU8a('<Bytes>'),
+          stringToU8a(message),
+          stringToU8a('</Bytes>'),
+        );
+        const signature = keypair.sign(wrappedMessage);
+        return {signature: u8aToHex(signature)};
+      } catch (e) {
+        console.error('Error in polkadot signMessage', e);
+        throw e;
+      }
     },
     getBalance: async ({address}) => {
       try {

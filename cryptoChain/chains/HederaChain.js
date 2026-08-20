@@ -8,6 +8,7 @@ import {
   AccountId,
   Client,
   PrivateKey,
+  Transaction,
   TransactionReceiptQuery,
   TransferTransaction,
   Status,
@@ -19,7 +20,8 @@ const operatorKey =
   '84a12efd44ed44978e619010933fe05541158377aa93924804d4a832f52f10e8';
 
 const MAX_HBAR_TRANSFER = 0.0021;
-
+const parseSignerAccountId = signerAccountId =>
+  signerAccountId?.split(':')?.pop();
 let client;
 const getClient = () => {
   try {
@@ -120,6 +122,83 @@ export const HederaChain = () => {
       } catch (e) {
         console.error('Error in create hedera wallet by private key', e);
         throw e;
+      }
+    },
+    signMessage: ({signTypeData, privateKey}) => {
+      try {
+        const message = signTypeData?.message ?? signTypeData;
+        const key = PrivateKey.fromStringECDSA(privateKey);
+        // eslint-disable-next-line no-undef
+        const messageBytes = Buffer.from(message, 'base64');
+        const signatureBytes = key.sign(messageBytes);
+        return {
+          signatureMap: [
+            {
+              publicKey: key.publicKey.toStringDer(),
+              // eslint-disable-next-line no-undef
+              signature: Buffer.from(signatureBytes).toString('base64'),
+            },
+          ],
+        };
+      } catch (e) {
+        console.error('Error in hedera signMessage', e);
+        throw e;
+      }
+    },
+    signRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        const transactionList = signTypeData?.transactionList ?? signTypeData;
+        const key = PrivateKey.fromStringECDSA(privateKey);
+        const transaction = Transaction.fromBytes(
+          // eslint-disable-next-line no-undef
+          Buffer.from(transactionList, 'base64'),
+        );
+        await transaction.sign(key);
+        return {
+          // eslint-disable-next-line no-undef
+          transactionList: Buffer.from(transaction.toBytes()).toString(
+            'base64',
+          ),
+        };
+      } catch (e) {
+        console.error('Error in hedera signTransaction', e);
+        throw e;
+      }
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      let tempClient;
+      try {
+        const transactionList = signTypeData?.transactionList ?? signTypeData;
+        const signerAccountId = parseSignerAccountId(
+          signTypeData?.signerAccountId,
+        );
+        const key = PrivateKey.fromStringECDSA(privateKey);
+        const transaction = Transaction.fromBytes(
+          // eslint-disable-next-line no-undef
+          Buffer.from(transactionList, 'base64'),
+        );
+        tempClient = (
+          IS_SANDBOX ? Client.forTestnet() : Client.forMainnet()
+        ).setOperator(signerAccountId, key);
+        await transaction.sign(key);
+        const response = await transaction.execute(tempClient);
+        const receipt = await response.getReceipt(tempClient);
+        return {
+          transactionId: response.transactionId.toString(),
+          nodeId: response.nodeId?.toString(),
+          // eslint-disable-next-line no-undef
+          transactionHash: Buffer.from(response.transactionHash).toString(
+            'base64',
+          ),
+          status: receipt.status.toString(),
+        };
+      } catch (e) {
+        console.error('Error in hedera signAndExecuteTransaction', e);
+        throw e;
+      } finally {
+        if (tempClient) {
+          tempClient.close();
+        }
       }
     },
     getBalance: async ({address}) => {

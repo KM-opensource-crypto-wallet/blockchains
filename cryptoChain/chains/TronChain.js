@@ -380,8 +380,9 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction =
-      await tronWeb.transactionBuilder.withdrawExpireUnfreeze(fromAddress);
+    const transaction = await tronWeb.transactionBuilder.withdrawExpireUnfreeze(
+      fromAddress,
+    );
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
   const createStakingTransactionForRewards = async (
@@ -390,8 +391,9 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction =
-      await tronWeb.transactionBuilder.withdrawBlockRewards(fromAddress);
+    const transaction = await tronWeb.transactionBuilder.withdrawBlockRewards(
+      fromAddress,
+    );
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
 
@@ -615,8 +617,9 @@ export const TronChain = () => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
 
-          const {transactionFee, energyFee, memoFee} =
-            await getChainData(tronWeb);
+          const {transactionFee, energyFee, memoFee} = await getChainData(
+            tronWeb,
+          );
           const sunAmount = convertToSmallAmount(amount, decimals);
           const {bandwidth: availableBandwidth, energy: currentAccountEnergy} =
             await getAccountResourcesData(tronWeb, fromAddress);
@@ -1741,9 +1744,10 @@ export const TronChain = () => {
         throw e;
       }
     },
-    signmessageV2: async ({payload, privateKey}) =>
+    signMessage: async ({signTypeData, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
+          const payload = signTypeData;
           const signature = tronWeb.trx.signMessageV2(payload, privateKey);
           return {signature};
         } catch (e) {
@@ -1751,16 +1755,40 @@ export const TronChain = () => {
           return Promise.reject(e?.message);
         }
       }, null),
-    signTransaction: async ({payload, privateKey}) =>
+    signRawTransaction: async ({payload, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
           const transactionData = await tronWeb.trx.sign(
-            {...payload},
+            {...payload?.transactionData},
             privateKey,
           );
           return {result: transactionData};
         } catch (e) {
           console.error('Error in sign tron transaction', e);
+          return Promise.reject(e?.message);
+        }
+      }, null),
+    sendRawTransaction: async ({payload, privateKey}) =>
+      retryFunc(async tronWeb => {
+        try {
+          const signedTransaction = await tronWeb.trx.sign(
+            {...payload?.transactionData},
+            privateKey,
+          );
+          const broadcast = await tronWeb.trx.sendRawTransaction(
+            signedTransaction,
+          );
+          if (!broadcast?.result && !broadcast?.txid) {
+            throw new Error(
+              broadcast?.code || 'Tron transaction broadcast failed',
+            );
+          }
+          return {
+            result: !!broadcast?.result,
+            txid: broadcast?.txid || signedTransaction?.txID,
+          };
+        } catch (e) {
+          console.error('Error in tron signAndSendTransaction', e);
           return Promise.reject(e?.message);
         }
       }, null),

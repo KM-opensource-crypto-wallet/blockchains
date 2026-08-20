@@ -1,13 +1,61 @@
 import BigNumber from 'bignumber.js';
 import {Client} from 'xrpl';
-import {sign} from 'ripple-keypairs';
+import {sign, deriveAddress} from 'ripple-keypairs';
 import {encodeForSigning} from 'ripple-binary-codec';
+import {ec as EC, eddsa as EDDSA} from 'elliptic';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
+
+function extractTxJson(data) {
+  if (!data) {
+    return {};
+  }
+  if (Array.isArray(data)) {
+    return extractTxJson(data[0]);
+  }
+  if (data.tx_json) {
+    return data.tx_json;
+  }
+  if (data.transaction) {
+    return data.transaction;
+  }
+  return data;
+}
+
+function hexToBytes(hex) {
+  const bytes = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes.push(Number.parseInt(hex.slice(i, i + 2), 16));
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+function derivePublicKey(privateKey) {
+  const keyUpper = privateKey.toUpperCase();
+  if (keyUpper.startsWith('ED')) {
+    const ed = new EDDSA('ed25519');
+    return (
+      'ED' +
+      bytesToHex(ed.keyFromSecret(hexToBytes(keyUpper.slice(2))).pubBytes())
+    );
+  }
+  const secp = new EC('secp256k1');
+  const rawPrivKey = keyUpper.startsWith('00') ? keyUpper.slice(2) : keyUpper;
+  return bytesToHex(
+    secp.keyFromPrivate(rawPrivKey, 'hex').getPublic().encodeCompressed(),
+  );
+}
 
 export const RippleChain = () => {
   let rippleProvider;
@@ -140,6 +188,62 @@ export const RippleChain = () => {
       } catch (e) {
         console.error(`error getting transaction for ripple ${e}`);
         return {data: null};
+      }
+    },
+    signRawTransaction: async ({transaction, privateKey}) => {
+      try {
+        await rippleProvider.connect();
+        const publicKey = derivePublicKey(privateKey);
+        const txJson = extractTxJson(transaction);
+        const tx = {
+          ...txJson,
+          Account: txJson.Account ?? deriveAddress(publicKey),
+        };
+        // Drop any LastLedgerSequence the dApp pre-computed — by the time
+        // the user reviews and approves in the WC modal it may already
+        // have expired, so let autofill recompute it fresh relative to now.
+        delete tx.LastLedgerSequence;
+        const prepared = await rippleProvider.autofill(tx);
+        prepared.SigningPubKey = publicKey;
+        const encoded = encodeForSigning(prepared);
+        prepared.TxnSignature = sign(encoded, privateKey);
+        return prepared;
+      } catch (e) {
+        console.error('Error in ripple signTransaction', e);
+        throw e;
+      }
+    },
+    sendRawTransaction: async ({transaction, privateKey}) => {
+      try {
+        await rippleProvider.connect();
+        const publicKey = derivePublicKey(privateKey);
+        const txJson = extractTxJson(transaction);
+        const tx = {
+          ...txJson,
+          Account: txJson.Account ?? deriveAddress(publicKey),
+        };
+        delete tx.LastLedgerSequence;
+        const prepared = await rippleProvider.autofill(tx);
+        prepared.SigningPubKey = publicKey;
+        const encoded = encodeForSigning(prepared);
+        prepared.TxnSignature = sign(encoded, privateKey);
+        const result = await rippleProvider.submitAndWait(prepared);
+        return {hash: result?.result?.hash ?? result?.hash};
+      } catch (e) {
+        console.error('Error in ripple signAndSubmitTransaction', e);
+        throw e;
+      }
+    },
+    signMessage: ({message, privateKey}) => {
+      try {
+        // eslint-disable-next-line no-undef
+        const messageHex = Buffer.from(message, 'utf8')
+          .toString('hex')
+          .toUpperCase();
+        return sign(messageHex, privateKey);
+      } catch (e) {
+        console.error('Error in ripple signMessage', e);
+        throw e;
       }
     },
     send: async ({to, from, amount, privateKey, publicKey, gasFee, memo}) => {

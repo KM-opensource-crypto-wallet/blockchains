@@ -1,4 +1,5 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
+import {signTypedData as metamaskSignTypedData} from '@metamask/eth-sig-util';
 import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
@@ -39,6 +40,7 @@ import {
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
+import {signMessage} from 'tronweb/lib/esm/utils';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -1686,6 +1688,83 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error(`error getting token transactions for ether ${e}`);
         return [];
+      }
+    },
+    signRawTransaction: async ({payload, privateKey}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const walletSigner = new ethers.Wallet(privateKey).connect(
+            evmProvider,
+          );
+          return await walletSigner.signTransaction({
+            from: payload.from,
+            to: payload.to,
+            data: payload.data,
+            nonce: payload.nonce,
+            value: payload.value,
+            gasLimit: payload.gas,
+            gasPrice: payload.gasPrice,
+          });
+        } catch (e) {
+          const {reason} = await errorDecoder.decode(e);
+          console.error('Error in sign raw ether transaction', reason);
+          return Promise.reject(reason);
+        }
+      }),
+    sendRawTransaction: async ({payload, privateKey}) => {
+      try {
+        const tx = {
+          from: payload.from,
+          to: payload.to,
+          data: payload.data,
+          nonce: payload.nonce,
+          value: payload.value,
+          gasLimit: payload.gas,
+          gasPrice: payload.gasPrice,
+        };
+        return await createSendTransaction(new ethers.Wallet(privateKey), tx);
+      } catch (e) {
+        const {reason} = await errorDecoder.decode(e);
+        console.error('Error in send raw ether transaction', reason);
+        return Promise.reject(reason);
+      }
+    },
+    personalSign: async ({message, privateKey}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const walletSigner = new ethers.Wallet(privateKey).connect(
+            evmProvider,
+          );
+          return await walletSigner.signMessage(
+            ethers.isHexString(message) ? ethers.getBytes(message) : message,
+          );
+        } catch (e) {
+          const {reason} = await errorDecoder.decode(e);
+          console.error('Error in personal sign ether transaction', reason);
+          return Promise.reject(reason);
+        }
+      }),
+    signTypedData: async ({privateKey, signTypeData}) => {
+      try {
+        // eslint-disable-next-line no-undef
+        const buffer = Buffer.from(privateKey, 'hex');
+        const parseData = JSON.parse(signTypeData);
+        let version = 'v1';
+        if (
+          typeof parseData === 'object' &&
+          (parseData.types || parseData.primaryType || parseData.domain)
+        ) {
+          version = 'v4';
+        }
+        return metamaskSignTypedData({
+          privateKey: buffer,
+          data: parseData,
+          version: version.toUpperCase(),
+        });
+      } catch (e) {
+        const {reason} = await errorDecoder.decode(e);
+        console.error('Error in sign typed data transaction', reason);
+        return Promise.reject(reason);
       }
     },
     send: async ({

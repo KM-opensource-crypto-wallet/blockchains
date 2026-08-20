@@ -4,7 +4,7 @@ import {EvmChain} from '@moralisweb3/common-evm-utils';
 import {SolNetwork} from '@moralisweb3/common-sol-utils';
 import * as StellarSdk from '@stellar/stellar-sdk';
 
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export function getSecureRandomValues(length = 16) {
   const result = new Uint8Array(length);
@@ -233,7 +233,7 @@ const WalletConnectSupportedChainSandbox = {
     chain_name: 'tron',
     symbol: 'TRX',
   },
-  'solana:8E9rvCKLFQia2Y35HXjjpWzj8weVo44K': {
+  'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1': {
     chain_display_name: 'Solana',
     chain_name: 'solana',
     symbol: 'SOL',
@@ -442,6 +442,217 @@ const WalletConnectSupportedChainProduction = {
     symbol: 'BTC',
   },
 };
+// {dappMethod: ourMethod}
+export const WalletConnectMethods = {
+  eth_sendTransaction: 'sendRawTransaction',
+  eth_signTransaction: 'signRawTransaction',
+  personal_sign: 'personalSign',
+  eth_sign: 'personalSign',
+  eth_signTypedData: 'signTypedData',
+  eth_signTypedData_v4: 'signTypedData',
+
+  solana_signAndSendTransaction: 'sendRawTransaction',
+  solana_signTransaction: 'signRawTransaction',
+  solana_signMessage: 'signMessage',
+
+  ton_sendMessage: 'sendRawTransaction',
+  ton_signData: 'signMessage',
+
+  polkadot_signTransaction: 'sendRawTransaction',
+  polkadot_signMessage: 'signMessage',
+
+  // Tron's signMessageV2 export is named with a lowercase "m" on TronChain.
+  tron_sendTransaction: 'sendRawTransaction',
+  tron_signTransaction: 'signRawTransaction',
+  tron_signMessage: 'signMessage',
+
+  stellar_signAndSubmitXDR: 'sendRawTransaction',
+  stellar_signXDR: 'personalSign',
+  stellar_signMessage: 'signMessage',
+
+  xrpl_submitTransaction: 'sendRawTransaction',
+  xrpl_signTransaction: 'signRawTransaction',
+  xrpl_signMessage: 'signMessage',
+  // RippleChain has no submit-only method; this re-signs and submits in one call.
+
+  hedera_signAndExecuteTransaction: 'sendRawTransaction',
+  hedera_signTransaction: 'signRawTransaction',
+  hedera_signMessage: 'signMessage',
+
+  aptos_signAndSubmitTransaction: 'sendRawTransaction',
+  aptos_signTransaction: 'signRawTransaction',
+  aptos_signMessage: 'signMessage',
+
+  tezos_send: 'sendRawTransaction',
+  tezos_sign: 'signMessage',
+  tezos_getAccounts: 'getAccounts',
+  // BTC
+  sendTransfer: 'sendRawTransaction',
+  signMessage: 'signMessage',
+  signPsbt: 'signPsbt',
+  getAccountAddresses: 'getAccounts',
+};
+
+// Keyed by the raw WalletConnect method strings defined in WalletConnectMethods
+// (dok-wallet-blockchain-networks/config/config.js) for the chain-specific request shape.
+export const NON_EVM_METHOD_HANDLERS = {
+  tron_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  solana_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  tron_signTransaction: params => ({
+    finaltransactionData: params?.transaction?.transaction,
+    signTypeData: params?.transaction?.transaction,
+  }),
+  tron_sendTransaction: params => ({
+    finaltransactionData: params?.transaction?.transaction,
+    signTypeData: params?.transaction?.transaction,
+  }),
+  solana_signTransaction: params => ({
+    finaltransactionData: params?.transaction,
+    signTypeData: params,
+  }),
+  solana_signAndSendTransaction: params => ({
+    finaltransactionData: params?.transaction,
+    signTypeData: params,
+  }),
+  ton_sendMessage: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  ton_signData: params => ({
+    signTypeData: params,
+  }),
+  stellar_signXDR: params => {
+    const stellarParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarParams === 'string' ? stellarParams : stellarParams?.xdr,
+    };
+  },
+  stellar_signAndSubmitXDR: params => {
+    const stellarParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarParams === 'string' ? stellarParams : stellarParams?.xdr,
+    };
+  },
+  stellar_signMessage: params => {
+    const stellarMessageParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarMessageParams === 'string'
+          ? stellarMessageParams
+          : stellarMessageParams?.message,
+    };
+  },
+  xrpl_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  xrpl_submitTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  xrpl_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  cosmos_signDirect: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  cosmos_signAmino: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  hedera_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  hedera_signAndExecuteTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+    expectedSignerAddress: params?.signerAccountId?.split(':')?.pop(),
+  }),
+  hedera_signMessage: params => ({
+    signTypeData: params,
+  }),
+  aptos_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  aptos_signAndSubmitTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  aptos_signMessage: params => ({
+    signTypeData: params,
+  }),
+  tezos_sign: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  tezos_send: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  tezos_getAccounts: params => ({
+    signTypeData: params,
+  }),
+  polkadot_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  polkadot_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  signPsbt: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  sendTransfer: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  getAccountAddresses: params => ({
+    signTypeData: params,
+  }),
+  signMessage: params => ({
+    signTypeData: params,
+  }),
+};
+
+export const EVM_SIGN_REQUEST_HANDLERS = {
+  personal_sign: params => ({
+    signTypeData: params?.[0],
+    expectedSignerAddress: params?.[1],
+  }),
+  eth_sign: params => ({
+    signTypeData: params?.[1],
+    expectedSignerAddress: params?.[0],
+  }),
+};
+
+const NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES = {
+  tron: 'tron',
+  solana: 'solana',
+  ton: 'ton',
+  stellar: 'stellar',
+  xrpl: 'xrpl',
+  polkadot: 'polkadot',
+  cosmos: 'cosmos',
+  hedera: 'hedera',
+  aptos: 'aptos',
+  tezos: 'tezos',
+  bip122: 'bip122',
+};
+
+export const isNonEVMChain = chainId =>
+  Object.keys(NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES).some(namespace =>
+    chainId?.includes(namespace),
+  );
 
 const ETHER_API_KEYS = shuffleArray([
   process.env.ETHERSCAN_API_KEY_1,

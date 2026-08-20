@@ -33,6 +33,7 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import bs58 from 'bs58';
 import {Buffer} from 'buffer';
+import nacl from 'tweetnacl';
 import {getSolanaContract} from 'dok-wallet-blockchain-networks/service/solflare';
 import {nanoid} from 'nanoid';
 import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
@@ -244,8 +245,9 @@ export const SolanaChain = () => {
     const extraFees = Math.ceil((gasFee * units) / 1000000);
     let rentExemptAmount = 0;
     if (needATA) {
-      rentExemptAmount =
-        await solanaProvider.getMinimumBalanceForRentExemption(ACCOUNT_SIZE);
+      rentExemptAmount = await solanaProvider.getMinimumBalanceForRentExemption(
+        ACCOUNT_SIZE,
+      );
     }
     const totalFee = extraFees + resp.value + rentExemptAmount;
 
@@ -406,6 +408,78 @@ export const SolanaChain = () => {
         address: keyPair.publicKey.toBase58(),
         privateKey: bs58.encode(keyPair.secretKey),
       };
+    },
+    signRawTransaction: async ({payload, privateKey}) => {
+      try {
+        const finalPayload = payload?.signTypeData?.transaction;
+        const secretKey = bs58.decode(privateKey);
+        const keypair = Keypair.fromSecretKey(secretKey, {
+          skipValidation: true,
+        });
+
+        const txBuffer = Buffer.from(finalPayload, 'base64');
+        const versionedTransaction = VersionedTransaction.deserialize(txBuffer);
+        versionedTransaction.sign([keypair]);
+        const primarySigPubkeyPair = versionedTransaction.signatures[0];
+        if (!primarySigPubkeyPair) {
+          throw new Error('Missing signature');
+        }
+        const signature = bs58.encode(primarySigPubkeyPair);
+        return {signature};
+      } catch (e) {
+        console.error('Error in solana signRawTransaction', e);
+        return Promise.reject(e?.message);
+      }
+    },
+    sendRawTransaction: async ({payload, privateKey}) =>
+      retryFunc(
+        async solanaProvider => {
+          try {
+            const finalPayload = payload?.signTypeData?.transaction;
+            const secretKey = bs58.decode(privateKey);
+            const keypair = Keypair.fromSecretKey(secretKey, {
+              skipValidation: true,
+            });
+
+            const txBuffer = Buffer.from(finalPayload, 'base64');
+            const versionedTransaction =
+              VersionedTransaction.deserialize(txBuffer);
+            const finalTransaction = new VersionedTransaction(
+              versionedTransaction.message,
+            );
+            finalTransaction.sign([keypair]);
+            const txHash = await solanaProvider.sendTransaction(
+              finalTransaction,
+              {
+                skipPreflight: true,
+                preflightCommitment: 'processed',
+              },
+            );
+            return {signature: txHash};
+          } catch (e) {
+            console.error('Error in solana signAndSendTransaction', e);
+            throw e;
+          }
+        },
+        null,
+        true,
+      ),
+    signMessage: async ({message, privateKey}) => {
+      try {
+        const secretKey = bs58.decode(privateKey);
+        const from = Keypair.fromSecretKey(secretKey, {
+          skipValidation: true,
+        });
+        const signature = nacl.sign.detached(
+          bs58.decode(message),
+          from.secretKey,
+        );
+        const bs58Signature = bs58.encode(signature);
+        return {signature: bs58Signature};
+      } catch (e) {
+        console.error('Error in solana signMessage', e);
+        return Promise.reject(e?.message);
+      }
     },
     getStaking: async ({address}) =>
       retryFunc(async solanaProvider => {
