@@ -4,6 +4,7 @@ import {
   IS_SANDBOX,
   isWeb,
 } from 'dok-wallet-blockchain-networks/config/config';
+import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
 
 /**
  * Electrum protocol client (the same data source BlueWallet uses).
@@ -40,8 +41,12 @@ const getTcpSocket = () => {
     return tcpSocketModule;
   }
   try {
-    tcpSocketModule = require('react-native-tcp-socket').default;
+    // The package assigns module.exports after its `export default`, which
+    // drops the compiled `.default` property — fall back to the module itself.
+    const mod = require('react-native-tcp-socket');
+    tcpSocketModule = (mod && mod.default) || mod || null;
   } catch (e) {
+    console.log('error in tcpSocketModule', e);
     tcpSocketModule = null;
   }
   return tcpSocketModule;
@@ -51,14 +56,13 @@ export const isElectrumAvailable = () => !isWeb && !!getTcpSocket();
 
 const defaultSocketFactory = ({host, port}, onConnect) => {
   const TcpSocket = getTcpSocket();
-  return TcpSocket.createConnection(
+  return TcpSocket.connectTLS(
     {
       host,
       port,
-      tls: true,
       // Electrum servers commonly use self-signed certificates
       // (BlueWallet accepts them the same way).
-      tlsCheckValidity: false,
+      rejectUnauthorized: false,
     },
     onConnect,
   );
@@ -242,7 +246,7 @@ export class ElectrumClient {
    * JSON-RPC batch: one write, one response array. calls = [{method, params}].
    * Returns results in the same order as calls.
    */
-  async batchRequest(calls) {
+  async batchRequest(calls, {settleErrors = false} = {}) {
     if (!calls.length) {
       return [];
     }
@@ -251,18 +255,25 @@ export class ElectrumClient {
     const promises = [];
     for (const {method, params} of calls) {
       const id = this.nextId++;
-      promises.push(this._registerRequest(id));
+      const promise = this._registerRequest(id);
+      promises.push(
+        // With settleErrors, a per-call server error resolves to
+        // {electrumError} instead of rejecting the whole batch.
+        settleErrors
+          ? promise.catch(error => ({electrumError: error}))
+          : promise,
+      );
       payload.push({jsonrpc: '2.0', id, method, params});
     }
     this.socket.write(JSON.stringify(payload) + '\n');
     return Promise.all(promises);
   }
 
-  async batchRequestChunked(calls, chunkSize = BATCH_SIZE) {
+  async batchRequestChunked(calls, chunkSize = BATCH_SIZE, opts) {
     const results = [];
     for (let i = 0; i < calls.length; i += chunkSize) {
       const chunk = calls.slice(i, i + chunkSize);
-      results.push(...(await this.batchRequest(chunk)));
+      results.push(...(await this.batchRequest(chunk, opts)));
     }
     return results;
   }
@@ -382,6 +393,297 @@ export const electrumFetchBitcoinTransactionDetails = async ({
   return {status: 200, data};
 };
 
+// ---- Raw transaction plumbing (history / transaction details) ----
+
+// Raw txs are immutable, so a bounded cache saves refetching the same
+// transactions (and their inputs) on every history refresh.
+const RAW_TX_CACHE_LIMIT = 500;
+const rawTxCache = new Map();
+const cacheRawTx = (txid, hex) => {
+  if (rawTxCache.size >= RAW_TX_CACHE_LIMIT) {
+    rawTxCache.delete(rawTxCache.keys().next().value);
+  }
+  rawTxCache.set(txid, hex);
+};
+
+const fetchRawTransactions = async (client, txids) => {
+  const missing = txids.filter(txid => !rawTxCache.has(txid));
+  const results = await client.batchRequestChunked(
+    missing.map(txid => ({
+      method: 'blockchain.transaction.get',
+      params: [txid],
+    })),
+  );
+  missing.forEach((txid, i) => {
+    if (typeof results[i] === 'string') {
+      cacheRawTx(txid, results[i]);
+    }
+  });
+  const byTxid = {};
+  txids.forEach(txid => {
+    byTxid[txid] = rawTxCache.get(txid);
+  });
+  return byTxid;
+};
+
+const getTipHeight = async client => {
+  const tip = await client.request('blockchain.headers.subscribe');
+  return Number(tip?.height) || 0;
+};
+
+// Block timestamp: uint32LE at byte 68 of the 80-byte header.
+const blockTimeCache = new Map();
+const fetchBlockTimestamps = async (client, heights) => {
+  const unique = [...new Set(heights.filter(height => height > 0))];
+  const missing = unique.filter(height => !blockTimeCache.has(height));
+  const results = await client.batchRequestChunked(
+    missing.map(height => ({
+      method: 'blockchain.block.header',
+      params: [height],
+    })),
+  );
+  missing.forEach((height, i) => {
+    const hex = results[i];
+    if (typeof hex === 'string' && hex.length >= 160) {
+      // eslint-disable-next-line no-undef
+      blockTimeCache.set(height, Buffer.from(hex, 'hex').readUInt32LE(68));
+    }
+  });
+  const byHeight = {};
+  unique.forEach(height => {
+    byHeight[height] = blockTimeCache.get(height);
+  });
+  return byHeight;
+};
+
+const outputAddress = script => {
+  try {
+    return bitcoin.address.fromOutputScript(
+      script,
+      config.BITCOIN_NETWORK_STRING,
+    );
+  } catch (e) {
+    return null;
+  }
+};
+
+const isCoinbaseInput = input =>
+  input.index === 0xffffffff && input.hash.every(byte => byte === 0);
+
+/**
+ * Builds Blockchair-dashboard-shaped transactions from raw Electrum data so
+ * parseBlockchainTransactions (blockChair.js) computes amount/from/to/fee
+ * with the exact same semantics as the API providers. Input values come from
+ * each spent output's previous transaction. txidHeightPairs = [[txid, height]]
+ * where height <= 0 means mempool.
+ */
+const buildBlockchairShapedTxs = async (client, txidHeightPairs) => {
+  const txids = txidHeightPairs.map(([txid]) => txid);
+  const rawByTxid = await fetchRawTransactions(client, txids);
+  const parsedByTxid = {};
+  const prevTxids = new Set();
+  txids.forEach(txid => {
+    const hex = rawByTxid[txid];
+    if (!hex) {
+      return;
+    }
+    const tx = bitcoin.Transaction.fromHex(hex);
+    parsedByTxid[txid] = tx;
+    tx.ins.forEach(input => {
+      if (!isCoinbaseInput(input)) {
+        // eslint-disable-next-line no-undef
+        prevTxids.add(Buffer.from(input.hash).reverse().toString('hex'));
+      }
+    });
+  });
+  const prevRawByTxid = await fetchRawTransactions(client, [...prevTxids]);
+  const timesByHeight = await fetchBlockTimestamps(
+    client,
+    txidHeightPairs.map(([, height]) => height),
+  );
+
+  return txidHeightPairs
+    .filter(([txid]) => parsedByTxid[txid])
+    .map(([txid, height]) => {
+      const tx = parsedByTxid[txid];
+      let inputTotal = 0;
+      let hasAllInputs = true;
+      const inputs = tx.ins.map(input => {
+        if (isCoinbaseInput(input)) {
+          return {recipient: null, value: 0};
+        }
+        // eslint-disable-next-line no-undef
+        const prevTxid = Buffer.from(input.hash).reverse().toString('hex');
+        const prevHex = prevRawByTxid[prevTxid];
+        if (!prevHex) {
+          hasAllInputs = false;
+          return {recipient: null, value: 0};
+        }
+        const prevOut = bitcoin.Transaction.fromHex(prevHex).outs[input.index];
+        const value = Number(prevOut.value);
+        inputTotal += value;
+        return {recipient: outputAddress(prevOut.script), value};
+      });
+      let outputTotal = 0;
+      const outputs = tx.outs.map(output => {
+        const value = Number(output.value);
+        outputTotal += value;
+        return {recipient: outputAddress(output.script), value};
+      });
+      const blockTime = timesByHeight[height];
+      return {
+        transaction: {
+          hash: txid,
+          fee: hasAllInputs ? Math.max(inputTotal - outputTotal, 0) : 0,
+          // Mempool txs get "now" so they sort before confirmed ones.
+          time: blockTime
+            ? new Date(blockTime * 1000).toISOString()
+            : new Date().toISOString(),
+          block_id: height > 0 ? height : -1,
+        },
+        inputs,
+        outputs,
+      };
+    });
+};
+
+const withConfirmations = (parsedTxs, tipHeight) =>
+  parsedTxs.map(item => ({
+    ...item,
+    confirmations:
+      item.blockNumber > 0 && tipHeight >= item.blockNumber
+        ? tipHeight - item.blockNumber + 1
+        : 0,
+  }));
+
+const TX_HISTORY_LIMIT = 20; // matches the Blockchair providers (limit: '20,0')
+
+/**
+ * Same output shape as BitcoinFork.getTransactions (Blockchair providers):
+ * [{hash, timestamp, status, amount, fee, from, to, blockNumber,
+ *   confirmations}], newest first, amounts in satoshis.
+ */
+export const electrumFetchBitcoinTransactions = async ({
+  address,
+  derive_addresses,
+}) => {
+  const client = getElectrumClient();
+  const finalAddresses =
+    Array.isArray(derive_addresses) && derive_addresses.length > 1
+      ? derive_addresses
+      : [address];
+  const histories = await client.batchRequestChunked(
+    finalAddresses.map(item => ({
+      method: 'blockchain.scripthash.get_history',
+      params: [addressToScripthash(item)],
+    })),
+  );
+  const heightByTxid = new Map();
+  histories.forEach(history => {
+    (history || []).forEach(({tx_hash, height}) => {
+      const known = heightByTxid.get(tx_hash);
+      if (known === undefined || height > known) {
+        heightByTxid.set(tx_hash, height);
+      }
+    });
+  });
+  // Mempool (height <= 0) first, then newest block first.
+  const sortRank = height => (height <= 0 ? Number.MAX_SAFE_INTEGER : height);
+  const txidHeightPairs = [...heightByTxid.entries()]
+    .sort((a, b) => sortRank(b[1]) - sortRank(a[1]))
+    .slice(0, TX_HISTORY_LIMIT);
+  const [shaped, tipHeight] = await Promise.all([
+    buildBlockchairShapedTxs(client, txidHeightPairs),
+    getTipHeight(client),
+  ]);
+  return withConfirmations(
+    parseBlockchainTransactions(shaped, finalAddresses),
+    tipHeight,
+  );
+};
+
+/**
+ * Same output shape as BitcoinFork.getTransaction. Also works without wallet
+ * addresses (waitForConfirmation passes only the txid): the confirmation
+ * height is discovered from the history of the tx's own outputs.
+ */
+export const electrumGetTransaction = async ({
+  transactionId,
+  address,
+  derive_addresses,
+}) => {
+  const client = getElectrumClient();
+  const rawByTxid = await fetchRawTransactions(client, [transactionId]);
+  const rawHex = rawByTxid[transactionId];
+  if (!rawHex) {
+    return null;
+  }
+  const tx = bitcoin.Transaction.fromHex(rawHex);
+  let height = 0;
+  for (const output of tx.outs) {
+    const outAddr = outputAddress(output.script);
+    if (!outAddr) {
+      continue;
+    }
+    try {
+      const history = await client.request(
+        'blockchain.scripthash.get_history',
+        [addressToScripthash(outAddr)],
+      );
+      const entry = (history || []).find(
+        item => item.tx_hash === transactionId,
+      );
+      if (entry) {
+        height = entry.height;
+        break;
+      }
+    } catch (e) {
+      // A busy address can exceed the server's history limit — try the
+      // next output instead of failing the whole lookup.
+    }
+  }
+  const finalAddresses = address
+    ? Array.isArray(derive_addresses)
+      ? derive_addresses
+      : [address]
+    : [];
+  const [shaped, tipHeight] = await Promise.all([
+    buildBlockchairShapedTxs(client, [[transactionId, height]]),
+    getTipHeight(client),
+  ]);
+  const [parsedTx] = withConfirmations(
+    parseBlockchainTransactions(shaped, finalAddresses),
+    tipHeight,
+  );
+  return parsedTx || null;
+};
+
+/**
+ * Address usage for BIP44 gap-limit discovery: true when the address has any
+ * transaction history. Per-address server errors (e.g. history too large)
+ * count as used.
+ */
+export const electrumFetchAddressUsage = async ({addresses}) => {
+  const client = getElectrumClient();
+  const list = Array.isArray(addresses) ? addresses : [];
+  const results = await client.batchRequestChunked(
+    list.map(address => ({
+      method: 'blockchain.scripthash.get_history',
+      params: [addressToScripthash(address)],
+    })),
+    BATCH_SIZE,
+    {settleErrors: true},
+  );
+  const usage = {};
+  list.forEach((address, i) => {
+    const result = results[i];
+    usage[address] = Array.isArray(result)
+      ? result.length > 0
+      : !!result?.electrumError;
+  });
+  return usage;
+};
+
 /** Broadcast a signed transaction. Returns the txid. */
 export const electrumBroadcastTransaction = async ({txHex}) => {
   const client = getElectrumClient();
@@ -393,7 +695,8 @@ export const electrumGetFeeRate = async ({blocks = 2} = {}) => {
   const client = getElectrumClient();
   const btcPerKb = await client.request('blockchain.estimatefee', [blocks]);
   if (!btcPerKb || btcPerKb <= 0) {
-    return null;
+    // Throw so the data-source wrapper falls back to the API providers.
+    throw new Error('Electrum fee estimate unavailable');
   }
   return Math.max(1, Math.round((btcPerKb * 1e8) / 1000));
 };

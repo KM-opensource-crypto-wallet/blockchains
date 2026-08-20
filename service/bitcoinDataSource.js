@@ -8,7 +8,12 @@ import {
   electrumFetchBitcoinBalances,
   electrumFetchBitcoinUTXO,
   electrumFetchBitcoinTransactionDetails,
+  electrumFetchBitcoinTransactions,
+  electrumGetTransaction,
+  electrumBroadcastTransaction,
+  electrumGetFeeRate,
 } from 'dok-wallet-blockchain-networks/service/electrum';
+import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
 
 /**
  * Bitcoin data source: Electrum first (direct server connection, like
@@ -46,4 +51,35 @@ export const fetchBitcoinTransactionDetails = withFallback(
   electrumFetchBitcoinTransactionDetails,
   dokFetchBitcoinTransactionDetails,
   'transaction details',
+);
+
+export const fetchBitcoinTransactions = withFallback(
+  electrumFetchBitcoinTransactions,
+  ({address, derive_addresses}) =>
+    BitcoinFork.getTransactions({chain: 'btc', address, derive_addresses}),
+  'transactions',
+);
+
+export const fetchBitcoinTransaction = withFallback(
+  electrumGetTransaction,
+  ({transactionId, address, derive_addresses}) =>
+    BitcoinFork.getTransaction({
+      chain: 'btc',
+      transactionId,
+      address,
+      derive_addresses,
+    }),
+  'transaction',
+);
+
+export const broadcastBitcoinTransaction = withFallback(
+  electrumBroadcastTransaction,
+  ({txHex}) => BitcoinFork.createTransaction({chain: 'btc', txHex}),
+  'broadcast',
+);
+
+export const fetchBitcoinFeeRate = withFallback(
+  electrumGetFeeRate,
+  () => BitcoinFork.getTransactionFees({chain: 'btc'}),
+  'fee rate',
 );

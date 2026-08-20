@@ -2,16 +2,26 @@ import ECPairFactory from 'ecpair';
 import ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
 import {toXOnly} from 'bitcoinjs-lib/src/psbt/bip371';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
-  getLastIndexOfDerivations,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
+import {
+  CHANGE_CHAIN,
+  ensureStandardAddresses,
+  extendByGapLimit,
+  getNetworkByChainName,
+  getStandardChainItems,
+  parsePathTail,
+} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
+import {
+  isElectrumAvailable,
+  electrumFetchAddressUsage,
+} from 'dok-wallet-blockchain-networks/service/electrum';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
 import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
@@ -19,39 +29,17 @@ import {
   fetchBitcoinBalances,
   fetchBitcoinTransactionDetails,
   fetchBitcoinUTXO,
+  fetchBitcoinTransactions,
+  fetchBitcoinTransaction,
+  broadcastBitcoinTransaction,
+  fetchBitcoinFeeRate,
 } from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
 bitcoin.initEccLib(ecc);
 
-const mainNetworkKeys = {
-  bitcoin: {
-    public: 0x04b24746,
-    private: 0x04b2430c,
-  },
-  bitcoin_segwit: {
-    public: 0x049d7cb2,
-    private: 0x049d7878,
-  },
-  bitcoin_legacy: {
-    public: 0x0488b21e,
-    private: 0x0488ade4,
-  },
-};
-
-const testnetNetworkKeys = {
-  bitcoin: {
-    public: 0x045f1cf6,
-    private: 0x045f18bc,
-  },
-  bitcoin_segwit: {
-    public: 0x044a5262,
-    private: 0x044a4e28,
-  },
-  bitcoin_legacy: {
-    public: 0x043587cf,
-    private: 0x04358394,
-  },
-};
+// Sorting weight so UTXOs order by (chainIndex, addressIndex); no chain ever
+// holds this many addresses (bitcoinHdAddress caps chains at 500).
+const MAX_UTXO_SORT_INDEX = 1000000;
 
 export const BitcoinChain = () => {
   return {
@@ -122,6 +110,43 @@ export const BitcoinChain = () => {
           });
           if (Array.isArray(resp?.data)) {
             newDeriveAddresses = resp?.data;
+          }
+        }
+        // BIP44 discovery: make sure the standard receive/change window
+        // exists, then extend it past the last used address (gap limit).
+        newDeriveAddresses = ensureStandardAddresses({
+          chain_name,
+          deriveAddresses: newDeriveAddresses,
+          accountKey: extendedPublicKey,
+        });
+        if (extendedPublicKey && isElectrumAvailable()) {
+          try {
+            for (let round = 0; round < 3; round++) {
+              const standardItems = getStandardChainItems(
+                chain_name,
+                newDeriveAddresses,
+              );
+              const usage = await electrumFetchAddressUsage({
+                addresses: standardItems.map(item => item.address),
+              });
+              const usedAddresses = new Set(
+                standardItems
+                  .filter(item => usage[item.address])
+                  .map(item => item.address),
+              );
+              const extended = extendByGapLimit({
+                chain_name,
+                deriveAddresses: newDeriveAddresses,
+                accountKey: extendedPublicKey,
+                usedAddresses,
+              });
+              if (extended === newDeriveAddresses) {
+                break;
+              }
+              newDeriveAddresses = extended;
+            }
+          } catch (e) {
+            console.warn('bitcoin gap-limit scan failed', e?.message);
           }
         }
         if (newDeriveAddresses?.length && newDeriveAddresses?.[0]?.address) {
@@ -299,8 +324,7 @@ export const BitcoinChain = () => {
     getTransactions: async ({address, deriveAddresses}) => {
       try {
         const allAddresses = deriveAddresses?.map?.(item => item?.address);
-        const transactions = await BitcoinFork.getTransactions({
-          chain: 'btc',
+        const transactions = await fetchBitcoinTransactions({
           address,
           derive_addresses: allAddresses,
         });
@@ -331,9 +355,8 @@ export const BitcoinChain = () => {
     getTransaction: async ({txHash, address, deriveAddresses}) => {
       try {
         const allAddresses = deriveAddresses?.map?.(item => item?.address);
-        const response = await BitcoinFork.getTransaction({
+        const response = await fetchBitcoinTransaction({
           transactionId: txHash,
-          chain: 'btc',
           address,
           derive_addresses: allAddresses,
         });
@@ -388,9 +411,8 @@ export const BitcoinChain = () => {
           memo,
         });
         if (built) {
-          return await BitcoinFork.createTransaction({
+          return await broadcastBitcoinTransaction({
             txHex: built,
-            chain: 'btc',
           });
         } else {
           throw new Error('no built found');
@@ -413,9 +435,8 @@ export const BitcoinChain = () => {
             console.log(
               `[${Date.now()}]in waitForConfirmation, going to call bitcoin, transactionID: ${transactionID}`,
             );
-            const response = await BitcoinFork.getTransaction({
+            const response = await fetchBitcoinTransaction({
               transactionId: transaction,
-              chain: 'btc',
             });
             // status alone is not proof of confirmation: some providers
             // report mempool txs as confirmed (Blockchair block_id -1),
@@ -590,11 +611,13 @@ const buildUTXO = async ({
       };
     });
 
-    // Only use the required utxos
+    // Only use the required utxos (receive chain first, then by index)
+    const sortRank = derivePath => {
+      const {chainIndex, addressIndex} = parsePathTail(derivePath);
+      return chainIndex * MAX_UTXO_SORT_INDEX + addressIndex;
+    };
     const finalUtxos = allUtxos.sort(
-      (a, b) =>
-        getLastIndexOfDerivations(a.derivePath) -
-        getLastIndexOfDerivations(b.derivePath),
+      (a, b) => sortRank(a.derivePath) - sortRank(b.derivePath),
     );
     const [usedUTXOs, sum] = finalUtxos.reduce(
       ([utxoAcc, total], utxo) =>
@@ -620,9 +643,10 @@ const buildUTXO = async ({
         keyPairs[derivePath] = ECPair.fromWIF(tempPrivateKey, customNetwork);
       } else if (!keyPairs[derivePath] && !tempPrivateKey) {
         const root = bip32.fromBase58(extendedPrivateKey, customNetwork);
-        const childNode = root
-          .derive(getLastIndexOfDerivations(derivePath))
-          .derive(0);
+        // Works for both standard (…/chain/index) and legacy (…/index/0)
+        // paths: always derive the last two path segments in order.
+        const {chainIndex, addressIndex} = parsePathTail(derivePath);
+        const childNode = root.derive(chainIndex).derive(addressIndex);
         // Convert BIP32 node to ECPair for React Native compatibility
         keyPairs[derivePath] = ECPair.fromPrivateKey(
           // eslint-disable-next-line no-undef
@@ -720,7 +744,7 @@ const buildUTXO = async ({
   }
   if (isGenerateFee) {
     vSize = vSize || createdTx.virtualSize();
-    const feeRate = await BitcoinFork.getTransactionFees({chain: 'btc'});
+    const feeRate = await fetchBitcoinFeeRate();
     const feeRateNumber = validateNumber(feeRate) || 20;
     const normal = feeMultiplier?.normal || 1.4;
     const recommended = feeMultiplier?.recommended || 1.65;
@@ -758,45 +782,26 @@ const getDeriveAddressByChain = chain_name => {
     : "m/44'/0'/0'/0/0";
 };
 
-const getNetworkByChainName = chain_name => {
-  return chain_name === 'bitcoin' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin_legacy' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_legacy'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_segwit' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_segwit,
-      })
-    : chain_name === 'bitcoin_segwit'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_segwit,
-      })
-    : '';
-};
-
+// Change goes to the first unused internal-chain address (…/1/i), like
+// BlueWallet/Electrum. Falls back to the sending address for coins without
+// an internal chain (private-key imports).
 const getChangeAddress = (usedAddresses, allDeriveAddresses) => {
-  if (
-    usedAddresses?.length === allDeriveAddresses?.length &&
-    usedAddresses.length > 0
-  ) {
-    return usedAddresses[0].address;
-  }
-  const lastUsedAddresses = usedAddresses[usedAddresses?.length - 1];
-  const lastAddressIndex = getLastIndexOfDerivations(
-    lastUsedAddresses?.derivePath,
+  const allItems = Array.isArray(allDeriveAddresses) ? allDeriveAddresses : [];
+  const spendingSet = new Set((usedAddresses || []).map(item => item?.address));
+  const internal = allItems
+    .filter(item => parsePathTail(item?.derivePath).chainIndex === CHANGE_CHAIN)
+    .sort(
+      (a, b) =>
+        parsePathTail(a?.derivePath).addressIndex -
+        parsePathTail(b?.derivePath).addressIndex,
+    );
+  const unused = internal.find(
+    item => !(Number(item?.balance) > 0) && !spendingSet.has(item?.address),
   );
-  const changeAddressIndex = lastAddressIndex === 19 ? 1 : lastAddressIndex + 1;
-  return allDeriveAddresses[changeAddressIndex]?.address;
+  return (
+    unused?.address ||
+    internal[0]?.address ||
+    usedAddresses?.[0]?.address ||
+    allItems[0]?.address
+  );
 };
