@@ -5,7 +5,7 @@ import {getSellCryptoPaymentDetails} from 'dok-wallet-blockchain-networks/servic
 import {getSellCryptoQuote} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   calculateEstimateFee,
-  setCurrentTransferData,
+  updateCurrentTransferData,
 } from '../currentTransfer/currentTransferSlice';
 import {validateBigNumberStr} from 'dok-wallet-blockchain-networks/helper';
 
@@ -53,7 +53,7 @@ const initiateTransfer = async (payload, thunkAPI) => {
   const transferDetails = currentState.sellCrypto.transferDetails;
   try {
     dispatch(
-      setCurrentTransferData({
+      updateCurrentTransferData({
         toAddress: transferDetails?.depositAddress,
         amount: validateBigNumberStr(transferDetails?.depositAmount),
         memo: transferDetails?.memo,

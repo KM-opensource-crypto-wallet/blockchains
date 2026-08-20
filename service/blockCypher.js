@@ -201,7 +201,7 @@ export const BlockCypher = {
             ? trAddr !== fromAddress?.toLowerCase()
             : addrSet.has(trAddr);
         })?.addresses?.[0],
-        blockNumber: item?.block_height ?? null,
+        blockNumber: item?.block_height > 0 ? item.block_height : null,
         confirmations: item?.confirmations ?? null,
       };
     } catch (e) {

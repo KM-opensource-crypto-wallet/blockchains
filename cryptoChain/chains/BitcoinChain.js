@@ -233,6 +233,7 @@ export const BitcoinChain = () => {
       estimateGas: virtualSize,
       feesType,
       selectedUTXOs,
+      memo,
     }) => {
       try {
         const amountToSend = new BigNumber(amount);
@@ -250,6 +251,7 @@ export const BitcoinChain = () => {
           virtualSize,
           feesType,
           selectedUTXOs,
+          memo,
         });
       } catch (e) {
         console.error('Error in bitcoin gas fee', e);
@@ -367,6 +369,7 @@ export const BitcoinChain = () => {
       balance,
       extendedPrivateKey,
       selectedUTXOs,
+      memo,
     }) => {
       try {
         const amountToSend = new BigNumber(amount);
@@ -382,6 +385,7 @@ export const BitcoinChain = () => {
           isGenerateFee: false,
           fee: transactionFee,
           selectedUTXOs,
+          memo,
         });
         if (built) {
           return await BitcoinFork.createTransaction({
@@ -401,7 +405,7 @@ export const BitcoinChain = () => {
         console.error('No transaction id found for bitcoin');
         return null;
       }
-      return new Promise((resolve, reject) => {
+      return new Promise(resolve => {
         let numberOfRetries = 0;
         let timer = setInterval(async () => {
           try {
@@ -413,17 +417,24 @@ export const BitcoinChain = () => {
               transactionId: transaction,
               chain: 'btc',
             });
-            if (response?.status) {
+            // status alone is not proof of confirmation: some providers
+            // report mempool txs as confirmed (Blockchair block_id -1),
+            // so also require a real block height.
+            if (response?.status && Number(response?.blockNumber) > 0) {
               clearInterval(timer);
               resolve(response);
-            } else if (numberOfRetries === 15) {
+            } else if (numberOfRetries >= 15) {
               clearInterval(timer);
               resolve('pending');
             }
           } catch (e) {
-            clearInterval(timer);
+            // The tx is already broadcast — a transient provider error must
+            // not fail the flow, keep polling until the retry limit.
             console.error('Error in get tranaction', e);
-            reject(e);
+            if (numberOfRetries >= 15) {
+              clearInterval(timer);
+              resolve('pending');
+            }
           }
         }, 5000);
       });
@@ -480,7 +491,22 @@ const buildUTXO = async ({
   virtualSize,
   feesType,
   selectedUTXOs,
+  memo,
 }) => {
+  // memo is a hex-encoded OP_RETURN payload (exchange providers like LI.FI
+  // route shared-vault BTC deposits by it). Validate up front: a malformed
+  // or oversized memo must fail the build, never produce a memo-less send —
+  // a vault deposit without its memo is unrecoverable.
+  if (memo) {
+    const isValidMemo =
+      typeof memo === 'string' &&
+      /^[0-9a-fA-F]+$/.test(memo) &&
+      memo.length % 2 === 0 &&
+      memo.length <= 160; // 80 bytes, the standard OP_RETURN relay limit
+    if (!isValidMemo) {
+      throw new Error('Invalid bitcoin memo: expected hex of at most 80 bytes');
+    }
+  }
   let amountWithFees = new BigNumber(amount);
   let vSize = virtualSize;
   let createdTx;
@@ -659,6 +685,14 @@ const buildUTXO = async ({
       address: toAddress,
       value: Number(amount),
     });
+    if (memo) {
+      tx.addOutput({
+        // eslint-disable-next-line no-undef
+        script: bitcoin.payments.embed({data: [Buffer.from(memo, 'hex')]})
+          .output,
+        value: 0,
+      });
+    }
     if (change.gt(0)) {
       const changeAddress = getChangeAddress(
         usedDerivedAddress,

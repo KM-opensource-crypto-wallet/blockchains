@@ -342,6 +342,34 @@ const EVM_CHAINS = [
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
 
+// Chains whose DEX swaps need an on-chain token allowance before the swap:
+// EVM (ERC20) and Tron (TRC20). Solana bundles the whole route into the
+// signed transaction itself, so it never needs an approval step.
+export const isSwapApprovalChain = chain_name =>
+  isEVMChain(chain_name) || chain_name === 'tron';
+
+// The single definition of "this exchange is a DEX swap" (provider returned
+// executable calldata) vs a deposit-address provider (plain send). Keep every
+// layer on this predicate instead of re-deriving it inline.
+export const isDexSwap = swapData => Boolean(swapData);
+
+// A DEX quote needs the allowance flow only when the provider named a
+// spender AND the source is a token on an approval chain (ERC20/TRC20).
+// Native-coin sources and Solana bundle everything into the signed tx.
+export const swapNeedsApproval = ({swapData, asset}) =>
+  Boolean(swapData?.spender) &&
+  isSwapApprovalChain(asset?.chain_name) &&
+  Boolean(asset?.contractAddress);
+
+// Shared across chains so the UI can treat an expired quote uniformly:
+// sendFunds matches on this exact message to toast and route the user back
+// to the Exchange screen for a fresh quote.
+export const SWAP_QUOTE_EXPIRED_ERROR =
+  'Swap simulation failed — the quote may have expired or the provider route is currently failing. Please refresh the quote or try another provider.';
+
+export const isSwapBlockingError = message =>
+  message === SWAP_QUOTE_EXPIRED_ERROR;
+
 const OPTIONS_GAS_FEES_CHAIN = [
   'ethereum',
   'binance_smart_chain',
@@ -1326,8 +1354,8 @@ export const commonRetryFunc = async (
       return await cb(provider);
     } catch (e) {
       console.log(`Error in provider:  ${providerName || ''} `, 'Errors:', e);
-      if (i === providers - 1) {
-        if (defaultResponse) {
+      if (i === providers.length - 1) {
+        if (defaultResponse !== undefined) {
           return defaultResponse;
         } else {
           throw e;
@@ -1488,30 +1516,22 @@ export async function sleep(timeMs) {
   });
 }
 
-export function extractHashFromEVMError(error) {
-  // Try to extract transaction hash from error message
-  const hashMatch = error.message?.match(/0x[a-fA-F0-9]{64}/);
-  return hashMatch ? hashMatch[0] : null;
-}
-
-export function extractTxHashFromEVMMissingError(error) {
-  // Check if error has the expected structure
-  if (!error.value || !Array.isArray(error.value)) {
-    return null;
+// Chain-agnostic sanity check for a tx hash about to be reported to the
+// backend exchange history. Non-EVM chains report base58/base64/plain-hex
+// hashes of varying lengths, so only 0x-prefixed values get the strict EVM
+// shape check; everything else just has to be a single clean token.
+export const isPlausibleTxHash = hash => {
+  if (typeof hash !== 'string') {
+    return false;
   }
-
-  // Look for a result that looks like a transaction hash (64 hex characters)
-  for (const response of error.value) {
-    if (response.result && typeof response.result === 'string') {
-      // Transaction hashes are 32 bytes = 64 hex characters + '0x' prefix = 66 characters
-      if (response.result.length === 66 && response.result.startsWith('0x')) {
-        return response.result;
-      }
-    }
+  if (/[\s,]/.test(hash) || hash.length < 10 || hash.length > 120) {
+    return false;
   }
-
-  return null;
-}
+  if (hash.startsWith('0x')) {
+    return isValidEVMTransactionHash(hash);
+  }
+  return true;
+};
 
 /**
  * Merges newAccounts into oldAccounts, deduplicating by address OR derivePath.
