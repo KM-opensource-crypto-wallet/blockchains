@@ -190,11 +190,12 @@ export const RippleChain = () => {
         return {data: null};
       }
     },
-    signRawTransaction: async ({transaction, privateKey}) => {
+    signRawTransaction: async ({payload, privateKey}) => {
       try {
+        const finalPayload = payload?.signTypeData?.transaction;
         await rippleProvider.connect();
         const publicKey = derivePublicKey(privateKey);
-        const txJson = extractTxJson(transaction);
+        const txJson = extractTxJson(finalPayload);
         const tx = {
           ...txJson,
           Account: txJson.Account ?? deriveAddress(publicKey),
@@ -213,11 +214,12 @@ export const RippleChain = () => {
         throw e;
       }
     },
-    sendRawTransaction: async ({transaction, privateKey}) => {
+    sendRawTransaction: async ({payload, privateKey}) => {
       try {
+        const finalPayload = payload?.signTypeData?.transaction;
         await rippleProvider.connect();
         const publicKey = derivePublicKey(privateKey);
-        const txJson = extractTxJson(transaction);
+        const txJson = extractTxJson(finalPayload);
         const tx = {
           ...txJson,
           Account: txJson.Account ?? deriveAddress(publicKey),

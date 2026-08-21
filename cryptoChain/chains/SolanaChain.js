@@ -464,8 +464,9 @@ export const SolanaChain = () => {
         null,
         true,
       ),
-    signMessage: async ({message, privateKey}) => {
+    signMessage: async ({signTypeData, privateKey}) => {
       try {
+        const message = signTypeData;
         const secretKey = bs58.decode(privateKey);
         const from = Keypair.fromSecretKey(secretKey, {
           skipValidation: true,

@@ -40,7 +40,6 @@ import {
 } from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
-import {signMessage} from 'tronweb/lib/esm/utils';
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -1696,14 +1695,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           const walletSigner = new ethers.Wallet(privateKey).connect(
             evmProvider,
           );
+          const transactionData = payload?.transactionData || {};
           return await walletSigner.signTransaction({
-            from: payload.from,
-            to: payload.to,
-            data: payload.data,
-            nonce: payload.nonce,
-            value: payload.value,
-            gasLimit: payload.gas,
-            gasPrice: payload.gasPrice,
+            from: transactionData.from,
+            to: transactionData.to,
+            data: transactionData.data,
+            nonce: transactionData.nonce,
+            value: transactionData.value,
+            gasLimit: transactionData.gas,
+            gasPrice: transactionData.gasPrice,
           });
         } catch (e) {
           const {reason} = await errorDecoder.decode(e);
@@ -1713,14 +1713,15 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }),
     sendRawTransaction: async ({payload, privateKey}) => {
       try {
+        const transactionData = payload?.transactionData || {};
         const tx = {
-          from: payload.from,
-          to: payload.to,
-          data: payload.data,
-          nonce: payload.nonce,
-          value: payload.value,
-          gasLimit: payload.gas,
-          gasPrice: payload.gasPrice,
+          from: transactionData.from,
+          to: transactionData.to,
+          data: transactionData.data,
+          nonce: transactionData.nonce,
+          value: transactionData.value,
+          gasLimit: transactionData.gas,
+          gasPrice: transactionData.gasPrice,
         };
         return await createSendTransaction(new ethers.Wallet(privateKey), tx);
       } catch (e) {
@@ -1729,9 +1730,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return Promise.reject(reason);
       }
     },
-    personalSign: async ({message, privateKey}) =>
+    personalSign: async ({signTypeData, privateKey}) =>
       retryFunc(async evmProvider => {
         try {
+          const message = signTypeData;
           const walletSigner = new ethers.Wallet(privateKey).connect(
             evmProvider,
           );

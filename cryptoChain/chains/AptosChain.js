@@ -105,8 +105,9 @@ export const AptosChain = () => {
         privateKey: privateKey,
       };
     },
-    signMessage: ({message, privateKey}) => {
+    signMessage: ({signTypeData, privateKey}) => {
       try {
+        const message = signTypeData;
         const account = getAccountFromPrivateKey(privateKey);
         const signature = account.sign(message);
         return {

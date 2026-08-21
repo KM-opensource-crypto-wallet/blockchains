@@ -46,8 +46,9 @@ export const StellarChain = () => {
         privateKey: privateKey,
       };
     },
-    personalSign: ({xdr, privateKey}) => {
+    personalSign: ({signTypeData, privateKey}) => {
       try {
+        const xdr = signTypeData;
         if (!xdr || typeof xdr !== 'string') {
           throw new Error('Invalid or missing Stellar XDR in signing request');
         }
@@ -64,8 +65,9 @@ export const StellarChain = () => {
       }
     },
     // SEP-0053: signature = ed25519_sign(SHA256("Stellar Signed Message:\n" + message))
-    signMessage: ({message, privateKey}) => {
+    signMessage: ({signTypeData, privateKey}) => {
       try {
+        const message = signTypeData;
         if (!message || typeof message !== 'string') {
           throw new Error(
             'Invalid or missing message in Stellar signing request',

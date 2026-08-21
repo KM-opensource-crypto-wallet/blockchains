@@ -1023,6 +1023,7 @@ export const walletConnect = createAsyncThunk(
       });
 
       let tx;
+      let batchConfirmation;
       if (method === ETH_WALLET_SEND_CALLS) {
         const calls = (transactionData?.batchCalls || []).map(call => ({
           to: call.to,
@@ -1035,18 +1036,29 @@ export const walletConnect = createAsyncThunk(
         const {nonce, gasFee, estimateGas, maxPriorityFeePerGas} =
           await nativeCoin.chain.getEstimateFeeForBatchTransaction({
             calls,
-            privateKey: nativeCoin.privateKey,
+            privateKey,
             isFetchNonce: true,
           });
         const res = await nativeCoin.chain.sendBatchTransaction({
           calls,
-          privateKey: nativeCoin.privateKey,
+          privateKey,
           nonce,
           gasFee,
           estimateGas,
           maxPriorityFeePerGas,
         });
         tx = getHashString(res, chain_name);
+        // Broadcast success isn't transaction success — the batch is one
+        // atomic on-chain call, so wait for it to mine before telling the
+        // dApp it succeeded, otherwise a revert gets reported as a win.
+        batchConfirmation = await nativeCoin.waitForConfirmation({
+          transaction: res,
+          interval: 5000,
+          retries: 15,
+        });
+        if (batchConfirmation?.status === 'failed') {
+          throw new Error('Your batch transaction failed on the network.');
+        }
       } else {
         const wcMethod = WalletConnectMethods[method];
         if (typeof nativeCoin.chain?.[wcMethod] !== 'function') {
@@ -1055,10 +1067,8 @@ export const walletConnect = createAsyncThunk(
         tx = await nativeCoin.chain[wcMethod]({
           payload,
           chain_name,
-          xdr: signTypeData,
           domain,
           signTypeData: signTypeData,
-          message: signTypeData,
           privateKey: privateKey,
         });
       }
@@ -1068,13 +1078,43 @@ export const walletConnect = createAsyncThunk(
           topic,
           response: {id, result: tx, jsonrpc: '2.0'},
         });
+        showToast({
+          type:
+            batchConfirmation === 'pending' ? 'warningToast' : 'successToast',
+          title:
+            batchConfirmation === 'pending'
+              ? 'Transaction pending'
+              : 'Transaction submitted',
+          message:
+            batchConfirmation === 'pending'
+              ? 'Transaction is taking longer than expected. Please check again later.'
+              : 'Your transaction was sent successfully',
+          toastId,
+        });
+        if (
+          method === ETH_WALLET_SEND_CALLS ||
+          WalletConnectMethods[method] === 'sendRawTransaction'
+        ) {
+          refreshCoinData(thunkAPI.dispatch, currentCoin, tx);
+        }
+      } else {
+        // Otherwise the dApp's request is left unanswered forever — no
+        // result and no error were ever sent back over the session.
+        await connector?.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            error: {code: 5000, message: 'Failed to obtain transaction hash'},
+          },
+        });
+        showToast({
+          type: 'errorToast',
+          title: 'Transaction failed',
+          message: 'Unable to submit transaction. Please try again.',
+          toastId,
+        });
       }
-      showToast({
-        type: 'successToast',
-        title: 'Transaction submitted',
-        message: 'Your transaction was sent successfully',
-        toastId,
-      });
       return tx;
     } catch (e) {
       console.error('Error in walletConnect', e);
