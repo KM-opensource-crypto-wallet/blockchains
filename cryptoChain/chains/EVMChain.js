@@ -1708,7 +1708,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         } catch (e) {
           const {reason} = await errorDecoder.decode(e);
           console.error('Error in sign raw ether transaction', reason);
-          return Promise.reject(reason);
+          throw e;
         }
       }),
     sendRawTransaction: async ({payload, privateKey}) => {
@@ -1727,7 +1727,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         const {reason} = await errorDecoder.decode(e);
         console.error('Error in send raw ether transaction', reason);
-        return Promise.reject(reason);
+        throw e;
       }
     },
     personalSign: async ({signTypeData, privateKey}) =>

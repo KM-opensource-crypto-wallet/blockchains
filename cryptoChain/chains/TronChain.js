@@ -1752,7 +1752,7 @@ export const TronChain = () => {
           return {signature};
         } catch (e) {
           console.error('Error in sign tron message', e);
-          return Promise.reject(e?.message);
+          throw e;
         }
       }, null),
     signRawTransaction: async ({payload, privateKey}) =>
@@ -1765,7 +1765,7 @@ export const TronChain = () => {
           return {result: transactionData};
         } catch (e) {
           console.error('Error in sign tron transaction', e);
-          return Promise.reject(e?.message);
+          throw e;
         }
       }, null),
     sendRawTransaction: async ({payload, privateKey}) =>

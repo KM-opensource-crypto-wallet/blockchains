@@ -428,7 +428,7 @@ export const SolanaChain = () => {
         return {signature};
       } catch (e) {
         console.error('Error in solana signRawTransaction', e);
-        return Promise.reject(e?.message);
+        throw e;
       }
     },
     sendRawTransaction: async ({payload, privateKey}) =>
@@ -479,7 +479,7 @@ export const SolanaChain = () => {
         return {signature: bs58Signature};
       } catch (e) {
         console.error('Error in solana signMessage', e);
-        return Promise.reject(e?.message);
+        throw e;
       }
     },
     getStaking: async ({address}) =>
