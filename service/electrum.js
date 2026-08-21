@@ -84,11 +84,14 @@ export class ElectrumClient {
   }
 
   async connect() {
-    if (this.socket) {
-      return;
-    }
+    // Order matters: _connectTo assigns this.socket before the TLS handshake
+    // finishes, so concurrent callers must wait on the in-flight promise
+    // instead of writing to a half-open socket.
     if (this.connectPromise) {
       return this.connectPromise;
+    }
+    if (this.socket) {
+      return;
     }
     this.connectPromise = this._connectWithFailover().finally(() => {
       this.connectPromise = null;
@@ -228,12 +231,32 @@ export class ElectrumClient {
     });
   }
 
+  // Removes just-registered requests so a synchronous write failure doesn't
+  // leave orphaned 30s timers rejecting with no handler attached.
+  _unregisterRequests(ids) {
+    ids.forEach(id => {
+      const entry = this.pending.get(id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        this.pending.delete(id);
+      }
+    });
+  }
+
   _send(method, params) {
+    if (!this.socket) {
+      return Promise.reject(new Error('Electrum not connected'));
+    }
     const id = this.nextId++;
     const promise = this._registerRequest(id);
-    this.socket.write(
-      JSON.stringify({jsonrpc: '2.0', id, method, params}) + '\n',
-    );
+    try {
+      this.socket.write(
+        JSON.stringify({jsonrpc: '2.0', id, method, params}) + '\n',
+      );
+    } catch (e) {
+      this._unregisterRequests([id]);
+      return Promise.reject(e);
+    }
     return promise;
   }
 
@@ -251,10 +274,15 @@ export class ElectrumClient {
       return [];
     }
     await this.connect();
+    if (!this.socket) {
+      throw new Error('Electrum not connected');
+    }
     const payload = [];
     const promises = [];
+    const ids = [];
     for (const {method, params} of calls) {
       const id = this.nextId++;
+      ids.push(id);
       const promise = this._registerRequest(id);
       promises.push(
         // With settleErrors, a per-call server error resolves to
@@ -265,7 +293,12 @@ export class ElectrumClient {
       );
       payload.push({jsonrpc: '2.0', id, method, params});
     }
-    this.socket.write(JSON.stringify(payload) + '\n');
+    try {
+      this.socket.write(JSON.stringify(payload) + '\n');
+    } catch (e) {
+      this._unregisterRequests(ids);
+      throw e;
+    }
     return Promise.all(promises);
   }
 
@@ -674,9 +707,17 @@ export const electrumFetchAddressUsage = async ({addresses}) => {
     BATCH_SIZE,
     {settleErrors: true},
   );
+  // A server that fails EVERY call (rate limiting, overload) must not mark
+  // the whole wallet "used" — that would ratchet the gap-limit extension on
+  // every refresh. Abort instead; the caller skips this discovery round.
+  if (list.length && results.every(result => result?.electrumError)) {
+    throw new Error('Electrum usage scan failed for all addresses');
+  }
   const usage = {};
   list.forEach((address, i) => {
     const result = results[i];
+    // A lone per-address error among successes means "history too large",
+    // which implies the address is used.
     usage[address] = Array.isArray(result)
       ? result.length > 0
       : !!result?.electrumError;
@@ -687,7 +728,20 @@ export const electrumFetchAddressUsage = async ({addresses}) => {
 /** Broadcast a signed transaction. Returns the txid. */
 export const electrumBroadcastTransaction = async ({txHex}) => {
   const client = getElectrumClient();
-  return client.request('blockchain.transaction.broadcast', [txHex]);
+  const result = await client.request('blockchain.transaction.broadcast', [
+    txHex,
+  ]);
+  // Some public Electrum servers return rejection text as the RESULT instead
+  // of a JSON-RPC error (BlueWallet guards this the same way) — only a
+  // 64-hex txid counts as success.
+  if (typeof result !== 'string' || !/^[0-9a-f]{64}$/i.test(result)) {
+    throw new Error(
+      `Electrum broadcast rejected: ${
+        typeof result === 'string' ? result : JSON.stringify(result)
+      }`,
+    );
+  }
+  return result;
 };
 
 /** Fee rate in sat/vB for ~`blocks` confirmation target. */

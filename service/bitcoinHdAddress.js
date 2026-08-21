@@ -23,6 +23,13 @@ export const RECEIVE_CHAIN = 0;
 export const CHANGE_CHAIN = 1;
 export const GAP_LIMIT = 20;
 export const MAX_ADDRESSES_PER_CHAIN = 500;
+// Older app versions derived the nonstandard scheme …/i/0 (index in the
+// change slot). Funds and change may sit on i=2..19 forever, so restores
+// must keep deriving that window (i=0,1 coincide with standard receive#0 /
+// change#0 and need no extra entries).
+const LEGACY_SCHEME_WINDOW = 20;
+
+const bip32 = BIP32Factory(ecc);
 
 const mainNetworkKeys = {
   bitcoin: {
@@ -118,25 +125,16 @@ const buildAddress = (chain_name, pubkey, network) => {
   return bitcoin.payments.p2wpkh({pubkey, network}).address;
 };
 
-/**
- * Derives `count` addresses on one chain from an account-level extended key.
- * xprv → items include a WIF privateKey; xpub → watch-only items.
- */
-export const deriveAddressRange = ({
+const deriveItemsFromNode = ({
   chain_name,
-  accountKey,
+  accountNode,
+  network,
+  basePath,
   chainIndex,
   start,
   count,
 }) => {
-  const network = getNetworkByChainName(chain_name);
-  if (!network || !accountKey || !(count > 0) || start < 0 || chainIndex < 0) {
-    return [];
-  }
-  const bip32 = BIP32Factory(ecc);
-  const accountNode = bip32.fromBase58(accountKey, network);
   const chainNode = accountNode.derive(chainIndex);
-  const basePath = getAccountBasePath(chain_name);
   const hasPrivateKey = !accountNode.isNeutered();
   const result = [];
   for (let i = start; i < start + count; i++) {
@@ -158,6 +156,57 @@ export const deriveAddressRange = ({
   return result;
 };
 
+/**
+ * Derives `count` addresses on one chain from an account-level extended key.
+ * xprv → items include a WIF privateKey; xpub → watch-only items.
+ */
+export const deriveAddressRange = ({
+  chain_name,
+  accountKey,
+  chainIndex,
+  start,
+  count,
+}) => {
+  const network = getNetworkByChainName(chain_name);
+  if (!network || !accountKey || !(count > 0) || start < 0 || chainIndex < 0) {
+    return [];
+  }
+  return deriveItemsFromNode({
+    chain_name,
+    accountNode: bip32.fromBase58(accountKey, network),
+    network,
+    basePath: getAccountBasePath(chain_name),
+    chainIndex,
+    start,
+    count,
+  });
+};
+
+/**
+ * WIF for one derive path from the account xprv (both path schemes work
+ * through parsePathTail). Returns null for xpubs or on any failure.
+ */
+export const derivePrivateKeyForPath = ({
+  chain_name,
+  extendedPrivateKey,
+  derivePath,
+}) => {
+  try {
+    const network = getNetworkByChainName(chain_name);
+    if (!network || !extendedPrivateKey || !derivePath) {
+      return null;
+    }
+    const node = bip32.fromBase58(extendedPrivateKey, network);
+    if (node.isNeutered()) {
+      return null;
+    }
+    const {chainIndex, addressIndex} = parsePathTail(derivePath);
+    return node.derive(chainIndex).derive(addressIndex).toWIF();
+  } catch (e) {
+    return null;
+  }
+};
+
 const standardPathPrefix = (chain_name, chainIndex) =>
   `${getAccountBasePath(chain_name)}/${chainIndex}/`;
 
@@ -175,7 +224,9 @@ export const getStandardChainItems = (chain_name, deriveAddresses) => {
 };
 
 /**
- * Guarantees the base window (receive 0..19 + change 0..19) exists.
+ * Guarantees the base window exists: standard receive 0..19 + change 0..19,
+ * plus the legacy-scheme window …/i/0 (i=2..19) so restored-from-seed wallets
+ * keep seeing funds/change the old app put on those paths.
  * Idempotent; watch-only additions when accountKey is an xpub. Returns the
  * input list unchanged when nothing is missing or no accountKey is available
  * (private-key-imported coins).
@@ -191,33 +242,41 @@ export const ensureStandardAddresses = ({
   }
   const existingPaths = new Set(existing.map(item => item?.derivePath));
   const basePath = getAccountBasePath(chain_name);
-  const hasAll = [RECEIVE_CHAIN, CHANGE_CHAIN].every(chainIndex => {
+  const requiredPaths = [];
+  for (const chainIndex of [RECEIVE_CHAIN, CHANGE_CHAIN]) {
     for (let i = 0; i < GAP_LIMIT; i++) {
-      if (!existingPaths.has(`${basePath}/${chainIndex}/${i}`)) {
-        return false;
-      }
+      requiredPaths.push(`${basePath}/${chainIndex}/${i}`);
     }
-    return true;
-  });
-  if (hasAll) {
+  }
+  for (let i = 2; i < LEGACY_SCHEME_WINDOW; i++) {
+    requiredPaths.push(`${basePath}/${i}/0`);
+  }
+  if (requiredPaths.every(path => existingPaths.has(path))) {
     return existing;
   }
   try {
-    const standard = [RECEIVE_CHAIN, CHANGE_CHAIN].flatMap(chainIndex =>
-      deriveAddressRange({
-        chain_name,
-        accountKey,
-        chainIndex,
-        start: 0,
-        count: GAP_LIMIT,
-      }),
+    const network = getNetworkByChainName(chain_name);
+    const accountNode = bip32.fromBase58(accountKey, network);
+    const common = {chain_name, accountNode, network, basePath};
+    const additions = [RECEIVE_CHAIN, CHANGE_CHAIN].flatMap(chainIndex =>
+      deriveItemsFromNode({...common, chainIndex, start: 0, count: GAP_LIMIT}),
     );
-    return mergeUniqueAccounts(existing, standard);
+    for (let i = 2; i < LEGACY_SCHEME_WINDOW; i++) {
+      additions.push(
+        ...deriveItemsFromNode({...common, chainIndex: i, start: 0, count: 1}),
+      );
+    }
+    return mergeUniqueAccounts(existing, additions);
   } catch (e) {
     console.error('error ensuring standard bitcoin addresses', e);
     return existing;
   }
 };
+
+/** True when the path sits on the internal/change chain (…/1/i). */
+export const isInternalChainAddress = (chain_name, derivePath) =>
+  typeof derivePath === 'string' &&
+  derivePath.startsWith(standardPathPrefix(chain_name, CHANGE_CHAIN));
 
 /**
  * BIP44 gap limit: per chain, make sure GAP_LIMIT addresses exist beyond the

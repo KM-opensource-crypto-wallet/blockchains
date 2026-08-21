@@ -1,3 +1,4 @@
+import * as bitcoin from 'bitcoinjs-lib';
 import {
   fetchBitcoinBalances as dokFetchBitcoinBalances,
   fetchBitcoinUTXO as dokFetchBitcoinUTXO,
@@ -95,12 +96,59 @@ export const fetchBitcoinTransaction = withFallback(
   'transaction',
 );
 
-export const broadcastBitcoinTransaction = withFallback(
-  electrumBroadcastTransaction,
-  ({txHex}) => BitcoinFork.createTransaction({chain: 'btc', txHex}),
-  'broadcast',
-  'broadcast',
-);
+// A retry can race a broadcast that actually landed (timeout after the
+// server accepted). Both attempts push the SAME signed bytes, so an
+// "already known" rejection means success — return the tx's own id, the
+// same idempotency rule the Tron/EVM chains follow.
+const ALREADY_KNOWN_RE =
+  /already in (the )?(block ?chain|mempool)|txn-already-known|already exists|already_exists|duplicate transaction/i;
+
+const isAlreadyKnownError = e =>
+  ALREADY_KNOWN_RE.test(e?.message || e?.response?.data?.message || '');
+
+export const broadcastBitcoinTransaction = async ({txHex}) => {
+  const expectedTxid = bitcoin.Transaction.fromHex(txHex).getId();
+  if (isWeb && isBrowser()) {
+    try {
+      return await callWebElectrum('broadcast', {txHex});
+    } catch (e) {
+      if (isAlreadyKnownError(e)) {
+        return expectedTxid;
+      }
+      console.warn(
+        'Web Electrum broadcast failed, falling back to API:',
+        e?.message,
+      );
+    }
+  } else if (isElectrumAvailable()) {
+    try {
+      return await electrumBroadcastTransaction({txHex});
+    } catch (e) {
+      if (isAlreadyKnownError(e)) {
+        return expectedTxid;
+      }
+      console.warn(
+        'Electrum broadcast failed, falling back to API:',
+        e?.message,
+      );
+    }
+  }
+  try {
+    const resp = await BitcoinFork.createTransaction({chain: 'btc', txHex});
+    // The provider retry wrapper returns a null default on failure; the tx
+    // may still be known to the network from the Electrum attempt, so only
+    // a real txid counts.
+    if (typeof resp === 'string' && resp.length > 0) {
+      return resp;
+    }
+    throw new Error('Bitcoin broadcast failed');
+  } catch (e) {
+    if (isAlreadyKnownError(e)) {
+      return expectedTxid;
+    }
+    throw e;
+  }
+};
 
 export const fetchBitcoinFeeRate = withFallback(
   electrumGetFeeRate,

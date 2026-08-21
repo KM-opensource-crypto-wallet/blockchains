@@ -71,6 +71,7 @@ import {
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
+import {derivePrivateKeyForPath} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
@@ -1843,11 +1844,12 @@ export const addCustomDeriveAddress = createAsyncThunk(
         payload?.chain_name || selectCurrentCoin(currentState)?.chain_name;
       const currentDeriveAddresses =
         selectCurrentCoin(currentState)?.deriveAddresses;
-      if (
-        isBitcoinChain(chain_name) &&
-        Array.isArray(currentDeriveAddresses) &&
-        currentDeriveAddresses.length >= 100
-      ) {
+      // Cap counts only user-created custom derivations — automatic
+      // gap-limit discovery can legitimately grow the full list past 100.
+      const customDeriveAddressCount = Array.isArray(currentDeriveAddresses)
+        ? currentDeriveAddresses.filter(item => item?.isCustom).length
+        : 0;
+      if (isBitcoinChain(chain_name) && customDeriveAddressCount >= 100) {
         showToast({
           type: 'errorToast',
           title: 'Limit reached',
@@ -2223,10 +2225,30 @@ export const walletsSlice = createSlice({
           subItem => subItem?.address === address,
         );
         if (item?.chain_name === chain_name && isFoundWallet) {
+          let privateKey = isFoundWallet?.privateKey;
+          if (!privateKey) {
+            // Watch-only (xpub-derived) entry: self-heal by deriving its key
+            // from the account xprv, otherwise the coin loses its privateKey
+            // and gets re-created (resetting the selection) on next refresh.
+            privateKey = derivePrivateKeyForPath({
+              chain_name,
+              extendedPrivateKey: item?.extendedPrivateKey,
+              derivePath: isFoundWallet?.derivePath,
+            });
+          }
+          const healedDeriveAddresses =
+            privateKey && !isFoundWallet?.privateKey
+              ? allDeriveAddresses.map(subItem =>
+                  subItem?.address === address
+                    ? {...subItem, privateKey}
+                    : subItem,
+                )
+              : item?.deriveAddresses;
           return {
             ...item,
+            deriveAddresses: healedDeriveAddresses,
             address: isFoundWallet?.address,
-            privateKey: isFoundWallet?.privateKey,
+            privateKey: privateKey || undefined,
           };
         }
         return item;

@@ -7,6 +7,7 @@ import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
+  mergeUniqueAccounts,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -109,7 +110,12 @@ export const BitcoinChain = () => {
             extended_pub_key: extendedPublicKey,
           });
           if (Array.isArray(resp?.data)) {
-            newDeriveAddresses = resp?.data;
+            // Merge (old-first) instead of replacing: a lone custom entry
+            // must survive backend recovery.
+            newDeriveAddresses = mergeUniqueAccounts(
+              Array.isArray(newDeriveAddresses) ? newDeriveAddresses : [],
+              resp.data,
+            );
           }
         }
         // BIP44 discovery: make sure the standard receive/change window
@@ -721,6 +727,7 @@ const buildUTXO = async ({
       const changeAddress = getChangeAddress(
         usedDerivedAddress,
         deriveAddresses,
+        extendedPrivateKey,
       );
       tx.addOutput({
         address: changeAddress,
@@ -785,11 +792,22 @@ const getDeriveAddressByChain = chain_name => {
 // Change goes to the first unused internal-chain address (…/1/i), like
 // BlueWallet/Electrum. Falls back to the sending address for coins without
 // an internal chain (private-key imports).
-const getChangeAddress = (usedAddresses, allDeriveAddresses) => {
+const getChangeAddress = (
+  usedAddresses,
+  allDeriveAddresses,
+  extendedPrivateKey,
+) => {
   const allItems = Array.isArray(allDeriveAddresses) ? allDeriveAddresses : [];
   const spendingSet = new Set((usedAddresses || []).map(item => item?.address));
+  // Watch-only entries are only spendable later through the xprv fallback in
+  // buildUTXO — never route change to one when that key is unavailable.
+  const canSpendXpubDerived = !!extendedPrivateKey;
   const internal = allItems
-    .filter(item => parsePathTail(item?.derivePath).chainIndex === CHANGE_CHAIN)
+    .filter(
+      item =>
+        parsePathTail(item?.derivePath).chainIndex === CHANGE_CHAIN &&
+        (item?.privateKey || canSpendXpubDerived),
+    )
     .sort(
       (a, b) =>
         parsePathTail(a?.derivePath).addressIndex -
