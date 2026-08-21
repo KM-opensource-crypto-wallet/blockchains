@@ -1352,12 +1352,12 @@ export const CHAIN_CONFIG = {
     chain_loader: 'tezos',
     rpc_urls: {
       default: {
-        mainnet: 'https://mainnet.tezos.ecadinfra.com',
-        testnet: 'https://ghostnet.ecadinfra.com',
+        mainnet: 'https://rpc.tzkt.io/mainnet',
+        testnet: 'https://rpc.shadownet.teztnets.com',
       },
     },
     scan: {
-      sandbox: 'https://ghostnet.tzkt.io',
+      sandbox: 'https://shadownet.tzkt.io',
       production: 'https://tzkt.io',
       txPath: '',
     },
@@ -1367,7 +1367,7 @@ export const CHAIN_CONFIG = {
       order: 29,
     },
     api_base_url: {
-      sandbox: 'https://api.ghostnet.tzkt.io',
+      sandbox: 'https://api.shadownet.tzkt.io',
       production: 'https://api.tzkt.io',
     },
     logo: require('assets/chain_logo/tezos.png'),
@@ -1519,6 +1519,10 @@ export const CHAIN_CONFIG = {
       production: 'https://filscan.io/en',
       txPath: 'message',
     },
+    api_base_url: {
+      sandbox: 'https://api-cali.filscan.io/api/v1',
+      production: 'https://api-v2.filscan.io/api/v1',
+    },
     private_key_list: {
       label: 'Filecoin',
       order: 34,
@@ -1606,6 +1610,7 @@ export const config = {
   RIPPLE_SCAN_URL: scanBase('ripple'),
   THORCHAIN_SCAN_URL: scanBase('thorchain'),
   TZKT_API_BASE_URL: forEnv(CHAIN_CONFIG.tezos.api_base_url),
+  FILSCAN_API_BASE_URL: forEnv(CHAIN_CONFIG.filecoin.api_base_url),
   TEZOS_SCAN_URL: scanBase('tezos'),
   STAKE_WIZ_BASE_URL: CHAIN_CONFIG.solana.stake_wiz_base_url,
   COSMOS_SCAN_URL: scanBase('cosmos'),

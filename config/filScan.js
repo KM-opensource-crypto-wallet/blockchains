@@ -1,7 +1,8 @@
 import axios from 'axios';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 
 export const FilScanApi = axios.create({
-  baseURL: 'https://api-v2.filscan.io/api/v1',
+  baseURL: config.FILSCAN_API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },

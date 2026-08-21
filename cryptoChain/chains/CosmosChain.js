@@ -217,8 +217,42 @@ export const CosmosChain = () => {
         console.error('Error in send cosmos transaction', e);
       }
     },
-    waitForConfirmation: async () => {
-      return true;
+    waitForConfirmation: async ({
+      transaction,
+      interval = 5000,
+      retries = 15,
+    }) => {
+      if (!transaction) {
+        console.error('No transaction hash found for cosmos');
+        return null;
+      }
+      // Poll the same REST host getBalance reads from, so a resolved
+      // confirmation guarantees the follow-up balance refresh sees the send.
+      return new Promise(resolve => {
+        let numberOfRetries = 0;
+        const timer = setInterval(async () => {
+          try {
+            numberOfRetries += 1;
+            const data = await fetchRequest(
+              `${getRPCUrl(
+                'cosmos_rest',
+              )}/cosmos/tx/v1beta1/txs/${transaction}`,
+            );
+            if (data?.tx_response) {
+              clearInterval(timer);
+              resolve(data.tx_response.code === 0 ? true : {status: 'failed'});
+            } else if (numberOfRetries >= retries) {
+              clearInterval(timer);
+              resolve('pending');
+            }
+          } catch (e) {
+            if (numberOfRetries >= retries) {
+              clearInterval(timer);
+              resolve('pending');
+            }
+          }
+        }, interval);
+      });
     },
   };
 };
