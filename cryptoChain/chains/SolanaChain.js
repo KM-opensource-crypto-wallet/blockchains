@@ -244,8 +244,9 @@ export const SolanaChain = () => {
     const extraFees = Math.ceil((gasFee * units) / 1000000);
     let rentExemptAmount = 0;
     if (needATA) {
-      rentExemptAmount =
-        await solanaProvider.getMinimumBalanceForRentExemption(ACCOUNT_SIZE);
+      rentExemptAmount = await solanaProvider.getMinimumBalanceForRentExemption(
+        ACCOUNT_SIZE,
+      );
     }
     const totalFee = extraFees + resp.value + rentExemptAmount;
 
