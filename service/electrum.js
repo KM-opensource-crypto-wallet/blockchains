@@ -33,6 +33,9 @@ const ELECTRUM_SERVERS = IS_SANDBOX
 
 const REQUEST_TIMEOUT_MS = 30000;
 const BATCH_SIZE = 100;
+// Chunks share one socket and are demuxed by JSON-RPC id, so they can overlap.
+// Bounded because the public ElectrumX fallbacks rate-limit on concurrent cost.
+const MAX_INFLIGHT_CHUNKS = 4;
 
 // Lazily required so the web/desktop bundle (no native TCP) keeps working.
 let tcpSocketModule;
@@ -302,12 +305,50 @@ export class ElectrumClient {
     return Promise.all(promises);
   }
 
+  /**
+   * Splits calls into batches and keeps up to MAX_INFLIGHT_CHUNKS of them in
+   * flight at once. One socket carries them all; responses are matched by
+   * JSON-RPC id, so overlapping batches only cost round trips, not ordering.
+   * Results always come back in the same order as `calls`.
+   */
   async batchRequestChunked(calls, chunkSize = BATCH_SIZE, opts) {
-    const results = [];
+    const chunks = [];
     for (let i = 0; i < calls.length; i += chunkSize) {
-      const chunk = calls.slice(i, i + chunkSize);
-      results.push(...(await this.batchRequest(chunk, opts)));
+      chunks.push(calls.slice(i, i + chunkSize));
     }
+    if (chunks.length <= 1) {
+      return chunks.length ? this.batchRequest(chunks[0], opts) : [];
+    }
+    // Connect once up front so the workers don't race the failover handshake.
+    await this.connect();
+    const chunkResults = new Array(chunks.length);
+    let next = 0;
+    let firstError = null;
+    const worker = async () => {
+      // Stop claiming chunks once one has failed: preserves the sequential
+      // version's short-circuit so a dead server isn't handed the rest of
+      // the work. Chunks already in flight are simply awaited out.
+      while (next < chunks.length && !firstError) {
+        const index = next++;
+        try {
+          chunkResults[index] = await this.batchRequest(chunks[index], opts);
+        } catch (e) {
+          firstError = firstError || e;
+        }
+      }
+    };
+    // Workers swallow their own errors, so this never leaves an in-flight
+    // sibling rejecting without a handler.
+    await Promise.all(
+      Array.from({length: Math.min(MAX_INFLIGHT_CHUNKS, chunks.length)}, () =>
+        worker(),
+      ),
+    );
+    if (firstError) {
+      throw firstError;
+    }
+    const results = [];
+    chunkResults.forEach(chunk => results.push(...chunk));
     return results;
   }
 }
