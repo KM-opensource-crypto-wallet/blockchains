@@ -224,6 +224,11 @@ export const createWallet = createAsyncThunk(
     };
     let isFromImportWallet = !!walletData.phrase || !!walletData?.privateKey;
     let isImportWalletWithPrivateKey = !!walletData?.privateKey;
+    // A mnemonic generated in-app (below) can never have been used with the
+    // old nonstandard bitcoin derivation scheme, so its coins skip the legacy
+    // window entirely. Imported phrases/keys must be scanned instead.
+    walletData.isLegacyFree = !isFromImportWallet;
+    newStoreWallet.isLegacyFree = !isFromImportWallet;
     let privateKey = null;
     let address = null;
     let chain_name = null;
@@ -464,12 +469,14 @@ export const addToken = createAsyncThunk(
         })) || [];
     }
 
+    let legacyScanDone = false;
     if (isBitcoin) {
       const resp = (await nativeCoin.getBalance?.()) || 0;
       balance = resp?.totalBalance || 0;
       if (Array.isArray(resp?.deriveAddresses)) {
         deriveAddresses = resp?.deriveAddresses;
       }
+      legacyScanDone = !!resp?.isLegacyScanDone;
     } else {
       balance = (await nativeCoin.getBalance?.()) || 0;
     }
@@ -507,6 +514,9 @@ export const addToken = createAsyncThunk(
     };
     if (isBitcoin) {
       coinObj.deriveAddresses = deriveAddresses;
+      if (legacyScanDone || currentWallet?.isLegacyFree) {
+        coinObj.isLegacyScanDone = true;
+      }
     }
     coinObj = addExistingDeriveAddress(currentWallet, coinObj);
     if (currentWallet.clientId) {

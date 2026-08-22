@@ -15,9 +15,12 @@ import {
   CHANGE_CHAIN,
   ensureStandardAddresses,
   extendByGapLimit,
+  getLegacyWindowItems,
   getNetworkByChainName,
   getStandardChainItems,
   parsePathTail,
+  removeLegacyWindowItems,
+  shouldPruneLegacyWindow,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {
   isElectrumAvailable,
@@ -98,8 +101,16 @@ export const BitcoinChain = () => {
       chain_name,
       extendedPublicKey,
       deriveAddresses,
+      isLegacyScanDone,
     }) => {
       let newDeriveAddresses = deriveAddresses;
+      // A lost/near-empty list means backend recovery may merge old-scheme
+      // entries back in below, so the resolved flag is ignored for this call
+      // and the legacy window is regenerated and rescanned in the same pass.
+      let legacyResolved =
+        !!isLegacyScanDone &&
+        Array.isArray(deriveAddresses) &&
+        deriveAddresses.length > 1;
       try {
         if (
           (!Array.isArray(deriveAddresses) || deriveAddresses?.length <= 1) &&
@@ -124,8 +135,40 @@ export const BitcoinChain = () => {
           chain_name,
           deriveAddresses: newDeriveAddresses,
           accountKey: extendedPublicKey,
+          includeLegacyWindow: !legacyResolved,
         });
         if (extendedPublicKey && isElectrumAvailable()) {
+          if (!legacyResolved) {
+            try {
+              const legacyItems = getLegacyWindowItems(
+                chain_name,
+                newDeriveAddresses,
+              );
+              if (legacyItems.length) {
+                const usage = await electrumFetchAddressUsage({
+                  addresses: legacyItems.map(item => item.address),
+                });
+                // All-or-nothing: one used legacy address keeps all of them.
+                if (
+                  shouldPruneLegacyWindow({
+                    legacyItems,
+                    usage,
+                    keepAddresses: new Set([address]),
+                  })
+                ) {
+                  newDeriveAddresses = removeLegacyWindowItems(
+                    chain_name,
+                    newDeriveAddresses,
+                  );
+                }
+              }
+              legacyResolved = true;
+            } catch (e) {
+              // Nothing pruned; the coin's flag stays unset so the scan
+              // retries on the next refresh.
+              console.warn('bitcoin legacy-window scan failed', e?.message);
+            }
+          }
           try {
             for (let round = 0; round < 3; round++) {
               const standardItems = getStandardChainItems(
@@ -159,7 +202,9 @@ export const BitcoinChain = () => {
           const resp = await fetchBitcoinBalances({
             derive_addresses: newDeriveAddresses,
           });
-          return resp?.data;
+          return resp?.data
+            ? {...resp.data, isLegacyScanDone: legacyResolved}
+            : resp?.data;
         } else {
           const deriveAddress = getDeriveAddressByChain(chain_name);
           const resp = await fetchBitcoinBalances({

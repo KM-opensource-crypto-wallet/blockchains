@@ -25,9 +25,11 @@ export const GAP_LIMIT = 20;
 export const MAX_ADDRESSES_PER_CHAIN = 500;
 // Older app versions derived the nonstandard scheme …/i/0 (index in the
 // change slot). Funds and change may sit on i=2..19 forever, so restores
-// must keep deriving that window (i=0,1 coincide with standard receive#0 /
-// change#0 and need no extra entries).
-const LEGACY_SCHEME_WINDOW = 20;
+// must keep deriving that window until a one-time usage scan proves the
+// whole window unused (i=0,1 coincide with standard receive#0 / change#0
+// and need no extra entries).
+export const LEGACY_SCHEME_WINDOW = 20;
+const LEGACY_WINDOW_START = 2;
 
 const bip32 = BIP32Factory(ecc);
 
@@ -223,18 +225,84 @@ export const getStandardChainItems = (chain_name, deriveAddresses) => {
   );
 };
 
+/** The legacy-scheme paths `${basePath}/2/0` … `${basePath}/19/0`. */
+export const buildLegacyWindowPaths = chain_name => {
+  const basePath = getAccountBasePath(chain_name);
+  const paths = [];
+  for (let i = LEGACY_WINDOW_START; i < LEGACY_SCHEME_WINDOW; i++) {
+    paths.push(`${basePath}/${i}/0`);
+  }
+  return paths;
+};
+
+/** True only for the exact legacy-window shape `${basePath}/i/0`, i=2..19. */
+export const isLegacyWindowPath = (chain_name, derivePath) => {
+  if (typeof derivePath !== 'string') {
+    return false;
+  }
+  const {chainIndex, addressIndex} = parsePathTail(derivePath);
+  return (
+    addressIndex === 0 &&
+    chainIndex >= LEGACY_WINDOW_START &&
+    chainIndex < LEGACY_SCHEME_WINDOW &&
+    derivePath === `${getAccountBasePath(chain_name)}/${chainIndex}/0`
+  );
+};
+
+/** Non-custom entries sitting on the legacy window (usage-scan candidates). */
+export const getLegacyWindowItems = (chain_name, deriveAddresses) => {
+  const items = Array.isArray(deriveAddresses) ? deriveAddresses : [];
+  return items.filter(
+    item => !item?.isCustom && isLegacyWindowPath(chain_name, item?.derivePath),
+  );
+};
+
+/**
+ * All-or-nothing prune decision: the legacy window may be deleted only when
+ * EVERY entry has an explicit empty-history result (usage[address] === false),
+ * none carries a recorded balance, and none is a protected address (e.g. the
+ * coin's active address). A single used/unknown/errored entry keeps all 18.
+ */
+export const shouldPruneLegacyWindow = ({
+  legacyItems,
+  usage,
+  keepAddresses,
+}) => {
+  const items = Array.isArray(legacyItems) ? legacyItems : [];
+  if (!items.length) {
+    return false;
+  }
+  return items.every(
+    item =>
+      usage?.[item?.address] === false &&
+      !(Number(item?.balance) > 0) &&
+      !keepAddresses?.has(item?.address),
+  );
+};
+
+/** The list without non-custom legacy-window entries. */
+export const removeLegacyWindowItems = (chain_name, deriveAddresses) => {
+  const items = Array.isArray(deriveAddresses) ? deriveAddresses : [];
+  return items.filter(
+    item => item?.isCustom || !isLegacyWindowPath(chain_name, item?.derivePath),
+  );
+};
+
 /**
  * Guarantees the base window exists: standard receive 0..19 + change 0..19,
- * plus the legacy-scheme window …/i/0 (i=2..19) so restored-from-seed wallets
- * keep seeing funds/change the old app put on those paths.
- * Idempotent; watch-only additions when accountKey is an xpub. Returns the
- * input list unchanged when nothing is missing or no accountKey is available
- * (private-key-imported coins).
+ * plus (while includeLegacyWindow) the legacy-scheme window …/i/0 (i=2..19)
+ * so restored-from-seed wallets keep seeing funds/change the old app put on
+ * those paths. Once a coin's one-time legacy usage scan has resolved the
+ * window, callers pass includeLegacyWindow: false so pruned entries are never
+ * re-derived. Idempotent; watch-only additions when accountKey is an xpub.
+ * Returns the input list unchanged when nothing is missing or no accountKey
+ * is available (private-key-imported coins).
  */
 export const ensureStandardAddresses = ({
   chain_name,
   deriveAddresses,
   accountKey,
+  includeLegacyWindow = true,
 }) => {
   const existing = Array.isArray(deriveAddresses) ? deriveAddresses : [];
   if (!accountKey) {
@@ -248,8 +316,8 @@ export const ensureStandardAddresses = ({
       requiredPaths.push(`${basePath}/${chainIndex}/${i}`);
     }
   }
-  for (let i = 2; i < LEGACY_SCHEME_WINDOW; i++) {
-    requiredPaths.push(`${basePath}/${i}/0`);
+  if (includeLegacyWindow) {
+    requiredPaths.push(...buildLegacyWindowPaths(chain_name));
   }
   if (requiredPaths.every(path => existingPaths.has(path))) {
     return existing;
@@ -261,10 +329,17 @@ export const ensureStandardAddresses = ({
     const additions = [RECEIVE_CHAIN, CHANGE_CHAIN].flatMap(chainIndex =>
       deriveItemsFromNode({...common, chainIndex, start: 0, count: GAP_LIMIT}),
     );
-    for (let i = 2; i < LEGACY_SCHEME_WINDOW; i++) {
-      additions.push(
-        ...deriveItemsFromNode({...common, chainIndex: i, start: 0, count: 1}),
-      );
+    if (includeLegacyWindow) {
+      for (let i = LEGACY_WINDOW_START; i < LEGACY_SCHEME_WINDOW; i++) {
+        additions.push(
+          ...deriveItemsFromNode({
+            ...common,
+            chainIndex: i,
+            start: 0,
+            count: 1,
+          }),
+        );
+      }
     }
     return mergeUniqueAccounts(existing, additions);
   } catch (e) {
@@ -277,6 +352,38 @@ export const ensureStandardAddresses = ({
 export const isInternalChainAddress = (chain_name, derivePath) =>
   typeof derivePath === 'string' &&
   derivePath.startsWith(standardPathPrefix(chain_name, CHANGE_CHAIN));
+
+/**
+ * Entries shown in address pickers: internal/change-chain addresses are not
+ * user accounts, so they only appear when they actually hold funds.
+ */
+export const getVisibleDeriveAddresses = (chain_name, deriveAddresses) => {
+  const items = Array.isArray(deriveAddresses) ? deriveAddresses : [];
+  return items.filter(
+    item =>
+      item?.address &&
+      (!isInternalChainAddress(chain_name, item?.derivePath) ||
+        Number(item?.balance) > 0),
+  );
+};
+
+/**
+ * Display label for a derive-address entry. Only meaningful for bitcoin
+ * chains — callers gate with isBitcoinChain. Precedence: a user-added entry
+ * is Custom regardless of where its path sits.
+ */
+export const getDeriveAddressLabel = (chain_name, item) => {
+  if (item?.isCustom) {
+    return 'Custom';
+  }
+  if (isLegacyWindowPath(chain_name, item?.derivePath)) {
+    return 'Legacy';
+  }
+  if (isInternalChainAddress(chain_name, item?.derivePath)) {
+    return 'Change';
+  }
+  return 'Receive';
+};
 
 /**
  * BIP44 gap limit: per chain, make sure GAP_LIMIT addresses exist beyond the

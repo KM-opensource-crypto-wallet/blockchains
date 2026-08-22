@@ -59,6 +59,7 @@ export const getCoinSnapshot = async (
     let deriveAddresses = Array.isArray(nativeCoin?.deriveAddresses)
       ? nativeCoin?.deriveAddresses
       : [];
+    let legacyScanDone = false;
     const isBitcoin = isBitcoinChain(coinDef?.chain_name);
     const stakingKey = getStakignKey(coinDef?.chain_name, coinDef?.symbol);
     const isStaking = isStakingChain(stakingKey);
@@ -124,6 +125,7 @@ export const getCoinSnapshot = async (
         if (Array.isArray(resp?.deriveAddresses)) {
           deriveAddresses = resp?.deriveAddresses;
         }
+        legacyScanDone = !!resp?.isLegacyScanDone;
       } else {
         balance = (await nativeCoin.getBalance?.()) || 0;
       }
@@ -189,6 +191,11 @@ export const getCoinSnapshot = async (
     if (isBitcoin) {
       newCoin.deriveAddresses = deriveAddresses;
       newCoin.UTXOs = finalUTXOs;
+      // Set-only: a coin created on a fresh in-app mnemonic (wallet flagged
+      // isLegacyFree) or one whose legacy usage scan completed never rescans.
+      if (legacyScanDone || wallet?.isLegacyFree) {
+        newCoin.isLegacyScanDone = true;
+      }
     }
     if (listOfUnClaimedDeposits !== undefined) {
       newCoin.listOfUnClaimedDeposits = listOfUnClaimedDeposits;
@@ -326,7 +333,14 @@ const updateDeriveAddressesInCoin = (parentCoin, newCoin) => {
   const deriveAddresses = parentCoin?.deriveAddresses;
   const address = parentCoin?.address;
   if (Array.isArray(deriveAddresses) && deriveAddresses?.length) {
-    return {...newCoin, deriveAddresses, address};
+    return {
+      ...newCoin,
+      deriveAddresses,
+      address,
+      // The parent's list is already legacy-resolved; carry the marker so
+      // the re-added coin doesn't regenerate/rescan the legacy window.
+      ...(parentCoin?.isLegacyScanDone ? {isLegacyScanDone: true} : {}),
+    };
   }
   console.warn('derive address not found while adding coin');
   return newCoin;
