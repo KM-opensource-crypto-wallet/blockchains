@@ -232,7 +232,9 @@ export function validateBigNumberStr(number) {
     if (!validNumber.isFinite() || validNumber.isNaN()) {
       return '0';
     }
-    return validNumber.toString();
+    // toFixed, never toString: BigNumber switches to scientific notation below
+    // 1e-7 by default, and this feeds real send/stake amounts.
+    return validNumber.toFixed();
   } catch (error) {
     return '0';
   }
