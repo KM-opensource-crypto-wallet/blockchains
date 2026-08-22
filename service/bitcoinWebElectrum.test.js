@@ -30,12 +30,12 @@ describe('callWebElectrum timeout', () => {
     global.fetch = hangingFetch();
 
     const promise = callWebElectrum('balances', {derive_addresses: []});
-    // Without the timeout this promise never settles at all.
-    jest.advanceTimersByTime(30000);
+    // Without the timeout this promise never settles at all. Advance well past
+    // any plausible budget rather than pinning the exact value, which is a
+    // tuning knob and not part of the contract.
+    jest.advanceTimersByTime(120000);
 
-    await expect(promise).rejects.toThrow(
-      'web electrum balances timed out after 30000ms',
-    );
+    await expect(promise).rejects.toThrow(/web electrum balances timed out/);
   });
 
   it('passes an abort signal to fetch', async () => {

@@ -66,8 +66,8 @@ const reattachKeys = (op, original, result) => {
 
 // fetch has no default timeout, so a hung bridge request would leave the
 // caller awaiting forever — and the DokApi fallback in bitcoinDataSource only
-// runs on a rejection, so it would never get its turn. Matches the 30s budget
-// DokApi and the direct Electrum client already use.
+// runs on a rejection, so it would never get its turn. Same budget as
+// customFetchWithTimeout in helper/index.js.
 const REQUEST_TIMEOUT_MS = 20000;
 
 export const callWebElectrum = async (op, payload = {}) => {
