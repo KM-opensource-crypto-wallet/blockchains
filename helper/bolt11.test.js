@@ -33,6 +33,24 @@ describe('getBolt11InvoiceAmount', () => {
     expect(getBolt11InvoiceAmount('lnbc10p1pvjluez')).toBe('0.00000001');
   });
 
+  it('returns null for a p amount that is not a multiple of 10', () => {
+    // BOLT11 requires readers to reject these: the smallest unit is 10p.
+    expect(getBolt11InvoiceAmount('lnbc1p1pvjluez')).toBe(null);
+    expect(getBolt11InvoiceAmount('lnbc25p1pvjluez')).toBe(null);
+  });
+
+  it('still accepts p amounts that are multiples of 10', () => {
+    expect(getBolt11InvoiceAmount('lnbc100p1pvjluez')).toBe('0.00000001');
+    expect(getBolt11InvoiceAmount('lnbc10000p1pvjluez')).toBe('0.00000001');
+  });
+
+  it('does not apply the p rule to other multipliers', () => {
+    // Only "p" carries the multiple-of-10 restriction.
+    expect(getBolt11InvoiceAmount('lnbc1n1pvjluez')).toBe('0.00000001');
+    expect(getBolt11InvoiceAmount('lnbc7u1pvjluez')).toBe('0.000007');
+    expect(getBolt11InvoiceAmount('lnbc3m1pvjluez')).toBe('0.003');
+  });
+
   it('decodes a whole-bitcoin amount with no multiplier', () => {
     expect(getBolt11InvoiceAmount('lnbc21pvjluez')).toBe('2');
   });

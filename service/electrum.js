@@ -31,7 +31,7 @@ const ELECTRUM_SERVERS = IS_SANDBOX
       {host: 'electrum.blockstream.info', port: 50002},
     ];
 
-const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TIMEOUT_MS = 20000;
 const BATCH_SIZE = 100;
 // Chunks share one socket and are demuxed by JSON-RPC id, so they can overlap.
 // Bounded because the public ElectrumX fallbacks rate-limit on concurrent cost.
@@ -435,6 +435,17 @@ export const electrumFetchBitcoinTransactionDetails = async ({
 }) => {
   const client = getElectrumClient();
   const utxos = Array.isArray(transaction_data) ? transaction_data : [];
+  // Every entry becomes a PSBT input in buildUTXO, while the caller's change
+  // output is derived from the utxo total computed BEFORE this call. Dropping
+  // an entry we cannot resolve would therefore under-fund the transaction, so
+  // an unresolvable entry rejects the whole batch and the data-source wrapper
+  // falls back to the API providers instead.
+  const missingTxidAt = utxos.findIndex(utxo => !utxo?.txid);
+  if (missingTxidAt !== -1) {
+    throw new Error(
+      `Electrum tx details: utxo at index ${missingTxidAt} has no txid`,
+    );
+  }
   const uniqueTxids = [...new Set(utxos.map(u => u.txid))];
   const calls = uniqueTxids.map(txid => ({
     method: 'blockchain.transaction.get',
@@ -448,8 +459,26 @@ export const electrumFetchBitcoinTransactionDetails = async ({
 
   const data = utxos.map(utxo => {
     const rawHex = rawByTxid[utxo.txid];
-    const tx = bitcoin.Transaction.fromHex(rawHex);
+    const at = `${utxo.txid}:${utxo.vout}`;
+    if (typeof rawHex !== 'string' || !rawHex) {
+      throw new Error(
+        `Electrum tx details: no raw transaction returned for ${at}`,
+      );
+    }
+    let tx;
+    try {
+      tx = bitcoin.Transaction.fromHex(rawHex);
+    } catch (e) {
+      throw new Error(
+        `Electrum tx details: undecodable raw transaction for ${at}: ${e?.message}`,
+      );
+    }
     const output = tx.outs[utxo.vout];
+    if (!output?.script) {
+      throw new Error(
+        `Electrum tx details: vout ${utxo.vout} out of range for ${utxo.txid} (${tx.outs.length} outputs)`,
+      );
+    }
     const script = output.script;
     // P2PKH (legacy) needs the full previous tx; everything the wallet
     // creates otherwise (P2WPKH, P2SH-P2WPKH) works with witnessUtxo.
@@ -576,6 +605,28 @@ const buildBlockchairShapedTxs = async (client, txidHeightPairs) => {
     txidHeightPairs.map(([, height]) => height),
   );
 
+  // Parsing dominates the cost here and one previous tx is commonly spent by
+  // several inputs, so parse each at most once. Failures are cached as null:
+  // the hex cache accepts any string result, so a server that answers with
+  // plain text instead of hex must not be re-parsed on every input.
+  const parsedPrevCache = new Map();
+  const getParsedPrev = prevTxid => {
+    if (parsedPrevCache.has(prevTxid)) {
+      return parsedPrevCache.get(prevTxid);
+    }
+    const prevHex = prevRawByTxid[prevTxid];
+    let parsed = null;
+    if (prevHex) {
+      try {
+        parsed = bitcoin.Transaction.fromHex(prevHex);
+      } catch (e) {
+        parsed = null;
+      }
+    }
+    parsedPrevCache.set(prevTxid, parsed);
+    return parsed;
+  };
+
   return txidHeightPairs
     .filter(([txid]) => parsedByTxid[txid])
     .map(([txid, height]) => {
@@ -588,12 +639,14 @@ const buildBlockchairShapedTxs = async (client, txidHeightPairs) => {
         }
         // eslint-disable-next-line no-undef
         const prevTxid = Buffer.from(input.hash).reverse().toString('hex');
-        const prevHex = prevRawByTxid[prevTxid];
-        if (!prevHex) {
+        const prevOut = getParsedPrev(prevTxid)?.outs?.[input.index];
+        // Covers a missing, undecodable, or too-short previous tx alike: the
+        // input's value is unknown, so drop the fee rather than report a
+        // wrong one (history is read-only, so a partial tx still renders).
+        if (!prevOut?.script) {
           hasAllInputs = false;
           return {recipient: null, value: 0};
         }
-        const prevOut = bitcoin.Transaction.fromHex(prevHex).outs[input.index];
         const value = Number(prevOut.value);
         inputTotal += value;
         return {recipient: outputAddress(prevOut.script), value};
@@ -769,6 +822,9 @@ export const electrumFetchAddressUsage = async ({addresses}) => {
 /** Broadcast a signed transaction. Returns the txid. */
 export const electrumBroadcastTransaction = async ({txHex}) => {
   const client = getElectrumClient();
+  // Witnesses are excluded from the txid, so the bytes we send fully determine
+  // the id a conformant server must answer with.
+  const expectedTxid = bitcoin.Transaction.fromHex(txHex).getId();
   const result = await client.request('blockchain.transaction.broadcast', [
     txHex,
   ]);
@@ -780,6 +836,16 @@ export const electrumBroadcastTransaction = async ({txHex}) => {
       `Electrum broadcast rejected: ${
         typeof result === 'string' ? result : JSON.stringify(result)
       }`,
+    );
+  }
+  // A well-formed id that is not OUR id means the server did not broadcast
+  // what we asked. Returning it would have the wallet track a transaction
+  // that does not exist; throwing instead lets the caller fall back to the
+  // API providers. Worth checking because the TLS here accepts self-signed
+  // certificates, so the peer is not authenticated.
+  if (result.toLowerCase() !== expectedTxid.toLowerCase()) {
+    throw new Error(
+      `Electrum broadcast returned txid ${result}, expected ${expectedTxid}`,
     );
   }
   return result;

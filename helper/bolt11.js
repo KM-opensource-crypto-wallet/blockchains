@@ -30,6 +30,12 @@ export const getBolt11InvoiceAmount = input => {
   if (!match) {
     return null;
   }
+  // BOLT11: the smallest unit is 1 msat (10p), so a reader MUST reject a "p"
+  // amount whose least-significant digit is not 0 (e.g. "1p"). Without this,
+  // such an invoice would round up to a full satoshi instead of being refused.
+  if (match[3] === 'p' && !match[2].endsWith('0')) {
+    return null;
+  }
   const exponent = match[3] ? MULTIPLIER_EXPONENT[match[3]] : 0;
   const amount = new BigNumber(match[2]).multipliedBy(
     new BigNumber(10).exponentiatedBy(exponent),

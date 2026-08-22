@@ -91,12 +91,16 @@ export const getNetworkByChainName = chain_name => {
     : '';
 };
 
-export const getAccountBasePath = chain_name =>
-  chain_name === 'bitcoin_segwit'
-    ? "m/49'/0'/0'"
-    : chain_name === 'bitcoin_legacy'
-    ? "m/44'/0'/0'"
-    : "m/84'/0'/0'";
+export const getAccountBasePath = chain_name => {
+  const purpose =
+    chain_name === 'bitcoin_segwit'
+      ? 49
+      : chain_name === 'bitcoin_legacy'
+      ? 44
+      : 84;
+  const coinType = IS_SANDBOX ? 1 : 0;
+  return `m/${purpose}'/${coinType}'/0'`;
+};
 
 /**
  * Last two path segments as numbers. Standard paths (`…/0/i`, `…/1/i`) parse

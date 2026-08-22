@@ -106,13 +106,41 @@ const ALREADY_KNOWN_RE =
 const isAlreadyKnownError = e =>
   ALREADY_KNOWN_RE.test(e?.message || e?.response?.data?.message || '');
 
+// "Inputs missing or spent" is ambiguous: the inputs are gone either because
+// THIS tx already spent them (the broadcast landed) or because a conflicting
+// tx did (a double spend, which will never confirm). The message alone cannot
+// tell those apart, so it must never count as success on its own.
+const MISSING_INPUTS_RE = /bad-txns-inputs-missingorspent|missing inputs/i;
+
+const isMissingInputsError = e =>
+  MISSING_INPUTS_RE.test(e?.message || e?.response?.data?.message || '');
+
+const isTxOnNetwork = async transactionId => {
+  try {
+    return !!(await fetchBitcoinTransaction({transactionId}));
+  } catch (lookupError) {
+    // A failed lookup proves nothing; never let it mask the broadcast error.
+    console.warn(
+      'Bitcoin broadcast recovery lookup failed:',
+      lookupError?.message,
+    );
+    return false;
+  }
+};
+
+// True only when the signed bytes are already known to the network, so the
+// caller can treat the rejection as the success it actually is.
+const hasBroadcastLanded = async (e, expectedTxid) =>
+  isAlreadyKnownError(e) ||
+  (isMissingInputsError(e) && (await isTxOnNetwork(expectedTxid)));
+
 export const broadcastBitcoinTransaction = async ({txHex}) => {
   const expectedTxid = bitcoin.Transaction.fromHex(txHex).getId();
   if (isWeb && isBrowser()) {
     try {
       return await callWebElectrum('broadcast', {txHex});
     } catch (e) {
-      if (isAlreadyKnownError(e)) {
+      if (await hasBroadcastLanded(e, expectedTxid)) {
         return expectedTxid;
       }
       console.warn(
@@ -124,7 +152,7 @@ export const broadcastBitcoinTransaction = async ({txHex}) => {
     try {
       return await electrumBroadcastTransaction({txHex});
     } catch (e) {
-      if (isAlreadyKnownError(e)) {
+      if (await hasBroadcastLanded(e, expectedTxid)) {
         return expectedTxid;
       }
       console.warn(
@@ -143,7 +171,7 @@ export const broadcastBitcoinTransaction = async ({txHex}) => {
     }
     throw new Error('Bitcoin broadcast failed');
   } catch (e) {
-    if (isAlreadyKnownError(e)) {
+    if (await hasBroadcastLanded(e, expectedTxid)) {
       return expectedTxid;
     }
     throw e;
