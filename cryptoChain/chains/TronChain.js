@@ -380,8 +380,9 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction =
-      await tronWeb.transactionBuilder.withdrawExpireUnfreeze(fromAddress);
+    const transaction = await tronWeb.transactionBuilder.withdrawExpireUnfreeze(
+      fromAddress,
+    );
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
   const createStakingTransactionForRewards = async (
@@ -390,8 +391,9 @@ export const TronChain = () => {
     privateKey,
   ) => {
     const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-    const transaction =
-      await tronWeb.transactionBuilder.withdrawBlockRewards(fromAddress);
+    const transaction = await tronWeb.transactionBuilder.withdrawBlockRewards(
+      fromAddress,
+    );
     return tronWeb.trx.sign(transaction, updatePrivateKey);
   };
 
@@ -615,8 +617,9 @@ export const TronChain = () => {
         try {
           const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
 
-          const {transactionFee, energyFee, memoFee} =
-            await getChainData(tronWeb);
+          const {transactionFee, energyFee, memoFee} = await getChainData(
+            tronWeb,
+          );
           const sunAmount = convertToSmallAmount(amount, decimals);
           const {bandwidth: availableBandwidth, energy: currentAccountEnergy} =
             await getAccountResourcesData(tronWeb, fromAddress);
