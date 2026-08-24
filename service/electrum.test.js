@@ -1,5 +1,9 @@
 /* global Buffer */
-import {ElectrumClient} from 'dok-wallet-blockchain-networks/service/electrum';
+import {
+  ELECTRUM_QUERIES,
+  ElectrumClient,
+} from 'dok-wallet-blockchain-networks/service/electrum';
+import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
 
 jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   IS_SANDBOX: false,
@@ -11,12 +15,16 @@ jest.mock('dok-wallet-blockchain-networks/service/blockChair', () => ({
   parseBlockchainTransactions: jest.fn(() => []),
 }));
 
-// The shared client (getElectrumClient) builds its own socket, so the module
-// under test reaches the native TCP package rather than an injected factory.
-const mockTcpHolder = {factory: null};
-jest.mock('react-native-tcp-socket', () => ({
-  connectTLS: (opts, onConnect) => mockTcpHolder.factory(opts, onConnect),
-}));
+// Wraps an in-memory socket in a real ElectrumClient. Every query takes its
+// client explicitly, so no module-registry gymnastics are needed to inject one.
+const clientOver = socket =>
+  new ElectrumClient({
+    servers: [{host: 'fake', port: 1}],
+    socketFactory: (_srv, onConnect) => {
+      setImmediate(onConnect);
+      return socket;
+    },
+  });
 
 /**
  * In-memory Electrum server over the injectable socketFactory: records every
@@ -59,14 +67,7 @@ const createFakeClient = () => {
     destroy: () => {},
   };
 
-  const client = new ElectrumClient({
-    servers: [{host: 'fake', port: 1}],
-    socketFactory: (_srv, onConnect) => {
-      setImmediate(onConnect);
-      return socket;
-    },
-  });
-  return {client, server};
+  return {client: clientOver(socket), server};
 };
 
 const makeCalls = (count, boomAt = -1) =>
@@ -151,10 +152,10 @@ const buildRawTx = () => {
   return {hex, txid: bitcoin.Transaction.fromHex(hex).getId()};
 };
 
-// Fresh module registry per call so the getElectrumClient singleton is new.
-// `results` maps txid -> whatever the server should answer with.
+// `results` maps txid -> whatever the server should answer with. A fresh client
+// per call means fresh raw-tx/block-time caches, so tests cannot pollute
+// each other through them.
 const loadSharedClient = results => {
-  jest.resetModules();
   const handlers = {};
   const server = {batches: 0};
   const deliver = response => {
@@ -196,14 +197,10 @@ const loadSharedClient = results => {
     },
     destroy: () => {},
   };
-  mockTcpHolder.factory = (_opts, onConnect) => {
-    setImmediate(onConnect);
-    return socket;
-  };
-  const mod = require('dok-wallet-blockchain-networks/service/electrum');
+  const client = clientOver(socket);
   return {
-    fetchDetails: mod.electrumFetchBitcoinTransactionDetails,
-    broadcast: mod.electrumBroadcastTransaction,
+    fetchDetails: payload => ELECTRUM_QUERIES.txdetails(client, payload),
+    broadcast: payload => ELECTRUM_QUERIES.broadcast(client, payload),
     server,
   };
 };
@@ -327,7 +324,6 @@ const HEIGHT = 700000;
 const BLOCK_TIME = 1700000000;
 
 const loadHistoryClient = ({history, rawTxs, tip = 800001}) => {
-  jest.resetModules();
   const handlers = {};
   const server = {getCalls: []};
   const deliver = response => {
@@ -363,16 +359,12 @@ const loadHistoryClient = ({history, rawTxs, tip = 800001}) => {
     },
     destroy: () => {},
   };
-  mockTcpHolder.factory = (_opts, onConnect) => {
-    setImmediate(onConnect);
-    return socket;
-  };
-  const mod = require('dok-wallet-blockchain-networks/service/electrum');
-  const blockChair = require('dok-wallet-blockchain-networks/service/blockChair');
-  blockChair.parseBlockchainTransactions.mockClear();
+  const client = clientOver(socket);
+  parseBlockchainTransactions.mockClear();
   return {
-    fetchTransactions: mod.electrumFetchBitcoinTransactions,
-    shapedTxs: () => blockChair.parseBlockchainTransactions.mock.calls[0]?.[0],
+    fetchTransactions: payload =>
+      ELECTRUM_QUERIES.transactions(client, payload),
+    shapedTxs: () => parseBlockchainTransactions.mock.calls[0]?.[0],
     server,
   };
 };
@@ -408,8 +400,8 @@ describe('buildBlockchairShapedTxs previous-output guards', () => {
       history: [{tx_hash: spend.txid, height: HEIGHT}],
       rawTxs: {[spend.txid]: spend.hex, [prev.txid]: prev.hex},
     });
-    // Must be taken from the post-resetModules registry, so it is the same
-    // Transaction class the module under test holds.
+    // Same Transaction class the module under test holds, so the spy sees its
+    // parses.
     const {Transaction} = require('bitcoinjs-lib');
     const fromHex = jest.spyOn(Transaction, 'fromHex');
     try {
@@ -528,5 +520,35 @@ describe('electrumBroadcastTransaction txid verification', () => {
     await expect(broadcast({txHex: TX_HEX})).rejects.toThrow(
       'Electrum broadcast rejected: {"unexpected":true}',
     );
+  });
+});
+
+describe('ELECTRUM_QUERIES registry', () => {
+  // The op vocabulary is the seam contract: bitcoinDataSource names an op, each
+  // app's transport looks it up here. Pin the shape so an op cannot be added on
+  // one side only.
+  const EXPECTED_OPS = [
+    'balances',
+    'utxo',
+    'txdetails',
+    'transactions',
+    'transaction',
+    'addressusage',
+    'broadcast',
+    'feerate',
+  ];
+
+  it('exposes exactly the expected ops', () => {
+    expect(Object.keys(ELECTRUM_QUERIES).sort()).toEqual(
+      [...EXPECTED_OPS].sort(),
+    );
+  });
+
+  it('maps every op to a function taking a client', () => {
+    Object.entries(ELECTRUM_QUERIES).forEach(([op, fn]) => {
+      expect(typeof fn).toBe('function');
+      // (client, payload) — the client is always explicit, never a singleton.
+      expect(fn.length).toBeGreaterThanOrEqual(1);
+    });
   });
 });

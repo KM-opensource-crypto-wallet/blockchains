@@ -4,87 +4,59 @@ import {
   fetchBitcoinUTXO as dokFetchBitcoinUTXO,
   fetchBitcoinTransactionDetails as dokFetchBitcoinTransactionDetails,
 } from 'dok-wallet-blockchain-networks/service/dokApi';
-import {
-  isElectrumAvailable,
-  electrumFetchBitcoinBalances,
-  electrumFetchBitcoinUTXO,
-  electrumFetchBitcoinTransactionDetails,
-  electrumFetchBitcoinTransactions,
-  electrumGetTransaction,
-  electrumBroadcastTransaction,
-  electrumGetFeeRate,
-} from 'dok-wallet-blockchain-networks/service/electrum';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
-import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
-import {callWebElectrum} from 'dok-wallet-blockchain-networks/service/bitcoinWebElectrum';
+import {
+  isElectrumQueryAvailable,
+  runElectrumQuery,
+} from 'utils/electrumTransport';
 
 /**
- * Bitcoin data source: Electrum first (direct server connection, like
- * BlueWallet), DokApi backend as fallback and on web where raw TCP
- * sockets are unavailable.
+ * Bitcoin data source: Electrum first, DokApi backend as fallback.
+ *
+ * How an Electrum query actually travels is the app's business, not this
+ * module's — `utils/electrumTransport` is a direct TLS socket on mobile and an
+ * /api/bitcoin round trip in the browser. Hence no platform checks here.
  */
 
-const isBrowser = () => typeof window !== 'undefined';
-
-// `op` names the operation for the web bridge (see bitcoinWebElectrum).
-// Web (browser): own server -> BlueWallet via /api/bitcoin, then dokFn.
-// Native (mobile): direct Electrum sockets, then dokFn.
-const withFallback = (electrumFn, dokFn, label, op) => async payload => {
-  if (isWeb && isBrowser()) {
-    try {
-      return await callWebElectrum(op, payload);
-    } catch (e) {
-      console.warn(
-        `Web Electrum ${label} failed, falling back to API:`,
-        e?.message,
-      );
+// The availability gate matters: when there is no transport at all, DokApi must
+// be reached without first paying a connect timeout per Electrum server.
+const withFallback =
+  (op, dokFn, label = op) =>
+  async payload => {
+    if (isElectrumQueryAvailable()) {
+      try {
+        return await runElectrumQuery(op, payload);
+      } catch (e) {
+        console.warn(
+          `Electrum ${label} failed, falling back to API:`,
+          e?.message,
+        );
+      }
     }
     return dokFn(payload);
-  }
-  if (isElectrumAvailable()) {
-    try {
-      return await electrumFn(payload);
-    } catch (e) {
-      console.warn(
-        `Electrum ${label} failed, falling back to API:`,
-        e?.message,
-      );
-    }
-  }
-  return dokFn(payload);
-};
+  };
 
 export const fetchBitcoinBalances = withFallback(
-  electrumFetchBitcoinBalances,
+  'balances',
   dokFetchBitcoinBalances,
-  'balances',
-  'balances',
 );
 
-export const fetchBitcoinUTXO = withFallback(
-  electrumFetchBitcoinUTXO,
-  dokFetchBitcoinUTXO,
-  'utxo',
-  'utxo',
-);
+export const fetchBitcoinUTXO = withFallback('utxo', dokFetchBitcoinUTXO);
 
 export const fetchBitcoinTransactionDetails = withFallback(
-  electrumFetchBitcoinTransactionDetails,
+  'txdetails',
   dokFetchBitcoinTransactionDetails,
   'transaction details',
-  'txdetails',
 );
 
 export const fetchBitcoinTransactions = withFallback(
-  electrumFetchBitcoinTransactions,
+  'transactions',
   ({address, derive_addresses}) =>
     BitcoinFork.getTransactions({chain: 'btc', address, derive_addresses}),
-  'transactions',
-  'transactions',
 );
 
 export const fetchBitcoinTransaction = withFallback(
-  electrumGetTransaction,
+  'transaction',
   ({transactionId, address, derive_addresses}) =>
     BitcoinFork.getTransaction({
       chain: 'btc',
@@ -92,8 +64,6 @@ export const fetchBitcoinTransaction = withFallback(
       address,
       derive_addresses,
     }),
-  'transaction',
-  'transaction',
 );
 
 // A retry can race a broadcast that actually landed (timeout after the
@@ -136,21 +106,9 @@ const hasBroadcastLanded = async (e, expectedTxid) =>
 
 export const broadcastBitcoinTransaction = async ({txHex}) => {
   const expectedTxid = bitcoin.Transaction.fromHex(txHex).getId();
-  if (isWeb && isBrowser()) {
+  if (isElectrumQueryAvailable()) {
     try {
-      return await callWebElectrum('broadcast', {txHex});
-    } catch (e) {
-      if (await hasBroadcastLanded(e, expectedTxid)) {
-        return expectedTxid;
-      }
-      console.warn(
-        'Web Electrum broadcast failed, falling back to API:',
-        e?.message,
-      );
-    }
-  } else if (isElectrumAvailable()) {
-    try {
-      return await electrumBroadcastTransaction({txHex});
+      return await runElectrumQuery('broadcast', {txHex});
     } catch (e) {
       if (await hasBroadcastLanded(e, expectedTxid)) {
         return expectedTxid;
@@ -178,9 +136,26 @@ export const broadcastBitcoinTransaction = async ({txHex}) => {
   }
 };
 
+// Address usage (does this address have any history?) drives the legacy-window
+// prune and the BIP44 gap-limit walk. Kept as its own domain-named export so
+// BitcoinChain never reaches for a transport, and because it stops being a
+// synonym for isElectrumQueryAvailable the day the backend gains an
+// address-usage endpoint of its own.
+export const isAddressUsageScanAvailable = isElectrumQueryAvailable;
+
+// No silent empty result: an unavailable or failing scan must reject, because
+// `{}` would read as "no address is used" and wrongly prune the legacy window.
+// The callers in BitcoinChain treat a rejection as "nothing resolved, retry on
+// the next refresh".
+export const fetchBitcoinAddressUsage = async ({addresses}) => {
+  if (!isElectrumQueryAvailable()) {
+    throw new Error('bitcoin address usage scan unavailable');
+  }
+  return runElectrumQuery('addressusage', {addresses});
+};
+
 export const fetchBitcoinFeeRate = withFallback(
-  electrumGetFeeRate,
+  'feerate',
   () => BitcoinFork.getTransactionFees({chain: 'btc'}),
   'fee rate',
-  'feerate',
 );

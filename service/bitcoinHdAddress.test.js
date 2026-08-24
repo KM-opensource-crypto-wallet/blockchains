@@ -9,12 +9,12 @@ import {
   shouldPruneLegacyWindow,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BitcoinChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
-import {
-  electrumFetchAddressUsage,
-  isElectrumAvailable,
-} from 'dok-wallet-blockchain-networks/service/electrum';
 import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {fetchBitcoinBalances} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
+import {
+  fetchBitcoinAddressUsage,
+  fetchBitcoinBalances,
+  isAddressUsageScanAvailable,
+} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
 jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   IS_SANDBOX: false,
@@ -53,16 +53,13 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => ({
   },
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/electrum', () => ({
-  isElectrumAvailable: jest.fn(() => true),
-  electrumFetchAddressUsage: jest.fn(),
-}));
-
 jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
   getBitcoinAddresses: jest.fn(),
 }));
 
 jest.mock('dok-wallet-blockchain-networks/service/bitcoinDataSource', () => ({
+  isAddressUsageScanAvailable: jest.fn(() => true),
+  fetchBitcoinAddressUsage: jest.fn(),
   fetchBitcoinBalances: jest.fn(),
   fetchBitcoinTransactionDetails: jest.fn(),
   fetchBitcoinUTXO: jest.fn(),
@@ -348,9 +345,9 @@ describe('BitcoinChain.getBalance legacy scan', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    isElectrumAvailable.mockReturnValue(true);
+    isAddressUsageScanAvailable.mockReturnValue(true);
     getBitcoinAddresses.mockResolvedValue({data: []});
-    electrumFetchAddressUsage.mockImplementation(usageAllUnused);
+    fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
     fetchBitcoinBalances.mockImplementation(({derive_addresses}) =>
       Promise.resolve({
         data: {
@@ -377,7 +374,7 @@ describe('BitcoinChain.getBalance legacy scan', () => {
   it('prunes the whole window when all 18 legacy addresses are unused', async () => {
     const result = await getBalanceWith({});
     // First usage call is the legacy scan over exactly 18 addresses.
-    expect(electrumFetchAddressUsage.mock.calls[0][0].addresses).toHaveLength(
+    expect(fetchBitcoinAddressUsage.mock.calls[0][0].addresses).toHaveLength(
       LEGACY_COUNT,
     );
     expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT);
@@ -385,7 +382,7 @@ describe('BitcoinChain.getBalance legacy scan', () => {
   });
 
   it('keeps all 18 when any single legacy address was used', async () => {
-    electrumFetchAddressUsage.mockImplementationOnce(({addresses}) =>
+    fetchBitcoinAddressUsage.mockImplementationOnce(({addresses}) =>
       Promise.resolve(
         Object.fromEntries(
           addresses.map((address, index) => [address, index === 4]),
@@ -398,7 +395,7 @@ describe('BitcoinChain.getBalance legacy scan', () => {
   });
 
   it('keeps everything and leaves the flag unset when the scan fails', async () => {
-    electrumFetchAddressUsage.mockRejectedValueOnce(new Error('electrum down'));
+    fetchBitcoinAddressUsage.mockRejectedValueOnce(new Error('electrum down'));
     const result = await getBalanceWith({});
     expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT + LEGACY_COUNT);
     expect(result.isLegacyScanDone).toBe(false);
@@ -419,7 +416,7 @@ describe('BitcoinChain.getBalance legacy scan', () => {
     expect(result.isLegacyScanDone).toBe(true);
     // Only the standard gap-limit scan ran; no 18-address legacy call.
     expect(
-      electrumFetchAddressUsage.mock.calls.some(
+      fetchBitcoinAddressUsage.mock.calls.some(
         call => call[0].addresses.length === LEGACY_COUNT,
       ),
     ).toBe(false);
@@ -430,7 +427,7 @@ describe('BitcoinChain.getBalance legacy scan', () => {
       deriveAddresses: [],
       isLegacyScanDone: true,
     });
-    expect(electrumFetchAddressUsage.mock.calls[0][0].addresses).toHaveLength(
+    expect(fetchBitcoinAddressUsage.mock.calls[0][0].addresses).toHaveLength(
       LEGACY_COUNT,
     );
     expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT);

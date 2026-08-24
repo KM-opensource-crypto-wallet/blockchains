@@ -22,14 +22,11 @@ import {
   removeLegacyWindowItems,
   shouldPruneLegacyWindow,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
-import {
-  isElectrumAvailable,
-  electrumFetchAddressUsage,
-} from 'dok-wallet-blockchain-networks/service/electrum';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
 import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
+  fetchBitcoinAddressUsage,
   fetchBitcoinBalances,
   fetchBitcoinTransactionDetails,
   fetchBitcoinUTXO,
@@ -37,6 +34,7 @@ import {
   fetchBitcoinTransaction,
   broadcastBitcoinTransaction,
   fetchBitcoinFeeRate,
+  isAddressUsageScanAvailable,
 } from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
 bitcoin.initEccLib(ecc);
@@ -137,7 +135,7 @@ export const BitcoinChain = () => {
           accountKey: extendedPublicKey,
           includeLegacyWindow: !legacyResolved,
         });
-        if (extendedPublicKey && isElectrumAvailable()) {
+        if (extendedPublicKey && isAddressUsageScanAvailable()) {
           if (!legacyResolved) {
             try {
               const legacyItems = getLegacyWindowItems(
@@ -145,7 +143,7 @@ export const BitcoinChain = () => {
                 newDeriveAddresses,
               );
               if (legacyItems.length) {
-                const usage = await electrumFetchAddressUsage({
+                const usage = await fetchBitcoinAddressUsage({
                   addresses: legacyItems.map(item => item.address),
                 });
                 // All-or-nothing: one used legacy address keeps all of them.
@@ -175,7 +173,7 @@ export const BitcoinChain = () => {
                 chain_name,
                 newDeriveAddresses,
               );
-              const usage = await electrumFetchAddressUsage({
+              const usage = await fetchBitcoinAddressUsage({
                 addresses: standardItems.map(item => item.address),
               });
               const usedAddresses = new Set(

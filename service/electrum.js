@@ -1,9 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import {
-  config,
-  IS_SANDBOX,
-  isWeb,
-} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
 
 /**
@@ -13,23 +9,12 @@ import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/servic
  * One socket serves every request; queries are batched (JSON-RPC batch
  * arrays), so fetching hundreds of addresses costs a handful of round
  * trips instead of hundreds of HTTP calls.
+ *
+ * Protocol only — no platform knowledge. Opening the socket and choosing the
+ * servers is each app's job, via `utils/electrumTransport`; this module just
+ * needs a factory that returns something with write/destroy/on('data'|'error'
+ * |'close'). See ELECTRUM_QUERIES at the bottom for the seam's contract.
  */
-
-const ELECTRUM_SERVERS = IS_SANDBOX
-  ? [
-      {host: 'electrum.blockstream.info', port: 60002},
-      {host: 'testnet.aranguren.org', port: 51002},
-    ]
-  : [
-      // Own Fulcrum server (primary). Public servers below are fallbacks,
-      // used automatically if this one is unreachable.
-      // Note: the DNS record must stay "DNS only" in Cloudflare - proxying it
-      // breaks port 50002, which the proxy does not forward.
-      {host: 'electrum.kimlwallet.com', port: 50002},
-      {host: 'mainnet.foundationdevices.com', port: 50002},
-      {host: 'electrum1.bluewallet.io', port: 443},
-      {host: 'electrum.blockstream.info', port: 50002},
-    ];
 
 const REQUEST_TIMEOUT_MS = 20000;
 const BATCH_SIZE = 100;
@@ -37,45 +22,12 @@ const BATCH_SIZE = 100;
 // Bounded because the public ElectrumX fallbacks rate-limit on concurrent cost.
 const MAX_INFLIGHT_CHUNKS = 4;
 
-// Lazily required so the web/desktop bundle (no native TCP) keeps working.
-let tcpSocketModule;
-const getTcpSocket = () => {
-  if (tcpSocketModule !== undefined) {
-    return tcpSocketModule;
-  }
-  try {
-    // The package assigns module.exports after its `export default`, which
-    // drops the compiled `.default` property — fall back to the module itself.
-    const mod = require('react-native-tcp-socket');
-    tcpSocketModule = (mod && mod.default) || mod || null;
-  } catch (e) {
-    console.log('error in tcpSocketModule', e);
-    tcpSocketModule = null;
-  }
-  return tcpSocketModule;
-};
-
-export const isElectrumAvailable = () => !isWeb && !!getTcpSocket();
-
-const defaultSocketFactory = ({host, port}, onConnect) => {
-  const TcpSocket = getTcpSocket();
-  return TcpSocket.connectTLS(
-    {
-      host,
-      port,
-      // Electrum servers commonly use self-signed certificates
-      // (BlueWallet accepts them the same way).
-      rejectUnauthorized: false,
-    },
-    onConnect,
-  );
-};
-
 export class ElectrumClient {
-  constructor({
-    servers = ELECTRUM_SERVERS,
-    socketFactory = defaultSocketFactory,
-  } = {}) {
+  constructor({servers, socketFactory} = {}) {
+    // No defaults on purpose: the transport that owns the platform owns these.
+    if (!Array.isArray(servers) || !servers.length || !socketFactory) {
+      throw new Error('ElectrumClient requires servers and a socketFactory');
+    }
     this.servers = servers;
     this.socketFactory = socketFactory;
     this.socket = null;
@@ -84,6 +36,11 @@ export class ElectrumClient {
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = '';
+    // Per-client, not module-global: two clients in one process (mobile's
+    // socket, the web server's) must not serve each other stale or poisoned
+    // entries, and a long-lived server process must not grow one unbounded.
+    this.rawTxCache = new Map();
+    this.blockTimeCache = new Map();
   }
 
   async connect() {
@@ -353,14 +310,6 @@ export class ElectrumClient {
   }
 }
 
-let sharedClient = null;
-export const getElectrumClient = () => {
-  if (!sharedClient) {
-    sharedClient = new ElectrumClient();
-  }
-  return sharedClient;
-};
-
 // Electrum identifies outputs by scripthash: sha256(scriptPubKey), reversed.
 export const addressToScripthash = address => {
   const script = bitcoin.address.toOutputScript(
@@ -376,8 +325,7 @@ export const addressToScripthash = address => {
  * {status, data: {totalBalance, deriveAddresses: [{...item, balance}]}}
  * Balances are in satoshis.
  */
-export const electrumFetchBitcoinBalances = async ({derive_addresses}) => {
-  const client = getElectrumClient();
+const fetchBalances = async (client, {derive_addresses}) => {
   const items = Array.isArray(derive_addresses) ? derive_addresses : [];
   const calls = items.map(item => ({
     method: 'blockchain.scripthash.get_balance',
@@ -402,8 +350,7 @@ export const electrumFetchBitcoinBalances = async ({derive_addresses}) => {
  * Same response shape as DokApi 'get_bitcoin_utxos':
  * {status, data: [{transaction_hash, index, value, address}]} (value in sats).
  */
-export const electrumFetchBitcoinUTXO = async ({derive_addresses}) => {
-  const client = getElectrumClient();
+const fetchUTXO = async (client, {derive_addresses}) => {
   const items = Array.isArray(derive_addresses) ? derive_addresses : [];
   const calls = items.map(item => ({
     method: 'blockchain.scripthash.listunspent',
@@ -430,10 +377,7 @@ export const electrumFetchBitcoinUTXO = async ({derive_addresses}) => {
  * txhash (raw tx hex, legacy → nonWitnessUtxo), matching what buildUTXO in
  * BitcoinChain.js expects.
  */
-export const electrumFetchBitcoinTransactionDetails = async ({
-  transaction_data,
-}) => {
-  const client = getElectrumClient();
+const fetchTransactionDetails = async (client, {transaction_data}) => {
   const utxos = Array.isArray(transaction_data) ? transaction_data : [];
   // Every entry becomes a PSBT input in buildUTXO, while the caller's change
   // output is derived from the utxo total computed BEFORE this call. Dropping
@@ -501,16 +445,16 @@ export const electrumFetchBitcoinTransactionDetails = async ({
 // Raw txs are immutable, so a bounded cache saves refetching the same
 // transactions (and their inputs) on every history refresh.
 const RAW_TX_CACHE_LIMIT = 500;
-const rawTxCache = new Map();
-const cacheRawTx = (txid, hex) => {
-  if (rawTxCache.size >= RAW_TX_CACHE_LIMIT) {
-    rawTxCache.delete(rawTxCache.keys().next().value);
+const cacheRawTx = (client, txid, hex) => {
+  const cache = client.rawTxCache;
+  if (cache.size >= RAW_TX_CACHE_LIMIT) {
+    cache.delete(cache.keys().next().value);
   }
-  rawTxCache.set(txid, hex);
+  cache.set(txid, hex);
 };
 
 const fetchRawTransactions = async (client, txids) => {
-  const missing = txids.filter(txid => !rawTxCache.has(txid));
+  const missing = txids.filter(txid => !client.rawTxCache.has(txid));
   const results = await client.batchRequestChunked(
     missing.map(txid => ({
       method: 'blockchain.transaction.get',
@@ -519,12 +463,12 @@ const fetchRawTransactions = async (client, txids) => {
   );
   missing.forEach((txid, i) => {
     if (typeof results[i] === 'string') {
-      cacheRawTx(txid, results[i]);
+      cacheRawTx(client, txid, results[i]);
     }
   });
   const byTxid = {};
   txids.forEach(txid => {
-    byTxid[txid] = rawTxCache.get(txid);
+    byTxid[txid] = client.rawTxCache.get(txid);
   });
   return byTxid;
 };
@@ -535,10 +479,20 @@ const getTipHeight = async client => {
 };
 
 // Block timestamp: uint32LE at byte 68 of the 80-byte header.
-const blockTimeCache = new Map();
+// Bounded for the same reason as the raw-tx cache: a server process serves
+// every user's history requests and would otherwise grow one entry per block.
+const BLOCK_TIME_CACHE_LIMIT = 5000;
+const cacheBlockTime = (client, height, time) => {
+  const cache = client.blockTimeCache;
+  if (cache.size >= BLOCK_TIME_CACHE_LIMIT) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(height, time);
+};
+
 const fetchBlockTimestamps = async (client, heights) => {
   const unique = [...new Set(heights.filter(height => height > 0))];
-  const missing = unique.filter(height => !blockTimeCache.has(height));
+  const missing = unique.filter(height => !client.blockTimeCache.has(height));
   const results = await client.batchRequestChunked(
     missing.map(height => ({
       method: 'blockchain.block.header',
@@ -549,12 +503,12 @@ const fetchBlockTimestamps = async (client, heights) => {
     const hex = results[i];
     if (typeof hex === 'string' && hex.length >= 160) {
       // eslint-disable-next-line no-undef
-      blockTimeCache.set(height, Buffer.from(hex, 'hex').readUInt32LE(68));
+      cacheBlockTime(client, height, Buffer.from(hex, 'hex').readUInt32LE(68));
     }
   });
   const byHeight = {};
   unique.forEach(height => {
-    byHeight[height] = blockTimeCache.get(height);
+    byHeight[height] = client.blockTimeCache.get(height);
   });
   return byHeight;
 };
@@ -690,11 +644,7 @@ const TX_HISTORY_LIMIT = 20; // matches the Blockchair providers (limit: '20,0')
  * [{hash, timestamp, status, amount, fee, from, to, blockNumber,
  *   confirmations}], newest first, amounts in satoshis.
  */
-export const electrumFetchBitcoinTransactions = async ({
-  address,
-  derive_addresses,
-}) => {
-  const client = getElectrumClient();
+const fetchTransactions = async (client, {address, derive_addresses}) => {
   const finalAddresses =
     Array.isArray(derive_addresses) && derive_addresses.length > 1
       ? derive_addresses
@@ -734,12 +684,10 @@ export const electrumFetchBitcoinTransactions = async ({
  * addresses (waitForConfirmation passes only the txid): the confirmation
  * height is discovered from the history of the tx's own outputs.
  */
-export const electrumGetTransaction = async ({
-  transactionId,
-  address,
-  derive_addresses,
-}) => {
-  const client = getElectrumClient();
+const fetchTransaction = async (
+  client,
+  {transactionId, address, derive_addresses},
+) => {
   const rawByTxid = await fetchRawTransactions(client, [transactionId]);
   const rawHex = rawByTxid[transactionId];
   if (!rawHex) {
@@ -790,8 +738,7 @@ export const electrumGetTransaction = async ({
  * transaction history. Per-address server errors (e.g. history too large)
  * count as used.
  */
-export const electrumFetchAddressUsage = async ({addresses}) => {
-  const client = getElectrumClient();
+const fetchAddressUsage = async (client, {addresses}) => {
   const list = Array.isArray(addresses) ? addresses : [];
   const results = await client.batchRequestChunked(
     list.map(address => ({
@@ -820,8 +767,7 @@ export const electrumFetchAddressUsage = async ({addresses}) => {
 };
 
 /** Broadcast a signed transaction. Returns the txid. */
-export const electrumBroadcastTransaction = async ({txHex}) => {
-  const client = getElectrumClient();
+const broadcastTransaction = async (client, {txHex}) => {
   // Witnesses are excluded from the txid, so the bytes we send fully determine
   // the id a conformant server must answer with.
   const expectedTxid = bitcoin.Transaction.fromHex(txHex).getId();
@@ -852,12 +798,30 @@ export const electrumBroadcastTransaction = async ({txHex}) => {
 };
 
 /** Fee rate in sat/vB for ~`blocks` confirmation target. */
-export const electrumGetFeeRate = async ({blocks = 2} = {}) => {
-  const client = getElectrumClient();
+const fetchFeeRate = async (client, {blocks = 2} = {}) => {
   const btcPerKb = await client.request('blockchain.estimatefee', [blocks]);
   if (!btcPerKb || btcPerKb <= 0) {
     // Throw so the data-source wrapper falls back to the API providers.
     throw new Error('Electrum fee estimate unavailable');
   }
   return Math.max(1, Math.round((btcPerKb * 1e8) / 1000));
+};
+
+/**
+ * The Electrum query registry: op name -> (client, payload) => Promise.
+ *
+ * This is the whole contract between the protocol layer here and each app's
+ * transport (`utils/electrumTransport`), which owns the servers and the socket.
+ * `payload` is passed through untouched, so it can be the exact JSON body the
+ * web bridge received.
+ */
+export const ELECTRUM_QUERIES = {
+  balances: fetchBalances,
+  utxo: fetchUTXO,
+  txdetails: fetchTransactionDetails,
+  transactions: fetchTransactions,
+  transaction: fetchTransaction,
+  addressusage: fetchAddressUsage,
+  broadcast: broadcastTransaction,
+  feerate: fetchFeeRate,
 };
