@@ -1,25 +1,27 @@
 /* global Buffer */
-import {broadcastBitcoinTransaction} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 import {
-  electrumBroadcastTransaction,
-  electrumGetTransaction,
-} from 'dok-wallet-blockchain-networks/service/electrum';
+  broadcastBitcoinTransaction,
+  fetchBitcoinAddressUsage,
+} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
-
-jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
-  isWeb: false,
-  IS_SANDBOX: false,
-  config: {},
-}));
+import {
+  isElectrumQueryAvailable,
+  runElectrumQuery,
+} from 'utils/electrumTransport';
+import {ELECTRUM_QUERIES} from 'dok-wallet-blockchain-networks/service/electrum';
+import {
+  fetchBitcoinBalances,
+  fetchBitcoinFeeRate,
+  fetchBitcoinTransaction,
+  fetchBitcoinTransactionDetails,
+  fetchBitcoinTransactions,
+  fetchBitcoinUTXO,
+} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
 jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
   fetchBitcoinBalances: jest.fn(),
   fetchBitcoinUTXO: jest.fn(),
   fetchBitcoinTransactionDetails: jest.fn(),
-}));
-
-jest.mock('dok-wallet-blockchain-networks/service/bitcoinWebElectrum', () => ({
-  callWebElectrum: jest.fn(),
 }));
 
 jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork', () => ({
@@ -31,16 +33,16 @@ jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork', () => ({
   },
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/electrum', () => ({
-  isElectrumAvailable: jest.fn(() => true),
-  electrumBroadcastTransaction: jest.fn(),
-  electrumGetTransaction: jest.fn(),
-  electrumFetchBitcoinBalances: jest.fn(),
-  electrumFetchBitcoinUTXO: jest.fn(),
-  electrumFetchBitcoinTransactionDetails: jest.fn(),
-  electrumFetchBitcoinTransactions: jest.fn(),
-  electrumGetFeeRate: jest.fn(),
+// The only platform-aware module left; how a query travels is its business.
+jest.mock('utils/electrumTransport', () => ({
+  isElectrumQueryAvailable: jest.fn(() => true),
+  runElectrumQuery: jest.fn(),
 }));
+
+// Per-op spies behind the single seam function, so each assertion can still
+// talk about "the broadcast call" and "the transaction lookup".
+const electrumBroadcastTransaction = jest.fn();
+const electrumGetTransaction = jest.fn();
 
 const bitcoin = require('bitcoinjs-lib');
 
@@ -70,6 +72,16 @@ const MISSING_INPUTS_MESSAGES = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  isElectrumQueryAvailable.mockReturnValue(true);
+  runElectrumQuery.mockImplementation((op, payload) => {
+    if (op === 'broadcast') {
+      return electrumBroadcastTransaction(payload);
+    }
+    if (op === 'transaction') {
+      return electrumGetTransaction(payload);
+    }
+    return Promise.reject(new Error(`unexpected op ${op}`));
+  });
   electrumGetTransaction.mockResolvedValue(null);
   BitcoinFork.createTransaction.mockResolvedValue(null);
 });
@@ -172,5 +184,64 @@ describe('broadcastBitcoinTransaction existing behaviour', () => {
     await expect(broadcastBitcoinTransaction({txHex: TX_HEX})).rejects.toThrow(
       'Bitcoin broadcast failed',
     );
+  });
+});
+
+describe('transport availability gating', () => {
+  it('goes straight to the backend without touching the transport', async () => {
+    isElectrumQueryAvailable.mockReturnValue(false);
+    BitcoinFork.createTransaction.mockResolvedValue(EXPECTED_TXID);
+
+    await expect(broadcastBitcoinTransaction({txHex: TX_HEX})).resolves.toBe(
+      EXPECTED_TXID,
+    );
+    // The whole point of the gate: no connect attempt when there is no
+    // transport, so DokApi is reached without paying a timeout first.
+    expect(runElectrumQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects an address-usage scan rather than reporting "nothing used"', async () => {
+    isElectrumQueryAvailable.mockReturnValue(false);
+    // An empty map would read as "no address is used" and wrongly prune the
+    // legacy window, so this must reject.
+    await expect(fetchBitcoinAddressUsage({addresses: ['a']})).rejects.toThrow(
+      'unavailable',
+    );
+    expect(runElectrumQuery).not.toHaveBeenCalled();
+  });
+
+  it('passes the address-usage payload through to the transport', async () => {
+    runElectrumQuery.mockResolvedValue({a: true});
+    await expect(fetchBitcoinAddressUsage({addresses: ['a']})).resolves.toEqual(
+      {a: true},
+    );
+    expect(runElectrumQuery).toHaveBeenCalledWith('addressusage', {
+      addresses: ['a'],
+    });
+  });
+});
+
+describe('op parity with the shared registry', () => {
+  // Every op this module names must exist in ELECTRUM_QUERIES, or the query
+  // throws at runtime on whichever platform reaches it first. `feerate` is the
+  // one called with no argument at all (BitcoinChain does), so it doubles as
+  // the no-payload regression.
+  const CALLS = [
+    ['balances', () => fetchBitcoinBalances({derive_addresses: []})],
+    ['utxo', () => fetchBitcoinUTXO({derive_addresses: []})],
+    ['txdetails', () => fetchBitcoinTransactionDetails({transaction_data: []})],
+    ['transactions', () => fetchBitcoinTransactions({address: 'a'})],
+    ['transaction', () => fetchBitcoinTransaction({transactionId: 't'})],
+    ['broadcast', () => broadcastBitcoinTransaction({txHex: TX_HEX})],
+    ['feerate', () => fetchBitcoinFeeRate()],
+    ['addressusage', () => fetchBitcoinAddressUsage({addresses: []})],
+  ];
+
+  it.each(CALLS)('%s is a real registry op', async (op, call) => {
+    runElectrumQuery.mockResolvedValue('ok');
+    await call().catch(() => {});
+    expect(runElectrumQuery).toHaveBeenCalled();
+    expect(runElectrumQuery.mock.calls[0][0]).toBe(op);
+    expect(ELECTRUM_QUERIES).toHaveProperty(op);
   });
 });

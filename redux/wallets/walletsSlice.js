@@ -163,8 +163,14 @@ export const RELOCK_OPTIONS = {
   MANUAL: 'MANUAL',
 };
 
+const findWalletByClientId = (state, clientId) =>
+  state.allWallets.find(wallet => wallet?.clientId === clientId);
+
+// Mutating callers rely on always getting an object back. Use
+// findWalletByClientId when you need to know whether the wallet exists —
+// the {} fallback here is truthy and will defeat an existence check.
 const getWalletByClientId = (state, clientId) =>
-  state.allWallets.find(wallet => wallet?.clientId === clientId) || {};
+  findWalletByClientId(state, clientId) || {};
 
 const getCurrentWallet = state =>
   getWalletByClientId(state, state.currentWalletClientId);
@@ -2089,7 +2095,7 @@ export const walletsSlice = createSlice({
     },
     setCurrentWalletClientId: (state, action) => {
       const clientId = action.payload;
-      if (!getWalletByClientId(state, clientId)) {
+      if (!findWalletByClientId(state, clientId)) {
         throw new Error(
           `setCurrentWalletClientId: missing or invalid action payload: ${clientId}`,
         );
@@ -2115,7 +2121,7 @@ export const walletsSlice = createSlice({
       if (clientId === state.currentWalletClientId) {
         throw new Error('cannot deleted because it is selected wallet');
       }
-      if (!getWalletByClientId(state, clientId)) {
+      if (!findWalletByClientId(state, clientId)) {
         throw new Error('wallet not available');
       }
       state.allWallets = allWallets.filter(item => item?.clientId !== clientId);
