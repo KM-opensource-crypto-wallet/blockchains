@@ -10,12 +10,12 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {generateMnemonics as newWallet} from 'myWallet/wallet.service';
-import thunk from 'redux-thunk';
+import {thunk} from 'redux-thunk';
 import configureMockStore from 'redux-mock-store';
-import * as dataModule from 'data/currency';
 import {combineReducers, configureStore} from '@reduxjs/toolkit';
 import {settingsSlice} from 'dok-wallet-blockchain-networks/redux/settings/settingsSlice';
-import walletsSlice, {
+import {
+  walletsSlice,
   addToken,
   createWallet,
   refreshCoins,
@@ -25,14 +25,33 @@ import walletsSlice, {
   updateWalletName,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 
-// Mock the async functions
-jest.mock('../../crypto', () => ({
-  newWallet: jest.fn(),
+// Mock the async functions. Both modules pull in every chain implementation
+// (and their native modules), so each mock covers the full surface walletsSlice
+// imports, not just what this file asserts on.
+jest.mock('dok-wallet-blockchain-networks/cryptoChain', () => ({
+  getChain: jest.fn(),
   getCoin: jest.fn(),
+  getHashString: jest.fn(),
 }));
 
-// Mock the module
-jest.mock('data/currency');
+jest.mock('myWallet/wallet.service', () => ({
+  addCustomDeriveAddressToWallet: jest.fn(),
+  addDeriveAddresses: jest.fn(),
+  generateMnemonics: jest.fn(),
+}));
+
+// Keep the thunks off the network: createWallet registers the new wallet and
+// refreshCoins prices the coins, neither of which is under test here.
+jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
+  fetchCoinByChainAPI: jest.fn(),
+  fetchCurrenciesAPI: jest.fn(),
+  registerUserAPI: jest.fn(() => Promise.resolve()),
+  reportExchangeTransactionHash: jest.fn(),
+}));
+
+jest.mock('dok-wallet-blockchain-networks/service/coinMarketCap', () => ({
+  getPrice: jest.fn(() => Promise.resolve({})),
+}));
 
 describe('walletsSlice tesets', () => {
   describe('wallets selectors', () => {
@@ -243,11 +262,19 @@ describe('walletsSlice tesets', () => {
     });
 
     describe('toggleCoinInWallet', () => {
-      it('toggleCoinInWallet toggles the isInWallet property of a coin', async () => {
+      // Toggling is no longer a sync reducer: addOrToggleCoinInWallet is an
+      // async thunk and the flip happens in its fulfilled case, which receives
+      // {newCoin, existingCoinId}. An already-present coin yields newCoin=null.
+      const toggle = coinId =>
+        addOrToggleCoinInWallet.fulfilled(
+          {newCoin: null, existingCoinId: coinId},
+          'requestId',
+          {_id: coinId},
+        );
+
+      it('toggleCoinInWallet toggles the isInWallet property of a coin', () => {
         const state = {...initialState};
-        const action = await addOrToggleCoinInWallet({_id: 'a'});
-        const nextState = walletsSlice.reducer(state, action);
-        console.log('next state', nextState);
+        const nextState = walletsReducer(state, toggle('a'));
         const foundCoin = nextState.allWallets[0].coins.find(
           item => item._id === 'a',
         );
@@ -255,10 +282,8 @@ describe('walletsSlice tesets', () => {
       });
       it('toggleCoinInWallet toggles the isInWallet property of a coin back', () => {
         const state = {...initialState};
-        let action = addOrToggleCoinInWallet({_id: 'a'});
-        let nextState = walletsReducer(state, action);
-        action = addOrToggleCoinInWallet({_id: 'a'});
-        nextState = walletsSlice.reducer(nextState, action);
+        let nextState = walletsReducer(state, toggle('a'));
+        nextState = walletsReducer(nextState, toggle('a'));
         const foundCoin = nextState.allWallets[0].coins.find(
           item => item._id === 'a',
         );
@@ -294,313 +319,153 @@ describe('walletsSlice tesets', () => {
   });
 
   describe('wallets thunks', () => {
-    // Define your mock data
-    const mockCurrency = [
+    // Coin definitions now come from the currency slice
+    // (state.currency.currencies) rather than the data/currency module, and are
+    // keyed by chain_name/symbol instead of the old `page` field. Only
+    // status: true entries are active, so solana below is deliberately excluded.
+    const mockCurrencies = [
       {
-        page: 'MockCoin',
-        title: 'MCK',
-        top: 'true',
-        // ...other properties
+        _id: 'coin1',
+        symbol: 'ETH',
+        chain_name: 'ethereum',
+        type: 'coin',
+        decimal: 18,
+        status: true,
       },
       {
-        page: 'MockCoin2',
-        title: 'MCK2',
-        top: 'true',
-        // ...other properties
+        _id: 'coin2',
+        symbol: 'MATIC',
+        chain_name: 'polygon',
+        type: 'coin',
+        decimal: 18,
+        status: true,
       },
       {
-        page: 'MockCoin3',
-        title: 'MCK3',
-        top: 'false',
-        // ...other properties
+        _id: 'coin3',
+        symbol: 'SOL',
+        chain_name: 'solana',
+        type: 'coin',
+        decimal: 9,
+        status: false,
       },
-      // ...other mock coins
     ];
 
-    // Use the mock data in your tests
+    // Native-coin stubs handed back by the mocked cryptoChain.getCoin. Balances
+    // are in smallest units; at decimal 18 they parse to '10.0' and '20.0'.
+    const nativeCoins = {
+      ethereum: {
+        address: '0xEthAddress',
+        privateKey: '0xEthPrivateKey',
+        getBalance: () => Promise.resolve('10000000000000000000'),
+      },
+      polygon: {
+        address: '0xPolygonAddress',
+        privateKey: '0xPolygonPrivateKey',
+        getBalance: () => Promise.resolve('20000000000000000000'),
+      },
+      solana: {
+        address: 'SolAddress',
+        privateKey: 'SolPrivateKey',
+        getBalance: () => Promise.resolve('30'),
+      },
+    };
+
+    // Slices these thunks read but never write.
+    const readOnlySlices = {
+      currency: (state = {currencies: mockCurrencies}) => state,
+      cryptoProvider: (state = {is_max_wallet_limit_reached: false}) => state,
+      customRpc: (state = {customRpcList: {}}) => state,
+    };
+
+    const baseState = {
+      wallets: {allWallets: []},
+      settings: {localCurrency: 'USD'},
+      currency: {currencies: mockCurrencies},
+      cryptoProvider: {is_max_wallet_limit_reached: false},
+      customRpc: {customRpcList: {}},
+    };
+
+    const makeStore = preloadedState =>
+      configureStore({
+        reducer: combineReducers({
+          wallets: walletsSlice.reducer,
+          settings: settingsSlice.reducer,
+          ...readOnlySlices,
+        }),
+        preloadedState,
+        // Coin snapshots carry non-serializable stubs; the checks add noise
+        // without telling us anything about the thunks under test.
+        middleware: getDefaultMiddleware =>
+          getDefaultMiddleware({
+            serializableCheck: false,
+            immutableCheck: false,
+          }),
+      });
+
     beforeEach(() => {
-      dataModule.currency = mockCurrency;
+      newWallet.mockResolvedValue({mnemonic: {phrase: 'test phrase'}});
+      getCoin.mockImplementation((phrase, coinDef) =>
+        Promise.resolve(nativeCoins[coinDef?.chain_name]),
+      );
     });
 
-    const middlewares = [thunk];
-    const mockStore = configureMockStore(middlewares);
-    // const mockStore = configureStore({reducer: walletsSlice.reducer});
     it('creates a new wallet', async () => {
-      // Mock the initial state
-      const initialState = {
-        wallets: {
-          allWallets: [],
-        },
-        settings: {
-          localCurrency: 'USD',
-        },
-      };
+      const middlewares = [thunk];
+      const mockStore = configureMockStore(middlewares);
+      const store = mockStore(baseState);
 
-      // Mock the new wallet and coins
-      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
-      const mockCoins = [
-        {
-          chain_name: 'MockCoin',
-          id: 'coin1',
-          status: true,
-          address: '0x1234',
-          privateKey: '0x1234567890',
-        },
-        {
-          chain_name: 'MockCoin2',
-          id: 'coin2',
-          status: false,
-          address: '0x4321',
-          privateKey: '0x0987654321',
-        },
-        {
-          chain_name: 'MockCoin3',
-          id: 'coin3',
-          status: false,
-          address: '0x33333',
-          privateKey: '0x33333333',
-        },
-      ];
-
-      // Set up the mock functions to return the mock wallet and coins
-      newWallet.mockResolvedValue(mockWallet);
-      // getCoin.mockResolvedValue(mockCoins); // If getCoin returns the coins
-      getCoin.mockImplementation((phrase, coinPage) => {
-        return Promise.resolve({
-          ...mockCoins.find(coin => {
-            if (!coin.chain_name) {
-              console.log(`Coin ${coin.id} has no page`);
-            }
-            return (
-              coin.chain_name?.toLowerCase() ===
-              coinPage.chain_name.toLowerCase()
-            );
-          }),
-          phrase,
-        });
-      });
-
-      // Create a mock store
-      const store = mockStore(initialState);
-
-      // Dispatch the thunk
       await store.dispatch(createWallet({walletName: 'Test Wallet'}));
 
-      // Get the actions dispatched by the store
-      const actions = store.getActions();
-
-      const fulfilled = actions.find(action =>
-        action.type.endsWith('fulfilled'),
-      );
+      const fulfilled = store
+        .getActions()
+        .find(action => action.type.endsWith('fulfilled'));
       expect(fulfilled).toBeDefined();
-      // Assert that the correct actions were dispatched
-      expect(fulfilled.payload).toEqual({
-        newStoreWallet: {
-          id: '1',
-          walletName: 'Main Wallet',
-          coins: [
-            {
-              address: '0x1234',
-              isInWallet: true,
-              chain_name: 'MockCoin',
-              phrase: 'test phrase',
-              privateKey: '0x1234567890',
-              title: 'MCK',
-              top: 'true',
-              totalAmount: 0,
-              totalCourse: '0.00',
-              currencyRate: '0.00',
-              transactions: [],
-            },
-            {
-              address: '0x4321',
-              isInWallet: true,
-              chain_name: 'MockCoin2',
-              phrase: 'test phrase',
-              privateKey: '0x0987654321',
-              title: 'MCK2',
-              top: 'true',
-              totalAmount: 0,
-              totalCourse: '0.00',
-              currencyRate: '0.00',
-              transactions: [],
-            },
-            {
-              address: '0x33333',
-              chain_name: 'MockCoin3',
-              phrase: 'test phrase',
-              privateKey: '0x33333333',
-              title: 'MCK3',
-              top: 'false',
-              totalAmount: 0,
-              totalCourse: '0.00',
-              currencyRate: '0.00',
-              transactions: [],
-            },
-          ],
-          phrase: mockWallet.mnemonic.phrase,
-        },
-        replace: undefined,
-      });
+
+      const {newStoreWallet} = fulfilled.payload;
+      expect(newStoreWallet.walletName).toEqual('Test Wallet');
+      expect(newStoreWallet.id).toEqual('1');
+      expect(newStoreWallet.clientId).toEqual(expect.any(String));
+      expect(newStoreWallet.phrase).toEqual('test phrase');
+      // Generated in-app, so it can skip the legacy bitcoin derivation scan.
+      expect(newStoreWallet.isLegacyFree).toBe(true);
+      expect(fulfilled.payload.isFromImportWallet).toBe(false);
+
+      // Only the two active currencies become coins, each carrying the address
+      // and key from its chain and flagged as in-wallet.
+      expect(newStoreWallet.coins.map(coin => coin.chain_name)).toEqual([
+        'ethereum',
+        'polygon',
+      ]);
+      expect(newStoreWallet.coins.map(coin => coin.address)).toEqual([
+        '0xEthAddress',
+        '0xPolygonAddress',
+      ]);
+      expect(newStoreWallet.coins.every(coin => coin.isInWallet)).toBe(true);
     });
 
     it('creates two new wallets', async () => {
-      // Mock the initial state
-      const initialState = {
-        wallets: {
-          allWallets: [],
-        },
-        settings: {
-          localCurrency: 'USD',
-        },
-      };
-
-      // Mock the new wallet and coins
-      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
-      const mockCoins = [
-        {
-          page: 'MockCoin',
-          id: 'coin1',
-          top: 'true',
-          address: '0x1234',
-          privateKey: '0x1234567890',
-        },
-        {
-          page: 'MockCoin2',
-          id: 'coin2',
-          top: 'false',
-          address: '0x4321',
-          privateKey: '0x0987654321',
-        },
-        {
-          page: 'MockCoin3',
-          id: 'coin3',
-          top: 'false',
-          address: '0x33333',
-          privateKey: '0x33333333',
-        },
-      ];
-
-      // Set up the mock functions to return the mock wallet and coins
-      newWallet.mockResolvedValue(mockWallet);
-      // getCoin.mockResolvedValue(mockCoins); // If getCoin returns the coins
-      getCoin.mockImplementation((phrase, coinPage) => {
-        return Promise.resolve({
-          ...mockCoins.find(coin => {
-            if (!coin.page) {
-              console.log(`Coin ${coin.id} has no page`);
-            }
-            return coin.page?.toLowerCase() === coinPage;
-          }),
-          phrase,
-        });
-      });
-
-      let dispatchedActions = [];
-
-      const recordDispatchedActions = storeAPI => next => action => {
-        dispatchedActions.push(action);
-        return next(action);
-      };
-
-      const rootReducer = combineReducers({
-        wallets: walletsSlice.reducer,
-        settings: settingsSlice.reducer,
-        // Include other slices here
-      });
-
-      const store = configureStore({
-        reducer: rootReducer,
-        preloadedState: initialState,
-        middleware: getDefaultMiddleware =>
-          getDefaultMiddleware().concat(recordDispatchedActions),
-      });
-
-      // Dispatch the thunk
-      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
+      const store = makeStore(baseState);
 
       await store.dispatch(createWallet({walletName: 'Test Wallet'}));
-      const state = store.getState();
-      const wallets = state.wallets.allWallets;
+      await store.dispatch(createWallet({walletName: 'Test Wallet'}));
+
+      const wallets = store.getState().wallets.allWallets;
+      expect(wallets).toHaveLength(2);
+      // The requested name is taken, so the second wallet is auto-renamed.
+      expect(wallets[0].walletName).toEqual('Test Wallet');
       expect(wallets[1].walletName).toEqual('Wallet 2');
       expect(wallets[1].coins).toBeDefined();
+      // Each wallet gets its own clientId, and the newest becomes current.
+      expect(wallets[0].clientId).not.toEqual(wallets[1].clientId);
+      expect(store.getState().wallets.currentWalletClientId).toEqual(
+        wallets[1].clientId,
+      );
     });
 
     it('creates should replace a wallet', async () => {
-      // Mock the initial state
-      const initialState = {
-        wallets: {
-          allWallets: [],
-        },
-        settings: {
-          localCurrency: 'USD',
-        },
-      };
+      const store = makeStore(baseState);
 
-      // Mock the new wallet and coins
-      const mockWallet = {mnemonic: {phrase: 'test phrase'}};
-      const mockCoins = [
-        {
-          page: 'MockCoin',
-          id: 'coin1',
-          top: 'true',
-          address: '0x1234',
-          privateKey: '0x1234567890',
-        },
-        {
-          page: 'MockCoin2',
-          id: 'coin2',
-          top: 'false',
-          address: '0x4321',
-          privateKey: '0x0987654321',
-        },
-        {
-          page: 'MockCoin3',
-          id: 'coin3',
-          top: 'false',
-          address: '0x33333',
-          privateKey: '0x33333333',
-        },
-      ];
-
-      // Set up the mock functions to return the mock wallet and coins
-      newWallet.mockResolvedValue(mockWallet);
-      // getCoin.mockResolvedValue(mockCoins); // If getCoin returns the coins
-      getCoin.mockImplementation((phrase, coinPage) => {
-        return Promise.resolve({
-          ...mockCoins.find(coin => {
-            if (!coin.page) {
-              console.log(`Coin ${coin.id} has no page`);
-            }
-            return coin.page?.toLowerCase() === coinPage;
-          }),
-          phrase,
-        });
-      });
-
-      let dispatchedActions = [];
-
-      const recordDispatchedActions = storeAPI => next => action => {
-        dispatchedActions.push(action);
-        return next(action);
-      };
-
-      const rootReducer = combineReducers({
-        wallets: walletsSlice.reducer,
-        settings: settingsSlice.reducer,
-        // Include other slices here
-      });
-
-      const store = configureStore({
-        reducer: rootReducer,
-        preloadedState: initialState,
-        middleware: getDefaultMiddleware =>
-          getDefaultMiddleware().concat(recordDispatchedActions),
-      });
-
-      // Dispatch the thunk
       await store.dispatch(createWallet({walletName: 'Test Wallet'}));
-
       await store.dispatch(
         createWallet({
           walletName: 'Test Wallet',
@@ -608,88 +473,46 @@ describe('walletsSlice tesets', () => {
           phrase: 'new test phrase',
         }),
       );
-      const state = store.getState();
-      const wallets = state.wallets.allWallets;
-      expect(wallets[0].walletName).toEqual('Main Wallet');
+
+      const wallets = store.getState().wallets.allWallets;
+      // replace collapses the list to the single new wallet, and skips the
+      // auto-rename branch entirely, so the requested name survives as-is.
+      expect(wallets).toHaveLength(1);
+      expect(wallets[0].walletName).toEqual('Test Wallet');
       expect(wallets[0].phrase).toEqual('new test phrase');
       expect(wallets[0].coins).toBeDefined();
+      // An imported phrase must still be scanned for legacy bitcoin usage.
+      expect(wallets[0].isLegacyFree).toBe(false);
     });
 
     it('test that refreshCoins refreshes the wallets coins', async () => {
-      const mockCoins = [
-        {
-          page: 'a',
-          id: 'coin1',
-          top: 'true',
-          address: '0x1234',
-          privateKey: '0x1234567890',
-          getBalance: () => Promise.resolve('10.0'),
-        },
-        {
-          page: 'b',
-          id: 'coin2',
-          top: 'false',
-          address: '0x4321',
-          privateKey: '0x0987654321',
-          getBalance: () => Promise.resolve('20.0'),
-        },
-      ];
-      getCoin.mockImplementation((phrase, coinPage) => {
-        return Promise.resolve({
-          ...mockCoins.find(coin => {
-            if (!coin.page) {
-              console.log(`Coin ${coin.page} has no page`);
-            }
-            return coin.page?.toLowerCase() === coinPage?.page?.toLowerCase();
-          }),
-          phrase,
-        });
-      });
-
-      const initialState = {
+      const store = makeStore({
+        ...baseState,
         wallets: {
           allWallets: [
             {
-              coins: [
-                {id: 'a', isInWallet: true, isSupported: true, page: 'A'},
-                {id: 'b', isInWallet: false, isSupported: true, page: 'B'},
-              ],
-              selectedCoinIndex: 0,
               clientId: 'client1',
+              phrase: 'test phrase',
+              coins: mockCurrencies
+                .slice(0, 2)
+                .map(coin => ({...coin, isInWallet: true})),
             },
           ],
           currentWalletClientId: 'client1',
         },
-        settings: {
-          localCurrency: 'USD',
-        },
-      };
-
-      let dispatchedActions = [];
-
-      const recordDispatchedActions = storeAPI => next => action => {
-        dispatchedActions.push(action);
-        return next(action);
-      };
-
-      const rootReducer = combineReducers({
-        wallets: walletsSlice.reducer,
-        settings: settingsSlice.reducer,
-        // Include other slices here
       });
 
-      const store = configureStore({
-        reducer: rootReducer,
-        preloadedState: initialState,
-        middleware: getDefaultMiddleware =>
-          getDefaultMiddleware().concat(recordDispatchedActions),
-      });
-
-      // Dispatch the thunk
       await store.dispatch(refreshCoins());
-      const state = store.getState();
-      const wallet = state.wallets.allWallets[0];
-      expect(wallet.coins[0].totalAmount).toEqual('10.0');
+
+      const wallet = store.getState().wallets.allWallets[0];
+      expect(wallet.coins.map(coin => coin.totalAmount)).toEqual([
+        '10.0',
+        '20.0',
+      ]);
+      expect(wallet.coins.map(coin => coin.address)).toEqual([
+        '0xEthAddress',
+        '0xPolygonAddress',
+      ]);
     });
     describe('wallets slice', () => {
       it('handles createWallet.fulfilled', async () => {
