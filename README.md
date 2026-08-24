@@ -32,6 +32,11 @@ Current seams: `utils/toast`, `utils/common`, `utils/wlData`,
 `utils/electrumTransport`, `myWallet/wallet.service`,
 `myWallet/wallet-lightning.service`, `redux/store`, `data/currency`.
 
+`utils/electrumServer` is *not* a seam, despite the mention in
+`config/electrumServers.js`: nothing here imports it, and it exists only in
+`web_wallet`, as internal plumbing behind that app's `utils/electrumTransport`.
+Mobile ships no counterpart and needs none.
+
 Conventions: `src/utils/<lowerCamelCase>.js` for helpers,
 `src/myWallet/<name>.service.js` for key/wallet bridges; named exports only, no
 default export; colocated `<name>.test.js`. Keep the two implementations'
