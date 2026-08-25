@@ -1006,13 +1006,14 @@ export async function fetchRequest(url, options) {
   } catch (e) {
     // Surface the provider's own error message instead of a bare status code
     const body = e?.response?.data;
-    const detail =
+    const errorMessage =
       body?.error?.message ||
       body?.message ||
       body?.detail ||
       body?.title ||
       body?.error ||
       (typeof body === 'string' && body.trim().slice(0, 200));
+    const detail = typeof candidate === 'string' ? errorMessage : null;
     if (detail) {
       e.message = `${detail} (status ${e.response.status})`;
     }

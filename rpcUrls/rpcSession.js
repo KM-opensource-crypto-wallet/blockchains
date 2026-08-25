@@ -89,11 +89,14 @@ export const withRpcSessionFetch =
     if (!isRpcProxyUrl(url)) {
       return baseFetch(url, options);
     }
-    const send = extra =>
-      baseFetch(url, {
-        ...options,
-        headers: {...(options.headers || {}), ...(extra || {})},
-      });
+    const send = extra => {
+      // Headers instances lose their entries when spread, so merge via Headers
+      const headers = new Headers(options.headers || {});
+      Object.entries(extra || {}).forEach(([key, value]) =>
+        headers.set(key, value),
+      );
+      return baseFetch(url, {...options, headers});
+    };
     const sessionHeaders = await getRpcSessionHeaders(url);
     const response = await send(sessionHeaders);
     if (response.status !== 401) {
