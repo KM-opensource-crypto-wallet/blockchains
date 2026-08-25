@@ -71,6 +71,7 @@ import {
   MORALIS_CHAIN_TO_CHAIN,
   NFT_SUPPORTED_CHAIN,
 } from 'dok-wallet-blockchain-networks/helper';
+import {derivePrivateKeyForPath} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
@@ -162,8 +163,14 @@ export const RELOCK_OPTIONS = {
   MANUAL: 'MANUAL',
 };
 
+const findWalletByClientId = (state, clientId) =>
+  state.allWallets.find(wallet => wallet?.clientId === clientId);
+
+// Mutating callers rely on always getting an object back. Use
+// findWalletByClientId when you need to know whether the wallet exists —
+// the {} fallback here is truthy and will defeat an existence check.
 const getWalletByClientId = (state, clientId) =>
-  state.allWallets.find(wallet => wallet?.clientId === clientId) || {};
+  findWalletByClientId(state, clientId) || {};
 
 const getCurrentWallet = state =>
   getWalletByClientId(state, state.currentWalletClientId);
@@ -223,6 +230,11 @@ export const createWallet = createAsyncThunk(
     };
     let isFromImportWallet = !!walletData.phrase || !!walletData?.privateKey;
     let isImportWalletWithPrivateKey = !!walletData?.privateKey;
+    // A mnemonic generated in-app (below) can never have been used with the
+    // old nonstandard bitcoin derivation scheme, so its coins skip the legacy
+    // window entirely. Imported phrases/keys must be scanned instead.
+    walletData.isLegacyFree = !isFromImportWallet;
+    newStoreWallet.isLegacyFree = !isFromImportWallet;
     let privateKey = null;
     let address = null;
     let chain_name = null;
@@ -463,12 +475,14 @@ export const addToken = createAsyncThunk(
         })) || [];
     }
 
+    let legacyScanDone = false;
     if (isBitcoin) {
       const resp = (await nativeCoin.getBalance?.()) || 0;
       balance = resp?.totalBalance || 0;
       if (Array.isArray(resp?.deriveAddresses)) {
         deriveAddresses = resp?.deriveAddresses;
       }
+      legacyScanDone = !!resp?.isLegacyScanDone;
     } else {
       balance = (await nativeCoin.getBalance?.()) || 0;
     }
@@ -506,6 +520,9 @@ export const addToken = createAsyncThunk(
     };
     if (isBitcoin) {
       coinObj.deriveAddresses = deriveAddresses;
+      if (legacyScanDone || currentWallet?.isLegacyFree) {
+        coinObj.isLegacyScanDone = true;
+      }
     }
     coinObj = addExistingDeriveAddress(currentWallet, coinObj);
     if (currentWallet.clientId) {
@@ -1843,11 +1860,12 @@ export const addCustomDeriveAddress = createAsyncThunk(
         payload?.chain_name || selectCurrentCoin(currentState)?.chain_name;
       const currentDeriveAddresses =
         selectCurrentCoin(currentState)?.deriveAddresses;
-      if (
-        isBitcoinChain(chain_name) &&
-        Array.isArray(currentDeriveAddresses) &&
-        currentDeriveAddresses.length >= 100
-      ) {
+      // Cap counts only user-created custom derivations — automatic
+      // gap-limit discovery can legitimately grow the full list past 100.
+      const customDeriveAddressCount = Array.isArray(currentDeriveAddresses)
+        ? currentDeriveAddresses.filter(item => item?.isCustom).length
+        : 0;
+      if (isBitcoinChain(chain_name) && customDeriveAddressCount >= 100) {
         showToast({
           type: 'errorToast',
           title: 'Limit reached',
@@ -2077,7 +2095,7 @@ export const walletsSlice = createSlice({
     },
     setCurrentWalletClientId: (state, action) => {
       const clientId = action.payload;
-      if (!getWalletByClientId(state, clientId)) {
+      if (!findWalletByClientId(state, clientId)) {
         throw new Error(
           `setCurrentWalletClientId: missing or invalid action payload: ${clientId}`,
         );
@@ -2103,7 +2121,7 @@ export const walletsSlice = createSlice({
       if (clientId === state.currentWalletClientId) {
         throw new Error('cannot deleted because it is selected wallet');
       }
-      if (!getWalletByClientId(state, clientId)) {
+      if (!findWalletByClientId(state, clientId)) {
         throw new Error('wallet not available');
       }
       state.allWallets = allWallets.filter(item => item?.clientId !== clientId);
@@ -2223,10 +2241,30 @@ export const walletsSlice = createSlice({
           subItem => subItem?.address === address,
         );
         if (item?.chain_name === chain_name && isFoundWallet) {
+          let privateKey = isFoundWallet?.privateKey;
+          if (!privateKey) {
+            // Watch-only (xpub-derived) entry: self-heal by deriving its key
+            // from the account xprv, otherwise the coin loses its privateKey
+            // and gets re-created (resetting the selection) on next refresh.
+            privateKey = derivePrivateKeyForPath({
+              chain_name,
+              extendedPrivateKey: item?.extendedPrivateKey,
+              derivePath: isFoundWallet?.derivePath,
+            });
+          }
+          const healedDeriveAddresses =
+            privateKey && !isFoundWallet?.privateKey
+              ? allDeriveAddresses.map(subItem =>
+                  subItem?.address === address
+                    ? {...subItem, privateKey}
+                    : subItem,
+                )
+              : item?.deriveAddresses;
           return {
             ...item,
+            deriveAddresses: healedDeriveAddresses,
             address: isFoundWallet?.address,
-            privateKey: isFoundWallet?.privateKey,
+            privateKey: privateKey || undefined,
           };
         }
         return item;

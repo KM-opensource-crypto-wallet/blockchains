@@ -9,7 +9,7 @@ const chainName = {
   ltc: 'litecoin',
 };
 
-const parseBlockchainTransactions = (txs, walletAddresses) => {
+export const parseBlockchainTransactions = (txs, walletAddresses) => {
   // Convert wallet addresses to lowercase Set for fast lookup
   const walletSet = new Set(walletAddresses.map(addr => addr.toLowerCase()));
 

@@ -147,11 +147,11 @@ export const getCoin = async (
   if (coin?.type === 'token' && coin.contractAddress) {
     return await getTokenCoin(chain, wallet, coin, transactionFee);
   } else {
-    return await getBaseCoin(chain, wallet, coin);
+    return await getBaseCoin(chain, wallet, coin, walletData);
   }
 };
 
-const getBaseCoin = async (chain, wallet, coin) => {
+const getBaseCoin = async (chain, wallet, coin, walletData) => {
   // Prefer coin's stored deriveAddresses (from Redux); fall back to native wallet result
   const effectiveDeriveAddresses = wallet?.isNew
     ? mergeUniqueAccounts(coin?.deriveAddresses, wallet?.deriveAddresses)
@@ -173,6 +173,9 @@ const getBaseCoin = async (chain, wallet, coin) => {
         extendedPublicKey: wallet.extendedPublicKey,
         deriveAddresses: effectiveDeriveAddresses,
         chain_name: coin?.chain_name,
+        isLegacyScanDone: !!(
+          coin?.isLegacyScanDone || walletData?.isLegacyFree
+        ),
       }),
     getStakingBalance: async () =>
       await chain.getStakingBalance({

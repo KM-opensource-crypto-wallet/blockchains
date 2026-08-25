@@ -127,6 +127,10 @@ export const calculateEstimateFee = createAsyncThunk(
         selectedWallet,
       );
       if (!nativeCoin) {
+        // setCurrentTransferLoading(true) already ran, so returning
+        // without resolving it would pin Transfer on its spinner forever
+        // and make the error view unreachable.
+        dispatch(setCurrentTransferSuccess(false));
         return null;
       }
 
@@ -168,6 +172,16 @@ export const calculateEstimateFee = createAsyncThunk(
           feeMultiplier: multiplier[chain_name],
           additionalL1Fee: additionalL1Fee[chain_name],
         });
+      }
+      // A chain that resolves without a fee has failed even though it did not
+      // throw. Without this the thunk prices the transaction off
+      // `new BigNumber(undefined)` -- NaN, silently -- and reports success, so
+      // Transfer renders the form instead of its error view. `== null` is
+      // deliberate: a real fee of 0 / '0' must still go through.
+      if (!respData || respData.fee == null) {
+        console.error('Estimate returned no fee', {chain_name, respData});
+        dispatch(setCurrentTransferSuccess(false));
+        return null;
       }
       const estimateGas = respData?.estimateGas;
       const gasFee = respData?.gasFee;
