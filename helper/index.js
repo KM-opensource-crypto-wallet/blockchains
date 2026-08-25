@@ -379,13 +379,9 @@ export const isValidatorSupportCreateStakingScreen = chain_name =>
 export const isHaveResourceTypeInCreateStakingScreen = chain_name =>
   SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN.includes(chain_name);
 
-const layer2Chains = [
-  // 'arbitrum',
-  'base',
-  'optimism',
-  'optimism_binance_smart_chain',
-  'ink',
-];
+const layer2Chains = Object.keys(CHAIN_CONFIG).filter(
+  chain_name => CHAIN_CONFIG[chain_name].gas_oracle,
+);
 
 export const isLayer2Chain = chain_name => layer2Chains.includes(chain_name);
 
@@ -582,15 +578,11 @@ export const resourcesData = Object.fromEntries(
     ]),
 );
 
-export const NFT_SUPPORTED_CHAIN = [
-  'Ethereum',
-  'BSC',
-  'Polygon',
-  'Solana',
-  'Arbitrum',
-  'Base',
-  'Optimism',
-];
+// NFTs are fetched via Moralis, so the supported chains are exactly the ones
+// with a moralis entry (the display keys the Moralis map uses)
+export const NFT_SUPPORTED_CHAIN = chainEntries
+  .filter(([, chainConfig]) => chainConfig.moralis)
+  .map(([, chainConfig]) => chainConfig.moralis.key);
 
 // Custom-derivation path templates and chain logos — both apps consume these
 // (each app's 'assets' alias resolves the logo files to its own bundle).

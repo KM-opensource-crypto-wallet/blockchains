@@ -2,6 +2,7 @@ import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
 import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
+  CHAIN_CONFIG,
   CHAIN_ID,
   GAS_ORACLE_CONTRACT_ADDRESS,
   IS_SANDBOX,
@@ -85,25 +86,6 @@ const ERC20_SELECTORS = new Set([
   '0x23b872dd', // transferFrom(address,address,uint256) — ambiguous, treat as non-NFT
 ]);
 
-const STAKING_CONTRACTS = {
-  ethereum: {
-    '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2': 'stake', // Aave V3 Pool
-    '0x3afdc9bca9213a35503b077a6072f3d0d5ab0840': 'stake', // Compound USDT
-    '0xc3d688b66703497daa19211eedff47f25384cdc3': 'stake', // Compound USDC
-    '0x1b0e765f6224c21223aea2af16c1c46e38885a40': 'stake', // Compound comet reward
-    '0x5c20b550819128074fd538edf79791733ccedd18': 'stake', // Fluid USDT
-    '0x9fb7b4477576fe5b32be4c1843afb1e55f251b33': 'stake', // Fluid USDC
-    '0xdad4e51d64c3b65a9d27ad9f3185b09449712065': 'stake', // Morpho USDT
-    '0xbeef01735c132ada46aa9aa4c54623caa92a64cb': 'stake', // Morpho USDC
-    '0xe2e7a17dff93280dec073c995595155283e3c372': 'stake', // Spark USDT
-    '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d': 'stake', // Spark USDC
-    '0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d': 'stake', // maple USDT
-    '0xf007476bb27430795138c511f18f821e8d1e5ee2': 'stake', //  maple USDC
-    '0xdac17f958d2ee523a2206206994597c13d831ec7': 'stake', // USDT contract approve
-    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'stake', // USDC contract approve
-  },
-};
-
 function isApproveRevertError(err) {
   if (err?.code === 'CALL_EXCEPTION') return true;
   // L2 RPCs that omit `data` land here as UNKNOWN_ERROR
@@ -180,7 +162,7 @@ function getEVMTransactionType(item, isBatch, chainName) {
     input?.startsWith('0x') && input?.length >= 10
       ? input.slice(0, 10).toLowerCase()
       : '';
-  const chainContracts = STAKING_CONTRACTS[chainName] || {};
+  const chainContracts = CHAIN_CONFIG[chainName]?.staking_contracts || {};
   const contractType = chainContracts[toAddress];
 
   if (contractType) {
@@ -299,18 +281,10 @@ function decodeBatchTokenTransfer(input, contractAddress) {
   }
 }
 
-const FEES_BY_RPC_CHAINS = [
-  'viction',
-  'ethereum_classic',
-  'ethereum_pow',
-  'kava',
-  'ink',
-];
+const FEES_BY_RPC_CHAINS = Object.keys(CHAIN_CONFIG).filter(
+  name => CHAIN_CONFIG[name].fees_by_rpc,
+);
 const TIMEOUT = 45000;
-
-const ADDITIONAL_ESTIMATE_GAS = {
-  arbitrum: 100000n,
-};
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const premiumRpcUrl = customRpcUrl ? '' : getPremiumRPCUrl(chain_name);
@@ -324,7 +298,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const localErc20ABI =
     chain_name === 'binance_smart_chain' ? bep20Abi : erc20Abi;
 
-  const extraEstimate = ADDITIONAL_ESTIMATE_GAS[chain_name] || 0n;
+  const extraEstimate = CHAIN_CONFIG[chain_name]?.additional_estimate_gas || 0n;
 
   async function createAuthorization(wallet, nonce, delegationContractAddress) {
     return await wallet.authorize({

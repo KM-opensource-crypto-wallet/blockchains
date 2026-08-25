@@ -1,37 +1,26 @@
 import axios from 'axios';
 import {fetchRpcSession} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  CHAIN_CONFIG,
+  config,
+  IS_SANDBOX,
+  SCAN_PROXY_SERVICES,
+} from 'dok-wallet-blockchain-networks/config/config';
 
 const PREMIUM_CHAINS = {
-  mainnet: [
-    'ethereum',
-    'binance_smart_chain',
-    'polygon',
-    'base',
-    'arbitrum',
-    'optimism',
-    'optimism_binance_smart_chain',
-    'avalanche',
-    'gnosis',
-    'linea',
-    'ink',
-    'sei',
-    'tron',
-    'ton',
-    'solana',
-  ],
-  testnet: ['tron', 'ton'],
+  mainnet: Object.keys(CHAIN_CONFIG).filter(
+    chain_name => CHAIN_CONFIG[chain_name].premium?.mainnet,
+  ),
+  testnet: Object.keys(CHAIN_CONFIG).filter(
+    chain_name => CHAIN_CONFIG[chain_name].premium?.testnet,
+  ),
 };
 
 const SCAN_ONLY_CHAINS = [
-  'polkadot',
-  'ethereum_pow',
-  'cardano',
-  'etherscan',
-  'blockscout',
-  'coinmarketcap',
-  'moralis',
-  'blockdaemon',
+  ...Object.keys(CHAIN_CONFIG).filter(
+    chain_name => CHAIN_CONFIG[chain_name].scan_only,
+  ),
+  ...SCAN_PROXY_SERVICES,
 ];
 
 const NETWORK = IS_SANDBOX ? 'testnet' : 'mainnet';

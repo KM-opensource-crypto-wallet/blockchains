@@ -3,6 +3,7 @@ export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 11155111,
       production: 1,
@@ -62,6 +63,22 @@ export const CHAIN_CONFIG = {
       order: 11,
     },
     staking_keys: ['usdt', 'usdc'],
+    staking_contracts: {
+      '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2': 'stake', // Aave V3 Pool
+      '0x3afdc9bca9213a35503b077a6072f3d0d5ab0840': 'stake', // Compound USDT
+      '0xc3d688b66703497daa19211eedff47f25384cdc3': 'stake', // Compound USDC
+      '0x1b0e765f6224c21223aea2af16c1c46e38885a40': 'stake', // Compound comet reward
+      '0x5c20b550819128074fd538edf79791733ccedd18': 'stake', // Fluid USDT
+      '0x9fb7b4477576fe5b32be4c1843afb1e55f251b33': 'stake', // Fluid USDC
+      '0xdad4e51d64c3b65a9d27ad9f3185b09449712065': 'stake', // Morpho USDT
+      '0xbeef01735c132ada46aa9aa4c54623caa92a64cb': 'stake', // Morpho USDC
+      '0xe2e7a17dff93280dec073c995595155283e3c372': 'stake', // Spark USDT
+      '0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d': 'stake', // Spark USDC
+      '0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d': 'stake', // maple USDT
+      '0xf007476bb27430795138c511f18f821e8d1e5ee2': 'stake', //  maple USDC
+      '0xdac17f958d2ee523a2206206994597c13d831ec7': 'stake', // USDT contract approve
+      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'stake', // USDC contract approve
+    },
     staking_validators_screen: true,
     unstaking_button: true,
     address_name_support: true,
@@ -90,6 +107,7 @@ export const CHAIN_CONFIG = {
     },
   },
   binance_smart_chain: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 97,
       production: 56,
@@ -144,6 +162,7 @@ export const CHAIN_CONFIG = {
     },
   },
   polygon: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 80002,
       production: 137,
@@ -205,6 +224,8 @@ export const CHAIN_CONFIG = {
     },
   },
   base: {
+    additional_l1_fee: 500000000000,
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 84532,
       production: 8453,
@@ -264,6 +285,8 @@ export const CHAIN_CONFIG = {
     },
   },
   optimism: {
+    additional_l1_fee: 500000000000,
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 11155420,
       production: 10,
@@ -318,6 +341,8 @@ export const CHAIN_CONFIG = {
     },
   },
   arbitrum: {
+    additional_estimate_gas: 100000n,
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 421614,
       production: 42161,
@@ -371,6 +396,8 @@ export const CHAIN_CONFIG = {
     },
   },
   optimism_binance_smart_chain: {
+    additional_l1_fee: 500000000000,
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 5611,
       production: 204,
@@ -423,6 +450,7 @@ export const CHAIN_CONFIG = {
     },
   },
   avalanche: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 43113,
       production: 43114,
@@ -518,6 +546,7 @@ export const CHAIN_CONFIG = {
     },
   },
   gnosis: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 10200,
       production: 100,
@@ -568,6 +597,7 @@ export const CHAIN_CONFIG = {
     },
   },
   viction: {
+    fees_by_rpc: true,
     chain_id: {
       sandbox: 89,
       production: 88,
@@ -657,6 +687,7 @@ export const CHAIN_CONFIG = {
     },
   },
   linea: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 59141,
       production: 59144,
@@ -702,6 +733,7 @@ export const CHAIN_CONFIG = {
     },
   },
   ethereum_classic: {
+    fees_by_rpc: true,
     chain_id: {
       sandbox: 61,
       production: 61,
@@ -748,6 +780,8 @@ export const CHAIN_CONFIG = {
     },
   },
   ethereum_pow: {
+    fees_by_rpc: true,
+    scan_only: true,
     chain_id: {
       sandbox: 10001,
       production: 10001,
@@ -790,6 +824,7 @@ export const CHAIN_CONFIG = {
     },
   },
   kava: {
+    fees_by_rpc: true,
     chain_id: {
       sandbox: 2221,
       production: 2222,
@@ -831,6 +866,9 @@ export const CHAIN_CONFIG = {
     },
   },
   ink: {
+    fees_by_rpc: true,
+    additional_l1_fee: 500000000000,
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 763373,
       production: 57073,
@@ -883,6 +921,7 @@ export const CHAIN_CONFIG = {
     },
   },
   sei: {
+    premium: {mainnet: true},
     chain_id: {
       sandbox: 1328,
       production: 1329,
@@ -1011,6 +1050,7 @@ export const CHAIN_CONFIG = {
     },
   },
   tron: {
+    premium: {mainnet: true, testnet: true},
     supported: true,
     chain_loader: 'tron',
     rpc_urls: {
@@ -1080,6 +1120,7 @@ export const CHAIN_CONFIG = {
     },
   },
   solana: {
+    premium: {mainnet: true},
     supported: true,
     chain_loader: 'solana',
     free_rpc_urls: {
@@ -1143,6 +1184,7 @@ export const CHAIN_CONFIG = {
     },
   },
   bitcoin: {
+    fee_multiplier: {normal: 1.4, recommended: 1.65},
     supported: true,
     is_bitcoin: true,
     chain_loader: 'bitcoin',
@@ -1221,6 +1263,7 @@ export const CHAIN_CONFIG = {
     unclaim_deposit: true,
   },
   litecoin: {
+    fee_multiplier: {normal: 1.4, recommended: 1.65},
     supported: true,
     is_litecoin: true,
     chain_loader: 'doge_ltc',
@@ -1248,6 +1291,7 @@ export const CHAIN_CONFIG = {
     },
   },
   dogecoin: {
+    fee_multiplier: {normal: 1.4, recommended: 1.65},
     supported: true,
     chain_loader: 'doge_ltc',
     scan: {
@@ -1274,6 +1318,7 @@ export const CHAIN_CONFIG = {
     },
   },
   bitcoin_cash: {
+    fee_multiplier: {normal: 1.4, recommended: 1.65},
     supported: true,
     chain_loader: 'doge_ltc',
     scan: {
@@ -1328,6 +1373,7 @@ export const CHAIN_CONFIG = {
     logo: require('assets/chain_logo/cosmos.png'),
   },
   polkadot: {
+    scan_only: true,
     supported: true,
     chain_loader: 'polkadot',
     rpc_urls: {
@@ -1427,6 +1473,7 @@ export const CHAIN_CONFIG = {
     logo: require('assets/chain_logo/ripple.png'),
   },
   ton: {
+    premium: {mainnet: true, testnet: true},
     supported: true,
     chain_loader: 'ton',
     rpc_urls: {
@@ -1491,6 +1538,7 @@ export const CHAIN_CONFIG = {
     },
   },
   cardano: {
+    scan_only: true,
     supported: true,
     chain_loader: 'cardano',
     scan: {
@@ -1531,6 +1579,16 @@ export const CHAIN_CONFIG = {
 };
 const forEnv = value => (IS_SANDBOX ? value.sandbox : value.production);
 const scanBase = chain_name => forEnv(CHAIN_CONFIG[chain_name].scan);
+
+// Non-chain services also routed through the worker scan proxy (chains carry
+// their own `scan_only` flag in CHAIN_CONFIG).
+export const SCAN_PROXY_SERVICES = [
+  'etherscan',
+  'blockscout',
+  'coinmarketcap',
+  'moralis',
+  'blockdaemon',
+];
 export const CHAIN_ID = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
     .filter(([, cfg]) => cfg.chain_id)

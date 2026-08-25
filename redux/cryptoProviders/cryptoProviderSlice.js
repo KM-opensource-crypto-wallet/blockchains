@@ -8,6 +8,7 @@ import {
   formatExchangeArray,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getSelectedCountry} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
+import {CHAIN_CONFIG} from 'dok-wallet-blockchain-networks/config/config';
 
 const initialState = {
   providers: [],
@@ -22,28 +23,18 @@ const initialState = {
   disableMessage: '',
   google_analytics_key: '',
   exchangeProviders: '',
-  bitcoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  litecoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  dogecoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  bitcoin_cash_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  additional_l1_fees: {
-    base: 500000000000,
-    optimism: 500000000000,
-    optimism_binance_smart_chain: 500000000000,
-    ink: 500000000000,
-  },
+  bitcoin_fee_multiplier: {...CHAIN_CONFIG.bitcoin.fee_multiplier},
+  litecoin_fee_multiplier: {...CHAIN_CONFIG.litecoin.fee_multiplier},
+  dogecoin_fee_multiplier: {...CHAIN_CONFIG.dogecoin.fee_multiplier},
+  bitcoin_cash_fee_multiplier: {...CHAIN_CONFIG.bitcoin_cash.fee_multiplier},
+  additional_l1_fees: Object.fromEntries(
+    Object.entries(CHAIN_CONFIG)
+      .filter(([, chainConfig]) => chainConfig.additional_l1_fee)
+      .map(([chain_name, chainConfig]) => [
+        chain_name,
+        chainConfig.additional_l1_fee,
+      ]),
+  ),
 };
 
 export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
