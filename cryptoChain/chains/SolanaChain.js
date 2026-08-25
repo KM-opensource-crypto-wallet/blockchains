@@ -1072,7 +1072,11 @@ export const SolanaChain = () => {
           [address, {mint: contractAddress}, {encoding: 'jsonParsed'}],
           [],
         );
-        const tokenAccount = tokenAccounts.value[0].pubkey;
+        const tokenAccount = tokenAccounts?.value?.[0]?.pubkey;
+        if (!tokenAccount) {
+          // no token account for this mint — no transaction history yet
+          return [];
+        }
         let transactionList = await rpcRequest(
           'getSignaturesForAddress',
           [tokenAccount, {limit: 20}],

@@ -17,7 +17,12 @@ export const getMoralis = () => {
       apiKey: 'proxied',
       evmApiBaseUrl: buildScanProxyUrl('moralis'),
       solApiBaseUrl: buildScanProxyUrl('moralis_solana'),
-    }).then(() => Moralis);
+    })
+      .then(() => Moralis)
+      .catch(e => {
+        moralisStarted = null;
+        throw e;
+      });
   }
   return moralisStarted;
 };

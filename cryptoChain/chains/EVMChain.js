@@ -1522,7 +1522,9 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               ]),
               rpcRequest('eth_blockNumber', []),
             ]);
-            blockTimestamp = block?.timestamp ?? null;
+            blockTimestamp = block?.timestamp
+              ? Number.parseInt(block.timestamp, 16)
+              : null;
             confirmations =
               parseInt(latestBlockHex, 16) - receipt.blockNumber + 1;
           } catch (e) {
