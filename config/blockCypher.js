@@ -6,8 +6,5 @@ export const BlockCypherAPI = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  // params: {
-  //   token: config.BLOCK_CYPHER_API_KEY,
-  // },
   timeout: 30000,
 });

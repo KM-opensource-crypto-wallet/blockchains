@@ -1615,7 +1615,6 @@ export const config = {
   STAKE_WIZ_BASE_URL: CHAIN_CONFIG.solana.stake_wiz_base_url,
   COSMOS_SCAN_URL: scanBase('cosmos'),
   COSMOS_SCAN_BASE_URL: CHAIN_CONFIG.cosmos.scan_api_base_url,
-  COSMOS_API_KEY: CHAIN_CONFIG.cosmos.scan_api_key,
   COSMOS_REST_BASE_URL: CHAIN_CONFIG.cosmos.rest_base_url,
   VICTION_SCAN_API_URL: forEnv(CHAIN_CONFIG.viction.scan_api_url),
   POLKADOT_SCAN_URL: scanBase('polkadot'),
