@@ -2046,9 +2046,14 @@ export const walletsSlice = createSlice({
       }
       state.allWallets = newWallets;
     },
-    setBackedUp: state => {
-      const currentWallet = getCurrentWallet(state);
-      currentWallet.isBackedup = true;
+    // clientId lets this mark a wallet other than the active one as backed up
+    // (e.g. confirming a backup from that wallet's Edit screen) - defaults to
+    // the active wallet when omitted.
+    setBackedUp: (state, {payload}) => {
+      const wallet = payload?.clientId
+        ? getWalletByClientId(state, payload.clientId)
+        : getCurrentWallet(state);
+      wallet.isBackedup = true;
     },
     setCurrentCoin: (state, action) => {
       const currentWallet = getCurrentWallet(state);
