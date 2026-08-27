@@ -375,16 +375,6 @@ export const getWhiteLabelInfo = async domain => {
     throw e;
   }
 };
-export const getCurrencyRate = async payload => {
-  try {
-    const resp = await DokApi.post('/get-currency-rate', payload);
-    return {status: resp?.status, data: resp?.data?.data};
-  } catch (e) {
-    console.error('Error in get getCurrencyRate', JSON.stringify(e));
-    throw e;
-  }
-};
-
 export const getExchangeQuote = async payload => {
   try {
     const resp = await DokApi.post('/exchange-quote', payload);

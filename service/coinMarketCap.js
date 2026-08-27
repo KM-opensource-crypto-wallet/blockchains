@@ -1,24 +1,8 @@
 import {CoinMarketCapAPI} from 'dok-wallet-blockchain-networks/config/coinMarketCap';
 import dayjs from 'dayjs';
-import {getCurrencyRate} from 'dok-wallet-blockchain-networks/service/dokApi';
-import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
 
 let priceInfo = {};
 let lastCallTimeStamp;
-
-const fetchWithRetry = async (symbol, currency) => {
-  try {
-    return await CoinMarketCapAPI.get('/cryptocurrency/quotes/latest', {
-      params: {
-        symbol,
-        convert: currency,
-      },
-    });
-  } catch (e) {
-    console.log('Error in cmc api:', e?.response?.data);
-    return {};
-  }
-};
 
 export const getPrice = async (symbol, currency) => {
   try {
@@ -27,7 +11,6 @@ export const getPrice = async (symbol, currency) => {
       dayjs().diff(dayjs(lastCallTimeStamp), 'minutes') > 5
     ) {
       lastCallTimeStamp = new Date();
-      let resp;
       const cleanedSymbols = symbol
         .split(',')
         .map(s =>
@@ -39,16 +22,13 @@ export const getPrice = async (symbol, currency) => {
         .filter(Boolean)
         .filter((v, i, arr) => arr.indexOf(v) === i) // remove duplicates
         .join(',');
-      if (isWeb) {
-        resp = await getCurrencyRate({cleanedSymbols, currency});
-        priceInfo = resp?.data;
-      } else {
-        resp = await fetchWithRetry(cleanedSymbols, currency);
-        priceInfo = {
-          ...priceInfo,
-          ...formatCurrencyPrice(resp?.data?.data, currency),
-        };
-      }
+      const resp = await CoinMarketCapAPI.get('/cryptocurrency/quotes/latest', {
+        params: {symbol: cleanedSymbols, convert: currency},
+      });
+      priceInfo = {
+        ...priceInfo,
+        ...formatCurrencyPrice(resp?.data?.data, currency),
+      };
     }
     return priceInfo;
   } catch (e) {
