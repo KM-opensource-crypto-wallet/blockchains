@@ -32,7 +32,7 @@ export const FilecoinChain = chain_name => {
       } catch (e) {
         console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;
@@ -49,7 +49,7 @@ export const FilecoinChain = chain_name => {
       } catch (e) {
         console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;

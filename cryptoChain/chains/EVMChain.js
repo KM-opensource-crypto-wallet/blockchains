@@ -736,7 +736,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               autoHide: true,
             });
           }
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;
@@ -1152,11 +1152,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         }
       }, {}),
     getBalance: async ({address}) => {
-      const balanceWei = await rpcRequest('eth_getBalance', [
-        address,
-        'latest',
-      ]);
-      return BigInt(balanceWei).toString();
+      const balanceWei = await rpcRequest(
+        'eth_getBalance',
+        [address, 'latest'],
+        '0',
+      );
+      return BigInt(balanceWei || 0).toString();
     },
     getEstimateFeeForBatchTransaction: async ({
       calls,

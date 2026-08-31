@@ -115,7 +115,7 @@ export const TronChain = () => {
           e,
         );
         if (i === providers.length - 1) {
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;
@@ -152,7 +152,7 @@ export const TronChain = () => {
           throw e;
         }
         if (i === providers.length - 1) {
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;

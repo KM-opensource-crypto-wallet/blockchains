@@ -227,9 +227,9 @@ export const SolanaChain = () => {
         }
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
-            return defaultResponse;
-          } else {
             throw e;
+          } else {
+            return defaultResponse;
           }
         }
       }
@@ -248,9 +248,9 @@ export const SolanaChain = () => {
         console.log('Error for solana rpc', rpcs[i], 'Errors:', e);
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
-            return defaultResponse;
-          } else {
             throw e;
+          } else {
+            return defaultResponse;
           }
         }
       }
@@ -281,9 +281,9 @@ export const SolanaChain = () => {
         console.log('Error for solana rpc', rpcs[i], 'Errors:', e);
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
-            return defaultResponse;
-          } else {
             throw e;
+          } else {
+            return defaultResponse;
           }
         }
       }
