@@ -25,8 +25,8 @@ export const getDogecoinFeeMultiplier = state =>
 export const getBitcoinCashFeeMultiplier = state =>
   state?.cryptoProvider?.bitcoin_cash_fee_multiplier || {};
 
-export const getAdditionalL1Fee = state =>
-  state?.cryptoProvider?.additional_l1_fees || {};
+export const getAdditionalL1FeePercentage = state =>
+  state?.cryptoProvider?.additional_l1_fee_percentages || {};
 
 export const getGoogleAnalyticsKey = state =>
   state?.cryptoProvider?.google_analytics_key;

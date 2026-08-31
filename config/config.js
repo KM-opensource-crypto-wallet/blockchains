@@ -36,12 +36,6 @@ export const CHAIN_CONFIG = {
     gas_fee_options: true,
     gas_currency: 'Gwei',
     fees_options: true,
-    fees_info: {
-      multiplier: {
-        testnet: 1.3,
-        mainnet: 1.3,
-      },
-    },
     eip_7702: true,
     derive_index: 4,
     derivation_paths: [
@@ -193,12 +187,6 @@ export const CHAIN_CONFIG = {
     },
     scan_service: 'polygon',
     tx_hash_path: 'hash',
-    fees_info: {
-      multiplier: {
-        testnet: 1.3,
-        mainnet: 1.3,
-      },
-    },
     private_key_list: {
       label: 'Polygon',
       order: 25,
@@ -224,7 +212,7 @@ export const CHAIN_CONFIG = {
     },
   },
   base: {
-    additional_l1_fee: 500000000000,
+    additional_l1_fee_percentage: 30,
     premium: {mainnet: true},
     chain_id: {
       sandbox: 84532,
@@ -285,7 +273,7 @@ export const CHAIN_CONFIG = {
     },
   },
   optimism: {
-    additional_l1_fee: 500000000000,
+    additional_l1_fee_percentage: 30,
     premium: {mainnet: true},
     chain_id: {
       sandbox: 11155420,
@@ -396,7 +384,7 @@ export const CHAIN_CONFIG = {
     },
   },
   optimism_binance_smart_chain: {
-    additional_l1_fee: 500000000000,
+    additional_l1_fee_percentage: 30,
     premium: {mainnet: true},
     chain_id: {
       sandbox: 5611,
@@ -423,12 +411,6 @@ export const CHAIN_CONFIG = {
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
-    fees_info: {
-      max_priority_fee: {
-        testnet: 1001,
-        mainnet: 1001,
-      },
-    },
     gas_oracle: '0x420000000000000000000000000000000000000F',
     private_key_list: {
       label: 'Optimism Binance Smart Chain',
@@ -867,7 +849,7 @@ export const CHAIN_CONFIG = {
   },
   ink: {
     fees_by_rpc: true,
-    additional_l1_fee: 500000000000,
+    additional_l1_fee_percentage: 30,
     premium: {mainnet: true},
     chain_id: {
       sandbox: 763373,

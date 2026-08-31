@@ -40,10 +40,6 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
 import {ErrorDecoder} from 'ethers-decode-error';
-import {
-  getFeesMultiplier,
-  getMaxPriorityFee,
-} from 'dok-wallet-blockchain-networks/feesInfo/feesInfo';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 
@@ -54,6 +50,14 @@ const errorDecoder = {
 };
 
 const BATCH_EXECUTE_SELECTOR = '0x3f707e6b';
+
+// Placeholder 65-byte signature used only to size the tx for GasPriceOracle
+// getL1Fee. Arbitrary high-entropy bytes; `s` kept in the low half so ethers
+// accepts it as canonical.
+const L1_FEE_PLACEHOLDER_SIGNATURE_R =
+  '0x8a3d1f7e2b9c4056d7e1a2f3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7';
+const L1_FEE_PLACEHOLDER_SIGNATURE_S =
+  '0x1b6e9d2c5f8a3b7e4d1c0f9a8b7e6d5c4b3a29181706f5e4d3c2b1a09f8e7d6c';
 
 const UNSTAKE_FUNCTION_KEYWORDS = [
   'unstake',
@@ -375,29 +379,38 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     if (!gasPriceNumber) {
       throw new Error('Fee data not available');
     }
-    let bnGasPrice = new BigNumber(gasPriceNumber);
-    const bnMultiplyGasPrice = bnGasPrice.multipliedBy(
-      getFeesMultiplier(chain_name),
-    );
+    const bnGasPrice = new BigNumber(gasPriceNumber);
+    // Under EIP-1559 the cap is ethers' heuristic `2 * baseFee + tip`
+    // (feeData.maxFeePerGas); the explorer/RPC gasPrice only raises it. No
+    // flat multiplier: inflating maxFeePerGas does not speed inclusion, it
+    // just overstates the displayed/reserved fee, so EVM chains expose a
+    // single Recommended preset (plus Custom in the UI).
     const maxFeeWei =
       feeData?.maxFeePerGas != null ? BigInt(feeData.maxFeePerGas) : 0n;
     const floorToMaxFee = wei => (wei < maxFeeWei ? maxFeeWei : wei);
-    const recommendedWei = floorToMaxFee(BigInt(bnMultiplyGasPrice.toFixed(0)));
-    const normalWei = floorToMaxFee(BigInt(bnGasPrice.toFixed(0)));
+    const gasPriceWei = floorToMaxFee(BigInt(bnGasPrice.toFixed(0)));
     const feesOptions = [
       {
         title: 'Recommended',
-        gasPrice: parseBalance(recommendedWei.toString(), 9),
-      },
-      {
-        title: 'Normal',
-        gasPrice: parseBalance(normalWei.toString(), 9),
+        gasPrice: parseBalance(gasPriceWei.toString(), 9),
       },
     ];
-    const finalGasPrice = feesType === 'normal' ? normalWei : recommendedWei;
+    const finalGasPrice = gasPriceWei;
 
-    let maxPriorityFeePerGas =
-      feeData?.maxPriorityFeePerGas || getMaxPriorityFee(chain_name);
+    let maxPriorityFeePerGas = feeData?.maxPriorityFeePerGas ?? null;
+    if (maxPriorityFeePerGas == null && !isEip1559NotSupported(chain_name)) {
+      // ethers' getFeeData() returns null EIP-1559 fields when the latest
+      // block's baseFeePerGas is 0 (e.g. opBNB) even though the node serves
+      // eth_maxPriorityFeePerGas. Leaving it null would make ethers sign a
+      // type-2 tx with a 0 tip -> underpriced. Ask the node directly.
+      try {
+        maxPriorityFeePerGas = BigInt(
+          await evmProvider.send('eth_maxPriorityFeePerGas', []),
+        );
+      } catch (e) {
+        console.error('eth_maxPriorityFeePerGas unavailable', chain_name, e);
+      }
+    }
 
     if (maxPriorityFeePerGas) {
       maxPriorityFeePerGas = validatePriorityFee(
@@ -406,10 +419,87 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       );
     }
 
+    // ethers derives feeData.maxFeePerGas as `2 * baseFee + priorityFee`, so
+    // the latest base fee is recoverable exactly without another RPC call.
+    // Null on legacy chains and on chains whose base fee is 0 (opBNB).
+    let baseFeePerGas = 0n;
+    if (
+      feeData?.maxFeePerGas != null &&
+      feeData?.maxPriorityFeePerGas != null
+    ) {
+      baseFeePerGas =
+        (BigInt(feeData.maxFeePerGas) - BigInt(feeData.maxPriorityFeePerGas)) /
+        2n;
+    }
+
     return {
       gasPrice: finalGasPrice,
       feesOptions,
       maxPriorityFeePerGas,
+      baseFeePerGas,
+    };
+  };
+
+  // geth (and every major client) only accepts a replacement for a pending
+  // nonce when BOTH maxFeePerGas and maxPriorityFeePerGas (or gasPrice on
+  // legacy chains) are >= 110% of the original tx. Pricing off the current
+  // market alone fails with "replacement transaction underpriced" whenever
+  // fees have dropped since the original was sent, so the original tx is the
+  // reference and the market is only a floor.
+  const REPLACEMENT_BUMP_NUMERATOR = 1125n; // 12.5% — headroom over the 10% rule
+  const REPLACEMENT_BUMP_DENOMINATOR = 1000n;
+  const getReplacementFees = async ({evmProvider, feesType, pendingTxHash}) => {
+    const market = await getEtherGasPrice(feesType, evmProvider);
+    let original = null;
+    if (pendingTxHash) {
+      try {
+        original = await evmProvider.getTransaction(pendingTxHash);
+      } catch (e) {
+        console.error('Unable to load pending tx for replacement', e);
+      }
+    }
+    const bump = value =>
+      (BigInt(value) * REPLACEMENT_BUMP_NUMERATOR) /
+      REPLACEMENT_BUMP_DENOMINATOR;
+    const maxBn = (a, b) => (a > b ? a : b);
+
+    if (isEip1559NotSupported(chain_name)) {
+      const originalPrice =
+        original?.gasPrice != null ? bump(original.gasPrice) : 0n;
+      return {gasPrice: maxBn(BigInt(market.gasPrice), originalPrice)};
+    }
+
+    // A legacy original on a 1559 chain has gasPrice acting as both fields.
+    const originalMax =
+      original?.maxFeePerGas != null
+        ? bump(original.maxFeePerGas)
+        : original?.gasPrice != null
+        ? bump(original.gasPrice)
+        : 0n;
+    const originalTip =
+      original?.maxPriorityFeePerGas != null
+        ? bump(original.maxPriorityFeePerGas)
+        : original?.gasPrice != null
+        ? bump(original.gasPrice)
+        : 0n;
+    const marketMax = BigInt(market.gasPrice);
+    const marketTip =
+      market.maxPriorityFeePerGas != null
+        ? BigInt(market.maxPriorityFeePerGas)
+        : 0n;
+
+    let maxFeePerGas = maxBn(marketMax, originalMax);
+    const maxPriorityFeePerGas = maxBn(marketTip, originalTip);
+    if (maxPriorityFeePerGas >= maxFeePerGas) {
+      // Keep the same base-fee headroom the market cap had above its tip.
+      maxFeePerGas = maxPriorityFeePerGas + (marketMax - marketTip);
+    }
+    return {
+      maxFeePerGas,
+      maxPriorityFeePerGas: validatePriorityFee(
+        maxPriorityFeePerGas,
+        maxFeePerGas,
+      ),
     };
   };
 
@@ -844,7 +934,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     tokenId,
     tokenAmount,
     contract_type,
-    additionalL1Fee = 0,
+    additionalL1FeePercentage = 0,
     nonce,
   }) => {
     const tx = new Transaction();
@@ -894,7 +984,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     if (transaction?.data) {
       tx.data = transaction?.data;
     }
-    const str = tx.unsignedSerialized;
+    // The sequencer charges the L1 data fee on the *signed* tx bytes, so
+    // estimate on a serialization that carries a signature-sized placeholder.
+    // Non-repeating bytes: Fjord's FastLZ size estimate would compress a run
+    // of 0x00/0xff far below what a real 65-byte signature costs.
+    tx.signature = {
+      r: L1_FEE_PLACEHOLDER_SIGNATURE_R,
+      s: L1_FEE_PLACEHOLDER_SIGNATURE_S,
+      yParity: 1,
+    };
+    const str = tx.serialized;
     const contractAddress = GAS_ORACLE_CONTRACT_ADDRESS[chain_name];
     const contract = new ethers.Contract(
       contractAddress,
@@ -902,8 +1001,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       evmProvider,
     );
     const l1Fees = await contract.getL1Fee(str);
-    const extraL1Bn = BigInt(new BigNumber(additionalL1Fee).toFixed(0));
-    return l1Fees + extraL1Bn;
+    // The L1 data fee is charged at inclusion time and is not capped by
+    // maxFeePerGas (EIP-1559 covers L2 execution gas only). The L1 base fee /
+    // blob base fee can each move up to 12.5% per L1 block between our
+    // estimate and inclusion, so reserve a proportional margin on top.
+    const percentageBn = new BigNumber(additionalL1FeePercentage || 0);
+    const percentageBuffer = BigInt(
+      new BigNumber(l1Fees.toString())
+        .multipliedBy(percentageBn)
+        .dividedBy(100)
+        .toFixed(0, BigNumber.ROUND_CEIL),
+    );
+    return l1Fees + percentageBuffer;
   };
 
   const calculateTotalFees = async ({
@@ -919,13 +1028,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     tokenAmount,
     contract_type,
     twiceFee,
-    additionalL1Fee,
+    additionalL1FeePercentage,
     ignoreLayer2,
     isFetchNonce,
     existingNonce,
     ignoreFetchingNonce,
   }) => {
-    const {gasPrice, feesOptions, maxPriorityFeePerGas} =
+    const {gasPrice, feesOptions, maxPriorityFeePerGas, baseFeePerGas} =
       await getEtherGasPrice(feesType, evmProvider);
     let level1Fees = 0n;
 
@@ -959,19 +1068,34 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         tokenId,
         tokenAmount,
         contract_type,
-        additionalL1Fee,
+        additionalL1FeePercentage,
         nonce: currentNonce,
       });
     }
     const safeEstimateGas = estimateGas != null ? BigInt(estimateGas) : 0n;
+    // `fee` is the worst case the wallet must reserve: gasLimit * maxFeePerGas.
+    // `estimatedFee` is what the sender will actually pay under EIP-1559:
+    // gasLimit * min(baseFee + tip, maxFeePerGas). On legacy chains both are
+    // the same because gasPrice is paid in full.
     const transactionFee = safeEstimateGas * finalGasPrice + level1Fees;
     const totalTransactionFee = parseBalance(transactionFee.toString(), 18);
+    let effectiveGasPrice = finalGasPrice;
+    if (!isEip1559NotSupported(chain_name) && maxPriorityFeePerGas != null) {
+      const marketPrice =
+        BigInt(baseFeePerGas ?? 0n) + BigInt(maxPriorityFeePerGas);
+      effectiveGasPrice =
+        marketPrice < finalGasPrice ? marketPrice : finalGasPrice;
+    }
+    const estimatedFeeWei = safeEstimateGas * effectiveGasPrice + level1Fees;
+    const estimatedFee = parseBalance(estimatedFeeWei.toString(), 18);
 
     return {
       fee: totalTransactionFee,
+      estimatedFee,
       gasFee: finalGasPrice,
       estimateGas: estimateGas,
       maxPriorityFeePerGas,
+      baseFeePerGas,
       feesOptions,
       l1Fees: level1Fees,
       nonce: currentNonce,
@@ -1098,7 +1222,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       decimals,
       privateKey,
       feesType,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
     }) =>
@@ -1125,7 +1249,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             fromAddress,
             toAddress,
             erc20TokenContract: contract,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -1144,7 +1268,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contract_type,
       tokenAmount,
       feesType,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
     }) =>
@@ -1200,7 +1324,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             tokenId,
             tokenAmount,
             contract_type,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -1214,7 +1338,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       toAddress,
       amount,
       feesType,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
     }) =>
@@ -1234,7 +1358,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             toAddress,
             value,
             feesType,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -1247,7 +1371,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       fromAddress,
       swapData,
       feesType,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
     }) =>
@@ -1287,7 +1411,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             toAddress: finalToAddress,
             value,
             feesType,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -1361,7 +1485,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       feesType,
       data,
       isCancelTransaction,
-      additionalL1Fee,
+      additionalL1FeePercentage,
     }) =>
       retryFunc(async evmProvider => {
         try {
@@ -1380,7 +1504,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             value,
             feesType,
             twiceFee: true,
-            additionalL1Fee,
+            additionalL1FeePercentage,
           });
         } catch (e) {
           const {reason} = await errorDecoder.decode(e);
@@ -1799,9 +1923,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             value: convertToSmallAmount(finalAmount, 18),
             gasLimit: finalEstimateGas,
             maxFeePerGas: finalGasPrice,
-            maxPriorityFeePerGas: isMax
-              ? finalGasPrice
-              : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice),
+            // Tip stays a tip even on max-send. Setting tip = cap would make
+            // the whole maxFeePerGas the effective price (~2x a normal send);
+            // the amount clamp already reserves gasLimit * maxFee, so the
+            // unspent cap is refunded as a few wei of dust instead.
+            maxPriorityFeePerGas: validatePriorityFee(
+              finalMaxPriorityFeePerGas,
+              finalGasPrice,
+            ),
             nonce,
           };
           if (isEip1559NotSupported(chain_name)) {
@@ -1820,7 +1949,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }
     },
 
-    cancelTransaction: async ({from, nonce, privateKey, feesType}) => {
+    cancelTransaction: async ({
+      from,
+      nonce,
+      privateKey,
+      feesType,
+      pendingTxHash,
+    }) => {
       try {
         const tx = await retryFunc(async evmProvider => {
           const finalEstimateGas = await evmProvider.estimateGas({
@@ -1828,23 +1963,24 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             to: from,
             data: '0x',
           });
-          const {gasPrice} = await getEtherGasPrice(feesType, evmProvider);
-          const twiceGasPrice = gasPrice * 2n;
+          const fees = await getReplacementFees({
+            evmProvider,
+            feesType,
+            pendingTxHash,
+          });
           const builtTx = {
-            type: 2,
             from: from,
             to: from,
             data: '0x',
             gasLimit: finalEstimateGas,
-            maxFeePerGas: twiceGasPrice,
-            maxPriorityFeePerGas: twiceGasPrice,
             nonce: nonce,
           };
           if (isEip1559NotSupported(chain_name)) {
-            delete builtTx.type;
-            delete builtTx.maxPriorityFeePerGas;
-            delete builtTx.maxFeePerGas;
-            builtTx.gasPrice = twiceGasPrice;
+            builtTx.gasPrice = fees.gasPrice;
+          } else {
+            builtTx.type = 2;
+            builtTx.maxFeePerGas = fees.maxFeePerGas;
+            builtTx.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
           }
           return builtTx;
         });
@@ -1863,6 +1999,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       privateKey,
       feesType,
       data,
+      pendingTxHash,
     }) => {
       try {
         const tx = await retryFunc(async evmProvider => {
@@ -1872,24 +2009,25 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             data: data,
             value: value,
           });
-          const {gasPrice} = await getEtherGasPrice(feesType, evmProvider);
-          const twiceGasPrice = gasPrice * 2n;
+          const fees = await getReplacementFees({
+            evmProvider,
+            feesType,
+            pendingTxHash,
+          });
           const builtTx = {
-            type: 2,
             from: from,
             to: to,
             data: data,
             value: value,
             gasLimit: finalEstimateGas,
-            maxFeePerGas: twiceGasPrice,
-            maxPriorityFeePerGas: twiceGasPrice,
             nonce: nonce,
           };
           if (isEip1559NotSupported(chain_name)) {
-            delete builtTx.type;
-            delete builtTx.maxPriorityFeePerGas;
-            delete builtTx.maxFeePerGas;
-            builtTx.gasPrice = twiceGasPrice;
+            builtTx.gasPrice = fees.gasPrice;
+          } else {
+            builtTx.type = 2;
+            builtTx.maxFeePerGas = fees.maxFeePerGas;
+            builtTx.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
           }
           return builtTx;
         });
@@ -2370,9 +2508,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           builtTx.gasLimit = estimateGas;
         }
         builtTx.maxFeePerGas = finalGasPrice;
-        builtTx.maxPriorityFeePerGas = isMax
-          ? finalGasPrice
-          : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice);
+        // Tip stays a tip on max-send (see `send`): tip = cap would pay the
+        // whole maxFeePerGas instead of baseFee + tip.
+        builtTx.maxPriorityFeePerGas = validatePriorityFee(
+          finalMaxPriorityFeePerGas,
+          finalGasPrice,
+        );
         if (isEip1559NotSupported(chain_name)) {
           delete builtTx.maxFeePerGas;
           delete builtTx.maxPriorityFeePerGas;
@@ -2428,9 +2569,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           builtTx.gasLimit = estimateGas;
         }
         builtTx.maxFeePerGas = finalGasPrice;
-        builtTx.maxPriorityFeePerGas = isMax
-          ? finalGasPrice
-          : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice);
+        // Tip stays a tip on max-send (see `send`): tip = cap would pay the
+        // whole maxFeePerGas instead of baseFee + tip.
+        builtTx.maxPriorityFeePerGas = validatePriorityFee(
+          finalMaxPriorityFeePerGas,
+          finalGasPrice,
+        );
         builtTx.nonce = nonce;
         if (isEip1559NotSupported(chain_name)) {
           delete builtTx.maxFeePerGas;
@@ -2468,7 +2612,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       decimals,
       privateKey,
       feesType,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
       stakingProviderName,
@@ -2496,7 +2640,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -2511,7 +2655,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       privateKey,
       feesType,
       stakingProviderName,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
       amount,
@@ -2544,7 +2688,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce,
           });
@@ -2561,7 +2705,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       contractAddress,
       feesType,
       stakingProviderName,
-      additionalL1Fee,
+      additionalL1FeePercentage,
       isFetchNonce,
       existingNonce,
     }) =>
@@ -2600,7 +2744,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             estimateGas: finalEstimateGas,
             fromAddress,
             toAddress,
-            additionalL1Fee,
+            additionalL1FeePercentage,
             isFetchNonce,
             existingNonce: currentNonce,
           });
@@ -3038,9 +3182,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             value: txValue,
             gasLimit: finalEstimateGas,
             maxFeePerGas: finalGasPrice,
-            maxPriorityFeePerGas: isMax
-              ? finalGasPrice
-              : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice),
+            // Tip stays a tip even on max-send. Setting tip = cap would make
+            // the whole maxFeePerGas the effective price (~2x a normal send);
+            // the amount clamp already reserves gasLimit * maxFee, so the
+            // unspent cap is refunded as a few wei of dust instead.
+            maxPriorityFeePerGas: validatePriorityFee(
+              finalMaxPriorityFeePerGas,
+              finalGasPrice,
+            ),
             nonce,
             ...(txData && {data: txData}),
           };
@@ -3214,9 +3363,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             type: 2,
             gasLimit: finalEstimateGas,
             maxFeePerGas: finalGasPrice,
-            maxPriorityFeePerGas: isMax
-              ? finalGasPrice
-              : validatePriorityFee(finalMaxPriorityFeePerGas, finalGasPrice),
+            // Tip stays a tip even on max-send. Setting tip = cap would make
+            // the whole maxFeePerGas the effective price (~2x a normal send);
+            // the amount clamp already reserves gasLimit * maxFee, so the
+            // unspent cap is refunded as a few wei of dust instead.
+            maxPriorityFeePerGas: validatePriorityFee(
+              finalMaxPriorityFeePerGas,
+              finalGasPrice,
+            ),
             nonce,
           },
         );

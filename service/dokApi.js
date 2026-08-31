@@ -215,18 +215,6 @@ export const fetchRpcSession = async () => {
   return resp?.data;
 };
 
-export const fetchFeesInfo = async () => {
-  try {
-    const resp = await DokApi.get('/get-fees-info', {
-      params: {is_sandbox: IS_SANDBOX},
-    });
-    return {status: resp?.status, data: resp?.data?.data};
-  } catch (e) {
-    console.error('Error in fetchFeesInfo', JSON.stringify(e));
-    throw e;
-  }
-};
-
 export const getBuyCryptoQuote = async payload => {
   try {
     const resp = await DokApi.post('/get-buy-crypto-quote', {

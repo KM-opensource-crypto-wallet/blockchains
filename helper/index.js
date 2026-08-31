@@ -356,6 +356,21 @@ export const isSwapBlockingError = message =>
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
+export const isEip1559Chain = chain_name =>
+  isEVMChain(chain_name) && !isEip1559NotSupported(chain_name);
+
+// Formats a wei value (BigInt/string/number) as a trimmed gwei string.
+// Returns null for null/undefined so callers can hide the row.
+export const weiToGwei = (wei, decimals = 9) => {
+  if (wei == null) {
+    return null;
+  }
+  return new BigNumber(wei.toString())
+    .dividedBy(1e9)
+    .toFixed(decimals)
+    .replace(/\.?0+$/, '');
+};
+
 export const isUnclaimDepositSupportedChain = chain_name =>
   UNCLAIM_DEPOSIT_SUPPORTED_CHAINS.includes(chain_name);
 
@@ -379,6 +394,11 @@ export const isValidatorSupportCreateStakingScreen = chain_name =>
 export const isHaveResourceTypeInCreateStakingScreen = chain_name =>
   SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN.includes(chain_name);
 
+// "Layer 2" here means an OP-Stack chain that exposes the GasPriceOracle
+// predeploy and charges the L1 data fee separately from execution gas.
+// Arbitrum / Arbitrum Orbit (robinhood), zkSync and Linea fold the L1 cost
+// into the gas the user already caps with maxFeePerGas, so they must NOT be
+// given a gas_oracle.
 const layer2Chains = Object.keys(CHAIN_CONFIG).filter(
   chain_name => CHAIN_CONFIG[chain_name].gas_oracle,
 );
