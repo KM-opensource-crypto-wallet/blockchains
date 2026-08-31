@@ -1106,11 +1106,7 @@ export const CHAIN_CONFIG = {
     supported: true,
     chain_loader: 'solana',
     free_rpc_urls: {
-      mainnet: [
-        'https://solana-mainnet.g.alchemy.com/v2/LqXKA4ZLdyCbWyPwtLqri3696CgruA0w',
-        'https://proud-quaint-patina.solana-mainnet.quiknode.pro/7955f2808766bd176ed1fe12d66abd88b33059dd',
-        'https://api.mainnet-beta.solana.com',
-      ],
+      mainnet: ['https://api.mainnet-beta.solana.com'],
       testnet: ['https://api.devnet.solana.com'],
     },
     scan: {
