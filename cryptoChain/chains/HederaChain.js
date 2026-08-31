@@ -41,7 +41,7 @@ const getClient = () => {
 const getNewClient = (localOperatorId, localPrivateKey) => {
   try {
     let tempClient = IS_SANDBOX ? Client.forTestnet() : Client.forMainnet();
-    tempClient = getClient().setOperator(
+    tempClient = tempClient.setOperator(
       localOperatorId,
       PrivateKey.fromStringECDSA(localPrivateKey),
     );
