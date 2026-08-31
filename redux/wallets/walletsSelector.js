@@ -38,6 +38,18 @@ export const selectCurrentWallet = state => {
   );
 };
 
+const EMPTY_SCHEDULED_PAYMENTS = [];
+
+export const selectScheduledPaymentsForCurrentWallet = state => {
+  const clientId = state.wallets?.currentWalletClientId;
+  if (!clientId) {
+    return EMPTY_SCHEDULED_PAYMENTS;
+  }
+  return (
+    state.wallets?.scheduledPayments?.[clientId] || EMPTY_SCHEDULED_PAYMENTS
+  );
+};
+
 export const getSelectedNftChain = state => {
   const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNftChain || 'Ethereum';
