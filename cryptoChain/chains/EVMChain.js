@@ -26,7 +26,6 @@ import {
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
-  fetchRPCRequest,
   getExplorerTxUrl,
   isEip1559NotSupported,
   isEip7702SupportedChain,
@@ -559,13 +558,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     const isLastIndex = allRpcUrls.length - 1;
     for (let i = 0; i < allRpcUrls.length; i++) {
       try {
-        const resp = await fetchRPCRequest(
-          allRpcUrls[i],
-          'eth_getTransactionByHash',
-          [txHash],
-        );
+        const retryEvmProvider = createRpcProvider(allRpcUrls[i]);
+        const resp = await retryEvmProvider.getTransaction(txHash);
         if (resp || i === isLastIndex) {
-          return formatTransaction(resp);
+          return resp;
         }
       } catch (e) {
         if (i === isLastIndex) {
@@ -579,13 +575,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     const isLastIndex = allRpcUrls.length - 1;
     for (let i = 0; i < allRpcUrls.length; i++) {
       try {
-        const resp = await fetchRPCRequest(
-          allRpcUrls[i],
-          'eth_getTransactionReceipt',
-          [txHash],
-        );
+        const retryEvmProvider = createRpcProvider(allRpcUrls[i]);
+        const resp = await retryEvmProvider.getTransactionReceipt(txHash);
         if (resp || i === isLastIndex) {
-          return formatStatus(resp);
+          return resp;
         }
       } catch (e) {
         if (i === isLastIndex) {
@@ -748,30 +741,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
   const retryFunc = (cb, defaultResponse) =>
     retryWithUrls(url => cb(createRpcProvider(url)), defaultResponse);
-
-  const rpcRequest = (method, params, defaultResponse) =>
-    retryWithUrls(url => fetchRPCRequest(url, method, params), defaultResponse);
-
-  const formatTransaction = tx =>
-    tx && {
-      hash: tx.hash,
-      from: tx.from,
-      to: tx.to,
-      data: tx.input,
-      nonce: parseInt(tx.nonce, 16),
-      value: BigInt(tx.value || 0),
-      gasPrice: tx.gasPrice ? BigInt(tx.gasPrice) : null,
-      blockNumber: tx.blockNumber ? parseInt(tx.blockNumber, 16) : null,
-    };
-
-  const formatStatus = receipt =>
-    receipt && {
-      blockNumber: receipt.blockNumber
-        ? parseInt(receipt.blockNumber, 16)
-        : null,
-      status: receipt.status != null ? parseInt(receipt.status, 16) : null,
-      gasUsed: receipt.gasUsed ? BigInt(receipt.gasUsed) : null,
-    };
 
   const createSendTransaction = async (wallet, tx) => {
     // Populate and sign ONCE so every RPC receives byte-identical raw bytes.
@@ -1151,14 +1120,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw e;
         }
       }, {}),
-    getBalance: async ({address}) => {
-      const balanceWei = await rpcRequest(
-        'eth_getBalance',
-        [address, 'latest'],
-        '0',
-      );
-      return BigInt(balanceWei || 0).toString();
-    },
+    getBalance: async ({address}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const balanceWei = await evmProvider.getBalance(address);
+          return balanceWei.toString();
+        } catch (e) {
+          console.error('error in get balance from ether', e);
+          throw e;
+        }
+      }, 0),
     getEstimateFeeForBatchTransaction: async ({
       calls,
       privateKey,
@@ -1514,25 +1485,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         }
       }, null),
     getTokenBalance: async ({address, contractAddress}) =>
-      retryWithUrls(async url => {
+      retryFunc(async evmProvider => {
         try {
-          if (!contractAddress) {
-            return '0';
+          const contract = new ethers.Contract(
+            contractAddress,
+            localErc20ABI,
+            evmProvider,
+          );
+          if (contract) {
+            const balance = await contract.balanceOf(address);
+            return balance.toString();
           }
-          // balanceOf(address) selector + the address
-          const data =
-            '0x70a08231' +
-            address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-          const result = await fetchRPCRequest(url, 'eth_call', [
-            {to: contractAddress, data},
-            'latest',
-          ]);
-          if (!result || result === '0x') {
-            throw new Error(
-              `could not decode result data (value="${result}") for balanceOf on ${contractAddress}`,
-            );
-          }
-          return BigInt(result).toString();
+          return '0';
         } catch (e) {
           console.error(`error getting token balance for ether ${e}`);
           throw e;
@@ -1640,18 +1604,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         let confirmations = null;
         if (receipt?.blockNumber) {
           try {
-            const [block, latestBlockHex] = await Promise.all([
-              rpcRequest('eth_getBlockByNumber', [
-                `0x${receipt.blockNumber.toString(16)}`,
-                false,
-              ]),
-              rpcRequest('eth_blockNumber', []),
+            const [block, conf] = await Promise.all([
+              receipt.getBlock(),
+              receipt.confirmations(),
             ]);
             blockTimestamp = block?.timestamp
-              ? Number.parseInt(block.timestamp, 16)
+              ? `0x${block.timestamp.toString(16)}`
               : null;
-            confirmations =
-              parseInt(latestBlockHex, 16) - receipt.blockNumber + 1;
+            confirmations = conf;
           } catch (e) {
             console.warn('Could not fetch block info', e);
           }
