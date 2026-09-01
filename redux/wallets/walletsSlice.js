@@ -2126,6 +2126,7 @@ export const walletsSlice = createSlice({
         throw new Error('wallet not available');
       }
       state.allWallets = allWallets.filter(item => item?.clientId !== clientId);
+      delete state.scheduledPayments[clientId];
     },
     deleteCoin: (state, action) => {
       const coinId = action?.payload;

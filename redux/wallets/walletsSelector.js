@@ -50,6 +50,22 @@ export const selectScheduledPaymentsForCurrentWallet = state => {
   );
 };
 
+export const selectScheduledPaymentsByClientId = (state, clientId) => {
+  if (!clientId) {
+    return EMPTY_SCHEDULED_PAYMENTS;
+  }
+  return (
+    state.wallets?.scheduledPayments?.[clientId] || EMPTY_SCHEDULED_PAYMENTS
+  );
+};
+
+// Used to cancel every pending scheduled-payment notification across all
+// wallets before a full wallet reset wipes the redux state they reference.
+export const selectAllScheduledPayments = state => {
+  const scheduledPayments = state.wallets?.scheduledPayments || {};
+  return Object.values(scheduledPayments).flat();
+};
+
 export const getSelectedNftChain = state => {
   const selectedWallet = selectCurrentWallet(state);
   return selectedWallet?.selectedNftChain || 'Ethereum';
