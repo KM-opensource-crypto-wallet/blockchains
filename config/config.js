@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false ;
 
 export const CHAIN_CONFIG = {
   ethereum: {
