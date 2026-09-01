@@ -36,7 +36,7 @@ const providers = {
   ltc: [PremiumBlockChair, Mempool, BlockCypher, BlockChair, BlockDaemon],
   btc: [PremiumBlockChair, Mempool, BlockChair, BlockDaemon],
   doge: [PremiumBlockChair, BlockChair, BlockCypher, BlockDaemon],
-  bch: [PremiumBlockChair, BlockChair, BlockDaemon, Mempool],
+  bch: [PremiumBlockChair, BlockChair, BlockDaemon],
 };
 
 export const BitcoinFork = {

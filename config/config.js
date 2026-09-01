@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = false ;
+export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -1600,7 +1600,7 @@ export const config = {
   INK_BLOCK_EXPLORER_BASE_URL: forEnv(CHAIN_CONFIG.ink.scan_api_url),
 
   DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
-  // DOK_WALLET_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app/dashboard',
+  // DOK_WALLET_BASE_URL: 'http://localhost:8787/dashboard',
   ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
   // ATTEST_WORKER_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app',
   BITCOIN_SCAN_URL: scanBase('bitcoin'),
