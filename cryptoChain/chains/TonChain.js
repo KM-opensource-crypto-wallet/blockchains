@@ -1,6 +1,5 @@
 import {
   convertToSmallAmount,
-  fetchRPCRequest,
   getExplorerTxUrl,
   isValidStringWithValue,
   parseBalance,
@@ -10,6 +9,8 @@ import {
   WalletContractV4,
   Address,
   internal,
+  external,
+  storeMessage,
   SendMode,
   JettonMaster,
   beginCell,
@@ -25,26 +26,18 @@ import BigNumber from 'bignumber.js';
 import {TonScan} from 'dok-wallet-blockchain-networks/service/tonScan';
 import {WL_APP_NAME} from 'utils/wlData';
 
-const findTxHashBySeqno = async (tonClient, address, seqno) => {
-  const txs = await tonClient().getTransactions(address, {limit: 20});
-  for (const tx of txs) {
-    if (!tx.inMessage?.body) {
-      continue;
-    }
-    try {
-      const slice = tx.inMessage.body.beginParse();
-      slice.loadBits(512); // skip ed25519 signature
-      slice.loadUint(32); // subwallet_id
-      slice.loadUint(32); // valid_untilconst txSeqno = slice.loadUint(32);
-      const txSeqno = slice.loadUint(32);
-      if (txSeqno === seqno) {
-        return tx.hash().toString('hex');
-      }
-    } catch {
-      console.error('errro in process ton transctions', seqno);
-    }
-  }
-  return null;
+// Normalized external message hash (TEP-467): the stable identifier a wallet
+// can compute at broadcast time and later resolve to the on-chain transaction
+// (toncenter v3 /transactionsByMessage indexes it). Normalization strips the
+// stateInit and stores the body as a reference so the hash does not depend on
+// serialization or deployment details.
+const getNormalizedExtMessageHash = (walletAddress, transferBody) => {
+  const message = external({to: walletAddress, body: transferBody});
+  return beginCell()
+    .store(storeMessage({...message, init: null}, {forceRef: true}))
+    .endCell()
+    .hash()
+    .toString('hex');
 };
 
 export const TonChain = () => {
@@ -90,13 +83,7 @@ export const TonChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const balance = await fetchRPCRequest(
-          tonEndpoint,
-          'getAddressBalance',
-          {
-            address,
-          },
-        );
+        const balance = await tonClient().getBalance(address);
         return balance?.toString() || '0';
       } catch (e) {
         console.error('error in get balance from ton', e);
@@ -294,33 +281,21 @@ export const TonChain = () => {
     },
     getTransaction: async ({txHash}) => {
       try {
-        let resolvedTxHash = null;
-        if (typeof txHash === 'object' && txHash !== null) {
-          const {seqno, walletContract} = txHash;
-          for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 5000));
-            const currentSeqno = await walletContract.getSeqno();
-            if (currentSeqno >= seqno) {
-              resolvedTxHash = await findTxHashBySeqno(
-                tonClient,
-                walletContract.address,
-                seqno,
-              );
-              if (resolvedTxHash) {
-                break;
-              }
-            }
-          }
-        } else if (typeof txHash === 'string') {
-          resolvedTxHash = txHash;
+        if (typeof txHash !== 'string' || !txHash) {
+          return {data: null};
         }
-
-        if (!resolvedTxHash) return null;
-
-        const res = TonScan.getTransactionByHash({txHash: resolvedTxHash});
-        const transactions = res?.data;
+        // Links opened from the transaction list carry a real tx hash;
+        // fresh sends carry the normalized external message hash — try
+        // both lookups.
+        let res = await TonScan.getTransactionByHash({txHash});
+        let transactions = res?.data;
         if (!Array.isArray(transactions) || transactions.length === 0) {
-          return null;
+          res = await TonScan.getTransactionsByMessage({msgHash: txHash});
+          transactions = res?.data;
+        }
+        if (!Array.isArray(transactions) || transactions.length === 0) {
+          // Not indexed yet — the screen keeps its seeded PENDING.
+          return {data: null};
         }
         const item = transactions[0];
         let date, to, from, amount;
@@ -344,17 +319,28 @@ export const TonChain = () => {
             : undefined;
           amount = outMsg?.value || '0';
         }
+        const executionFailed =
+          item?.description?.compute_ph?.success === false ||
+          item?.description?.action?.success === false;
+        // toncenter v3 returns the tx hash in base64; tonscan.org expects hex.
+        const txHashHex = item?.hash
+          ? // eslint-disable-next-line no-undef
+            Buffer.from(item.hash, 'base64').toString('hex')
+          : txHash;
 
         return {
           data: {
             amount: amount || '0',
-            link: resolvedTxHash,
-            url: getExplorerTxUrl('ton', resolvedTxHash),
-            status: from && to ? 'SUCCESS' : 'FAILED',
+            // The input identifier, so the details screen's
+            // `data?.link === txHash` check matches.
+            link: txHash,
+            url: getExplorerTxUrl('ton', txHashHex),
+            status: executionFailed ? 'FAILED' : 'SUCCESS',
             date: date,
             from: from,
             to: to,
             totalCourse: '0$',
+            blockNumber: item?.mc_block_seqno ?? null,
           },
         };
       } catch (e) {
@@ -422,10 +408,12 @@ export const TonChain = () => {
           ],
         });
 
+        const hash = getNormalizedExtMessageHash(wallet.address, transfer);
         await walletContract.send(transfer);
-        return {seqno, walletContract};
+        return {hash, seqno, walletContract};
       } catch (e) {
         console.error('Error in send ton transaction', e);
+        throw e;
       }
     },
     sendToken: async ({
@@ -473,7 +461,7 @@ export const TonChain = () => {
           .endCell();
 
         // Send it
-        await walletContract.sendTransfer({
+        const transfer = walletContract.createTransfer({
           seqno,
           secretKey: keyPair.secretKey,
           messages: [
@@ -484,7 +472,9 @@ export const TonChain = () => {
             }),
           ],
         });
-        return {seqno, walletContract};
+        const hash = getNormalizedExtMessageHash(wallet.address, transfer);
+        await walletContract.send(transfer);
+        return {hash, seqno, walletContract};
       } catch (e) {
         console.error('Error in send ton transaction', e);
         throw e;
