@@ -1,23 +1,11 @@
-import axios from 'axios';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
-import {
-  buildScanProxyUrl,
-  rpcSessionAdapter,
-} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const EtherScanAPIFree = axios.create({
+export const EtherScanAPIFree = createProviderClient({
   baseURL: config.ETHEREUM_SCAN_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });
 
-export const EtherScanAPI = axios.create({
-  baseURL: buildScanProxyUrl('etherscan'),
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  adapter: rpcSessionAdapter,
-  timeout: 30000,
+export const EtherScanAPI = createProviderClient({
+  proxy: 'etherscan',
+  scan: true,
 });

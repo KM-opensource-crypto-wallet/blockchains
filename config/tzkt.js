@@ -1,10 +1,6 @@
-import axios from 'axios';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const TZKTAPI = axios.create({
+export const TZKTAPI = createProviderClient({
   baseURL: config.TZKT_API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });

@@ -1,10 +1,6 @@
-import axios from 'axios';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const BlockCypherAPI = axios.create({
+export const BlockCypherAPI = createProviderClient({
   baseURL: config.BLOCK_CYPHER_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });

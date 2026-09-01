@@ -1,9 +1,5 @@
-import axios from 'axios';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const BchMempoolAPI = axios.create({
+export const BchMempoolAPI = createProviderClient({
   baseURL: 'https://bchmempool.cash/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });

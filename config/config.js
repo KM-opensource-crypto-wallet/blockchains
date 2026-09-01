@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -396,8 +396,7 @@ export const CHAIN_CONFIG = {
       mainnet: ['https://opbnb-rpc.publicnode.com', 'https://opbnb.drpc.org'],
       testnet: [
         'https://opbnb-testnet-rpc.bnbchain.org',
-        'https://opbnb-testnet.nodereal.io/v1/e9a36765eb8a40b9bd12e680a1fd2bc5',
-        'https://opbnb-testnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
+        'https://opbnb-testnet.drpc.org',
       ],
     },
     scan: {
@@ -680,7 +679,7 @@ export const CHAIN_CONFIG = {
       mainnet: ['https://linea-rpc.publicnode.com', 'https://linea.drpc.org'],
       testnet: [
         'https://rpc.sepolia.linea.build',
-        'https://linea-sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
+        'https://linea-sepolia.drpc.org',
       ],
     },
     scan: {
@@ -784,7 +783,6 @@ export const CHAIN_CONFIG = {
       order: 14,
     },
     scan_service: 'ethereum_pow',
-    scan_proxy: true,
     tx_hash_path: 'hash',
     eip_1559_not_supported: true,
     private_key_list: {
@@ -998,6 +996,9 @@ export const CHAIN_CONFIG = {
     },
     is_evm: true,
     chain_loader: 'evm',
+    premium: {
+      mainnet: true,
+    },
     free_rpc_urls: {
       mainnet: ['https://rpc.mainnet.chain.robinhood.com'],
       testnet: [
@@ -1340,8 +1341,6 @@ export const CHAIN_CONFIG = {
       production: 'https://www.mintscan.io',
       txPath: 'cosmos/tx',
     },
-    scan_api_base_url: 'https://apis.mintscan.io',
-    scan_api_key: process.env.COSMOS_API_KEY,
     private_key_list: {
       label: 'Cosmos',
       order: 9,
@@ -1365,7 +1364,6 @@ export const CHAIN_CONFIG = {
       production: 'https://polkadot.subscan.io',
       txPath: 'extrinsic',
     },
-    scan_proxy: true,
     private_key_list: {
       label: 'Polkadot',
       order: 24,
@@ -1524,7 +1522,6 @@ export const CHAIN_CONFIG = {
       production: 'https://cardanoscan.io',
       txPath: 'transaction',
     },
-    scan_proxy: true,
     private_key_not_supported: true,
   },
   filecoin: {
@@ -1650,7 +1647,6 @@ export const config = {
   TEZOS_SCAN_URL: scanBase('tezos'),
   STAKE_WIZ_BASE_URL: CHAIN_CONFIG.solana.stake_wiz_base_url,
   COSMOS_SCAN_URL: scanBase('cosmos'),
-  COSMOS_SCAN_BASE_URL: CHAIN_CONFIG.cosmos.scan_api_base_url,
   COSMOS_REST_BASE_URL: CHAIN_CONFIG.cosmos.rest_base_url,
   VICTION_SCAN_API_URL: forEnv(CHAIN_CONFIG.viction.scan_api_url),
   POLKADOT_SCAN_URL: scanBase('polkadot'),

@@ -1,14 +1,6 @@
-import axios from 'axios';
-import {
-  buildScanProxyUrl,
-  rpcSessionAdapter,
-} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const CoinMarketCapAPI = axios.create({
-  baseURL: buildScanProxyUrl('coinmarketcap'),
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  adapter: rpcSessionAdapter,
-  timeout: 30000,
+export const CoinMarketCapAPI = createProviderClient({
+  proxy: 'coinmarketcap',
+  scan: true,
 });

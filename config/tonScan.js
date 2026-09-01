@@ -1,14 +1,3 @@
-import axios from 'axios';
-import {
-  buildRpcProxyUrl,
-  rpcSessionAdapter,
-} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-const proxyBaseUrl = buildRpcProxyUrl('ton');
-
-export const TonScanAPI = axios.create({
-  baseURL: proxyBaseUrl,
-  headers: {'Content-Type': 'application/json'},
-  adapter: rpcSessionAdapter,
-  timeout: 30000,
-});
+export const TonScanAPI = createProviderClient({proxy: 'ton', scan: true});

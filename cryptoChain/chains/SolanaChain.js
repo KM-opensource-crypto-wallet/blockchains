@@ -334,12 +334,15 @@ export const SolanaChain = () => {
   // Sends the SAME bytes to every transaction RPC in turn. "Already
   // processed" from a node that saw a previous attempt is success.
   const broadcastRawTransaction = async ({serializedTx, signature}) => {
-    const rpcs = getFreeRPCUrl('solana');
+    const rpcs = [
+      getPremiumRPCUrl('solana'),
+      ...getFreeRPCUrl('solana'),
+    ].filter(Boolean);
     let lastError = null;
     for (let i = 0; i < rpcs.length; i++) {
       try {
         const solanaProvider = new Connection(rpcs[i], {
-          fetch: customFetchWithTimeout,
+          fetch: withRpcSessionFetch(customFetchWithTimeout),
         });
         await solanaProvider.sendRawTransaction(serializedTx, {
           skipPreflight: true,

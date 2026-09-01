@@ -1,9 +1,5 @@
-import axios from 'axios';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const LitecoinSpaceAPI = axios.create({
+export const LitecoinSpaceAPI = createProviderClient({
   baseURL: 'https://litecoinspace.org/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });
