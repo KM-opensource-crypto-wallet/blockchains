@@ -4,7 +4,6 @@ import BigNumber from 'bignumber.js';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
-  fetchRPCRequest,
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -32,24 +31,7 @@ export const FilecoinChain = chain_name => {
       } catch (e) {
         console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
         if (i === allRpcUrls.length - 1) {
-          if (defaultResponse !== undefined) {
-            return defaultResponse;
-          } else {
-            throw e;
-          }
-        }
-      }
-    }
-  };
-
-  const rpcRequest = async (method, params, defaultResponse) => {
-    for (let i = 0; i < allRpcUrls.length; i++) {
-      try {
-        return await fetchRPCRequest(allRpcUrls[i], method, params);
-      } catch (e) {
-        console.log('Error for filecoin rpc', allRpcUrls[i], 'Errors:', e);
-        if (i === allRpcUrls.length - 1) {
-          if (defaultResponse !== undefined) {
+          if (defaultResponse) {
             return defaultResponse;
           } else {
             throw e;
@@ -112,14 +94,16 @@ export const FilecoinChain = chain_name => {
         return null;
       }
     },
-    getBalance: async ({address}) => {
-      const balance = await rpcRequest(
-        'Filecoin.WalletBalance',
-        [address],
-        '0',
-      );
-      return balance?.toString() || '0';
-    },
+    getBalance: async ({address}) =>
+      retryFunc(async ({wallet}) => {
+        try {
+          const balance = await wallet.getBalance(address);
+          return balance.toString();
+        } catch (e) {
+          console.error('Error in get balance from filecoin', e);
+          throw e;
+        }
+      }, '0'),
     getEstimateFee: async ({toAddress, fromAddress, amount}) =>
       retryFunc(async ({wallet}) => {
         try {
@@ -162,7 +146,7 @@ export const FilecoinChain = chain_name => {
             amount: item?.amount?.toString(),
             link: txHash ? txHash : '',
             url: getExplorerTxUrl('filecoin', txHash),
-            status: item?.status === true ? 'SUCCESS' : 'FAILED',
+            status: item?.status || 'PENDING',
             date: item?.timestamp ? new Date(item.timestamp) : new Date(),
             from: item?.from,
             to: item?.to,
@@ -185,7 +169,7 @@ export const FilecoinChain = chain_name => {
               amount: finalTransaction?.amount?.toString(),
               link: txHash ? txHash : '',
               url: getExplorerTxUrl('filecoin', txHash),
-              status: finalTransaction?.status === true ? 'SUCCESS' : 'FAILED',
+              status: finalTransaction?.status || 'PENDING',
               date: finalTransaction?.timestamp
                 ? new Date(finalTransaction.timestamp)
                 : new Date(),
