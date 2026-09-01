@@ -978,7 +978,7 @@ export const SolanaChain = () => {
         throw e;
       }
     },
-    getTransaction: async ({txHash}) => {
+    getTransaction: async ({txHash, contractAddress}) => {
       try {
         if (!txHash) return null;
         const item = await rpcRequest(
@@ -1047,6 +1047,47 @@ export const SolanaChain = () => {
         const transactionDetails = instructions.find(
           ix => ix?.parsed?.info?.lamports != null,
         )?.parsed?.info;
+
+        // SPL token transfers carry no lamports — match the token
+        // instruction the way getTokenTransactions does.
+        const tokenDetails = instructions.find(
+          ix =>
+            (ix?.parsed?.type === 'transferChecked' ||
+              ix?.parsed?.type === 'transfer') &&
+            (ix?.parsed?.info?.amount != null ||
+              ix?.parsed?.info?.tokenAmount?.amount != null),
+        )?.parsed?.info;
+
+        if (tokenDetails && (contractAddress || !transactionDetails)) {
+          const tokenAmount =
+            tokenDetails?.amount?.toString() ||
+            tokenDetails?.tokenAmount?.amount?.toString();
+          // source/destination are token accounts (ATAs); resolve the
+          // recipient's wallet address from postTokenBalances.
+          const accountKeys = item?.transaction?.message?.accountKeys || [];
+          const destinationOwner = item?.meta?.postTokenBalances?.find(
+            balance =>
+              accountKeys[balance?.accountIndex]?.pubkey?.toString() ===
+              tokenDetails?.destination,
+          )?.owner;
+          return {
+            data: {
+              amount: tokenAmount,
+              link: txHash,
+              url: getExplorerTxUrl('solana', txHash),
+              status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+              date: item?.blockTime * 1000,
+              from:
+                tokenDetails?.authority ||
+                tokenDetails?.multisigAuthority ||
+                tokenDetails?.source,
+              to: destinationOwner || tokenDetails?.destination,
+              totalCourse: '0',
+              blockNumber,
+            },
+          };
+        }
+
         if (!transactionDetails?.lamports?.toString()) return null;
         const bnValue = transactionDetails?.lamports?.toString() || 0;
         return {
