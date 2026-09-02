@@ -80,6 +80,7 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
     wallet = {
       privateKey: coin?.privateKey,
       address: coin?.address,
+      accountId: coin?.accountId,
       publicKey: coin?.publicKey,
       extendedPublicKey: coin?.extendedPublicKey,
       extendedPrivateKey: coin?.extendedPrivateKey,
@@ -91,6 +92,7 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
     wallet = {
       privateKey: chain_existing_coin.privateKey,
       address: chain_existing_coin.address,
+      accountId: chain_existing_coin.accountId,
       publicKey: chain_existing_coin.publicKey,
       extendedPublicKey: chain_existing_coin.extendedPublicKey,
       extendedPrivateKey: chain_existing_coin.extendedPrivateKey,
@@ -120,6 +122,11 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
       privateKey: walletData?.privateKey,
       address: walletData?.address,
     };
+  }
+  if (wallet && chainName === 'hedera' && chain?.attachAccountId) {
+    // Adds `accountId` (0.0.N) once the ledger has created the account; the
+    // stored address stays the EVM address.
+    wallet = await chain.attachAccountId(wallet);
   }
   return {wallet, chain};
 };
@@ -161,6 +168,7 @@ const getBaseCoin = async (chain, wallet, coin, walletData) => {
     type: 'coin',
     wallet,
     address: wallet.address,
+    accountId: wallet.accountId,
     privateKey: wallet.privateKey,
     publicKey: wallet.publicKey,
     extendedPublicKey: wallet.extendedPublicKey,
@@ -405,6 +413,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
     type: 'token',
     wallet,
     address: wallet.address,
+    accountId: wallet.accountId,
     privateKey: wallet.privateKey,
     publicKey: wallet.publicKey,
     extendedPublicKey: wallet.extendedPublicKey,

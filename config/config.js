@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -1585,7 +1585,9 @@ export const CHAIN_CONFIG = {
       production: 'https://hashscan.io/mainnet',
       txPath: 'transaction',
     },
-    tx_hash_path: 'transactionHash',
+    // HederaChain.send returns the mirror-node style id `0.0.N-sec-nanos`,
+    // the same form the tx history uses for links.
+    tx_hash_path: 'transactionId',
     private_key_list: {
       label: 'Hedera',
       order: 16,
@@ -1599,7 +1601,6 @@ export const CHAIN_CONFIG = {
       production: 'hedera:mainnet',
     },
     memo_support: true,
-    custom_address_not_supported: true,
     api_base_url: {
       sandbox: 'https://testnet.mirrornode.hedera.com',
       production: 'https://mainnet.mirrornode.hedera.com',

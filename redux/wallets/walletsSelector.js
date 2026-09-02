@@ -1,4 +1,6 @@
 import {
+  getHederaLedgerAddress,
+  isHederaUnactivated,
   generateUniqueKeyForChain,
   isBitcoinChain,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -238,7 +240,13 @@ export const getUserCoinsOptions = createSelector(
     for (let j = 0; j < allCoins?.length; j++) {
       const currentCoin = allCoins[j];
       const key = currentCoin?.chain_name + '_' + currentCoin.symbol;
-      if (alreadyIncluded.includes(key) || !currentCoin?.isInWallet) {
+      // Buy/sell/OTC providers need a Hedera account id, which only exists
+      // after the first deposit.
+      if (
+        alreadyIncluded.includes(key) ||
+        !currentCoin?.isInWallet ||
+        isHederaUnactivated(currentCoin)
+      ) {
         continue;
       }
       alreadyIncluded.push(key);
@@ -250,7 +258,7 @@ export const getUserCoinsOptions = createSelector(
           currencyRate: currentCoin.currencyRate,
           symbol: currentCoin.symbol,
           icon: currentCoin?.icon,
-          walletAddress: currentCoin?.address,
+          walletAddress: getHederaLedgerAddress(currentCoin),
           type: currentCoin?.type,
           chain_name: currentCoin?.chain_name,
           chain_display_name:

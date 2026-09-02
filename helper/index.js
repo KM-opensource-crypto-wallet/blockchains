@@ -433,6 +433,20 @@ export const isTransactionListNotSupported = (chain_name, type) =>
 export const isCustomAddressNotSupportedChain = chain_name =>
   CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS.includes(chain_name);
 
+export const HEDERA_UNACTIVATED_MESSAGE =
+  'Your Hedera account is not active yet. Deposit HBAR to your address first.';
+
+// A Hedera coin's `address` is always the EVM address. The ledger account id
+// (`0.0.N`) only exists after the first deposit (HIP-583) and is kept in a
+// separate `accountId` field. Exchange/on-ramp providers and WalletConnect
+// dApps only know `0.0.N`, so they wait for it and read it via
+// getHederaLedgerAddress.
+export const isHederaUnactivated = coin =>
+  coin?.chain_name === 'hedera' && !coin?.accountId;
+
+export const getHederaLedgerAddress = coin =>
+  (coin?.chain_name === 'hedera' && coin?.accountId) || coin?.address;
+
 export const isPendingTransactionSupportedChain = chain_name =>
   EVM_CHAINS.includes(chain_name);
 

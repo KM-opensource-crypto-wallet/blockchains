@@ -151,6 +151,7 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
       if (!chainWallets[item.chain_name]) {
         chainWallets[item.chain_name] = {
           address: item?.address,
+          accountId: item?.accountId,
           privateKey: item?.privateKey,
           publicKey: item?.publicKey,
           extendedPublicKey: item?.extendedPublicKey,
@@ -499,6 +500,7 @@ export const addToken = createAsyncThunk(
       ...tokenData,
       isInWallet: true,
       address: nativeCoin.address,
+      accountId: nativeCoin.accountId,
       privateKey: nativeCoin.privateKey,
       publicKey: nativeCoin.publicKey,
       phrase: nativeCoin.phrase,
@@ -570,6 +572,25 @@ export const refreshCoins = createAsyncThunk(
           );
         }),
       );
+      // A Hedera coin saved by an older build as `0.0.N` is migrated to its
+      // EVM address on the next refresh; the backend keys coins by address,
+      // so re-register it.
+      const upgradedCoins = resp.filter(
+        (coin, index) =>
+          coin?.chain_name === 'hedera' &&
+          coin?.address &&
+          filterCoins[index]?.address &&
+          coin.address !== filterCoins[index].address,
+      );
+      if (upgradedCoins.length && currentWallet?.clientId) {
+        const masterClientId = getMasterClientId(currentState);
+        registerUserAPI({
+          coins: upgradedCoins,
+          clientId: currentWallet.clientId,
+          masterClientId,
+          is_imported: currentWallet?.isBackedup,
+        });
+      }
       return {coinData: resp, currentWalletClientId};
     } catch (e) {
       console.error('Error in refreshCoins', e);
@@ -3028,6 +3049,20 @@ export const walletsSlice = createSlice({
           currentWallet.chain_existing_coin,
           coinData,
         );
+        // extractChainExistingCoins never overwrites an entry; mirror the
+        // Hedera legacy-address migration and the later-assigned account id.
+        const hederaCoin = coinData.find(
+          item => item?.chain_name === 'hedera' && item?.type === 'coin',
+        );
+        const hederaExisting = currentWallet.chain_existing_coin?.hedera;
+        if (hederaCoin && hederaExisting) {
+          if (hederaCoin.address) {
+            hederaExisting.address = hederaCoin.address;
+          }
+          if (hederaCoin.accountId) {
+            hederaExisting.accountId = hederaCoin.accountId;
+          }
+        }
       }
     });
     builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {

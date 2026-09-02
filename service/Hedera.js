@@ -15,6 +15,24 @@ export const HEDERA = {
       return false;
     }
   },
+  // `0.0.N` for a funded EVM address, null while no account exists yet. A 404
+  // is the normal "not yet created" answer, not an error.
+  getAccountByEvmAddress: async evmAddress => {
+    try {
+      const resp = await HEDERA_API.get(`/api/v1/accounts/${evmAddress}`, {
+        params: {
+          limit: 1,
+          transactions: false,
+        },
+      });
+      return resp?.data?.account || null;
+    } catch (e) {
+      if (e?.response?.status !== 404) {
+        console.error('Error in HEDERA getAccountByEvmAddress', e);
+      }
+      return null;
+    }
+  },
   getExchangeFee: async () => {
     try {
       const resp = await HEDERA_API.get('/api/v1/network/exchangerate');
