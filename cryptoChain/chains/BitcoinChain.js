@@ -2,26 +2,50 @@ import ECPairFactory from 'ecpair';
 import ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
 import {toXOnly} from 'bitcoinjs-lib/src/psbt/bip371';
-import {config, IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
-  getLastIndexOfDerivations,
+  mergeUniqueAccounts,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
+import {
+  CHANGE_CHAIN,
+  ensureStandardAddresses,
+  extendByGapLimit,
+  getLegacyWindowItems,
+  getNetworkByChainName,
+  getStandardChainItems,
+  parsePathTail,
+  removeLegacyWindowItems,
+  shouldPruneLegacyWindow,
+} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
+import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
+  fetchBitcoinAddressUsage,
   fetchBitcoinBalances,
   fetchBitcoinTransactionDetails,
   fetchBitcoinUTXO,
-  getBitcoinAddresses,
-} from 'dok-wallet-blockchain-networks/service/dokApi';
+  fetchBitcoinTransactions,
+  fetchBitcoinTransaction,
+  broadcastBitcoinTransaction,
+  fetchBitcoinFeeRate,
+  isAddressUsageScanAvailable,
+} from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
-bitcoin.initEccLib(ecc);
+// Registered on first SDK use (taproot needs it) so balance/transaction
+// reads — which are plain HTTP — never load bitcoinjs-lib.
+let eccInitDone = false;
+const ensureEccInit = () => {
+  if (!eccInitDone) {
+    bitcoin.initEccLib(ecc);
+    eccInitDone = true;
+  }
+};
 
 const varuint = require('varuint-bitcoin');
 
@@ -41,10 +65,10 @@ const getBip137FlagBase = chain_name => {
 
 const firstOf = data => (Array.isArray(data) ? data[0] : data);
 
-const getSimpleNetwork = () =>
-  IS_SANDBOX ? bitcoin.networks.testnet : bitcoin.networks.bitcoin;
+const getSimpleNetwork = () => config.BITCOIN_NETWORK_STRING;
 
 const getKeyPairAndAddress = (privateKey, chain_name) => {
+  ensureEccInit();
   const ECPair = ECPairFactory(ecc);
   const network = getSimpleNetwork();
   const keyPair = ECPair.fromWIF(privateKey, network);
@@ -69,40 +93,15 @@ const getKeyPairAndAddress = (privateKey, chain_name) => {
   return {keyPair, address, network};
 };
 
-const mainNetworkKeys = {
-  bitcoin: {
-    public: 0x04b24746,
-    private: 0x04b2430c,
-  },
-  bitcoin_segwit: {
-    public: 0x049d7cb2,
-    private: 0x049d7878,
-  },
-  bitcoin_legacy: {
-    public: 0x0488b21e,
-    private: 0x0488ade4,
-  },
-};
-
-const testnetNetworkKeys = {
-  bitcoin: {
-    public: 0x045f1cf6,
-    private: 0x045f18bc,
-  },
-  bitcoin_segwit: {
-    public: 0x044a5262,
-    private: 0x044a4e28,
-  },
-  bitcoin_legacy: {
-    public: 0x043587cf,
-    private: 0x04358394,
-  },
-};
+// Sorting weight so UTXOs order by (chainIndex, addressIndex); no chain ever
+// holds this many addresses (bitcoinHdAddress caps chains at 500).
+const MAX_UTXO_SORT_INDEX = 1000000;
 
 export const BitcoinChain = () => {
   return {
     isValidAddress: ({address}) => {
       try {
+        ensureEccInit();
         bitcoin.address.toOutputScript(address, config.BITCOIN_NETWORK_STRING);
         return true;
       } catch (e) {
@@ -111,6 +110,7 @@ export const BitcoinChain = () => {
     },
     isValidPrivateKey: ({privateKey}) => {
       try {
+        ensureEccInit();
         const ECPair = ECPairFactory(ecc);
         const keyPair = ECPair.fromWIF(
           privateKey,
@@ -190,10 +190,7 @@ export const BitcoinChain = () => {
         });
         if (broadcast) {
           const txHex = psbtObj.extractTransaction().toHex();
-          const txid = await BitcoinFork.createTransaction({
-            txHex,
-            chain: 'btc',
-          });
+          const txid = await broadcastBitcoinTransaction({txHex});
           return {psbt: psbtObj.toBase64(), txid};
         }
         return {psbt: psbtObj.toBase64()};
@@ -258,6 +255,7 @@ export const BitcoinChain = () => {
       }
     },
     createWalletByPrivateKey: ({privateKey, chain_name}) => {
+      ensureEccInit();
       const customNetwork = getNetworkByChainName(chain_name);
       const ECPair = ECPairFactory(ecc);
       const keyPair = ECPair.fromWIF(privateKey, customNetwork);
@@ -291,8 +289,16 @@ export const BitcoinChain = () => {
       chain_name,
       extendedPublicKey,
       deriveAddresses,
+      isLegacyScanDone,
     }) => {
       let newDeriveAddresses = deriveAddresses;
+      // A lost/near-empty list means backend recovery may merge old-scheme
+      // entries back in below, so the resolved flag is ignored for this call
+      // and the legacy window is regenerated and rescanned in the same pass.
+      let legacyResolved =
+        !!isLegacyScanDone &&
+        Array.isArray(deriveAddresses) &&
+        deriveAddresses.length > 1;
       try {
         if (
           (!Array.isArray(deriveAddresses) || deriveAddresses?.length <= 1) &&
@@ -303,14 +309,90 @@ export const BitcoinChain = () => {
             extended_pub_key: extendedPublicKey,
           });
           if (Array.isArray(resp?.data)) {
-            newDeriveAddresses = resp?.data;
+            // Merge (old-first) instead of replacing: a lone custom entry
+            // must survive backend recovery.
+            newDeriveAddresses = mergeUniqueAccounts(
+              Array.isArray(newDeriveAddresses) ? newDeriveAddresses : [],
+              resp.data,
+            );
+          }
+        }
+        // BIP44 discovery: make sure the standard receive/change window
+        // exists, then extend it past the last used address (gap limit).
+        newDeriveAddresses = ensureStandardAddresses({
+          chain_name,
+          deriveAddresses: newDeriveAddresses,
+          accountKey: extendedPublicKey,
+          includeLegacyWindow: !legacyResolved,
+        });
+        if (extendedPublicKey && isAddressUsageScanAvailable()) {
+          if (!legacyResolved) {
+            try {
+              const legacyItems = getLegacyWindowItems(
+                chain_name,
+                newDeriveAddresses,
+              );
+              if (legacyItems.length) {
+                const usage = await fetchBitcoinAddressUsage({
+                  addresses: legacyItems.map(item => item.address),
+                });
+                // All-or-nothing: one used legacy address keeps all of them.
+                if (
+                  shouldPruneLegacyWindow({
+                    legacyItems,
+                    usage,
+                    keepAddresses: new Set([address]),
+                  })
+                ) {
+                  newDeriveAddresses = removeLegacyWindowItems(
+                    chain_name,
+                    newDeriveAddresses,
+                  );
+                }
+              }
+              legacyResolved = true;
+            } catch (e) {
+              // Nothing pruned; the coin's flag stays unset so the scan
+              // retries on the next refresh.
+              console.warn('bitcoin legacy-window scan failed', e?.message);
+            }
+          }
+          try {
+            for (let round = 0; round < 3; round++) {
+              const standardItems = getStandardChainItems(
+                chain_name,
+                newDeriveAddresses,
+              );
+              const usage = await fetchBitcoinAddressUsage({
+                addresses: standardItems.map(item => item.address),
+              });
+              const usedAddresses = new Set(
+                standardItems
+                  .filter(item => usage[item.address])
+                  .map(item => item.address),
+              );
+              const extended = extendByGapLimit({
+                chain_name,
+                deriveAddresses: newDeriveAddresses,
+                accountKey: extendedPublicKey,
+                usedAddresses,
+              });
+              if (extended === newDeriveAddresses) {
+                break;
+              }
+              newDeriveAddresses = extended;
+            }
+          } catch (e) {
+            console.warn('bitcoin gap-limit scan failed', e?.message);
           }
         }
         if (newDeriveAddresses?.length && newDeriveAddresses?.[0]?.address) {
           const resp = await fetchBitcoinBalances({
             derive_addresses: newDeriveAddresses,
           });
-          return resp?.data;
+          return resp?.data
+            ? {...resp.data, isLegacyScanDone: legacyResolved}
+            : resp?.data;
         } else {
           const deriveAddress = getDeriveAddressByChain(chain_name);
           const resp = await fetchBitcoinBalances({
@@ -330,6 +412,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinLegacyWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName('bitcoin_legacy');
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -356,6 +439,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinTaprootWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
         const root = bip32.fromSeed(seed, config.BITCOIN_NETWORK_STRING);
@@ -375,6 +459,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinSegwitWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName('bitcoin_segwit');
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -481,8 +566,7 @@ export const BitcoinChain = () => {
     getTransactions: async ({address, deriveAddresses}) => {
       try {
         const allAddresses = deriveAddresses?.map?.(item => item?.address);
-        const transactions = await BitcoinFork.getTransactions({
-          chain: 'btc',
+        const transactions = await fetchBitcoinTransactions({
           address,
           derive_addresses: allAddresses,
         });
@@ -513,9 +597,8 @@ export const BitcoinChain = () => {
     getTransaction: async ({txHash, address, deriveAddresses}) => {
       try {
         const allAddresses = deriveAddresses?.map?.(item => item?.address);
-        const response = await BitcoinFork.getTransaction({
+        const response = await fetchBitcoinTransaction({
           transactionId: txHash,
-          chain: 'btc',
           address,
           derive_addresses: allAddresses,
         });
@@ -570,9 +653,8 @@ export const BitcoinChain = () => {
           memo,
         });
         if (built) {
-          return await BitcoinFork.createTransaction({
+          return await broadcastBitcoinTransaction({
             txHex: built,
-            chain: 'btc',
           });
         } else {
           throw new Error('no built found');
@@ -595,9 +677,8 @@ export const BitcoinChain = () => {
             console.log(
               `[${Date.now()}]in waitForConfirmation, going to call bitcoin, transactionID: ${transactionID}`,
             );
-            const response = await BitcoinFork.getTransaction({
+            const response = await fetchBitcoinTransaction({
               transactionId: transaction,
-              chain: 'btc',
             });
             // status alone is not proof of confirmation: some providers
             // report mempool txs as confirmed (Blockchair block_id -1),
@@ -623,6 +704,7 @@ export const BitcoinChain = () => {
     },
     createCustomDerivedAddress: async ({chain_name, mnemonic, derivePath}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName(chain_name);
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -675,6 +757,7 @@ const buildUTXO = async ({
   selectedUTXOs,
   memo,
 }) => {
+  ensureEccInit();
   // memo is a hex-encoded OP_RETURN payload (exchange providers like LI.FI
   // route shared-vault BTC deposits by it). Validate up front: a malformed
   // or oversized memo must fail the build, never produce a memo-less send —
@@ -772,11 +855,13 @@ const buildUTXO = async ({
       };
     });
 
-    // Only use the required utxos
+    // Only use the required utxos (receive chain first, then by index)
+    const sortRank = derivePath => {
+      const {chainIndex, addressIndex} = parsePathTail(derivePath);
+      return chainIndex * MAX_UTXO_SORT_INDEX + addressIndex;
+    };
     const finalUtxos = allUtxos.sort(
-      (a, b) =>
-        getLastIndexOfDerivations(a.derivePath) -
-        getLastIndexOfDerivations(b.derivePath),
+      (a, b) => sortRank(a.derivePath) - sortRank(b.derivePath),
     );
     const [usedUTXOs, sum] = finalUtxos.reduce(
       ([utxoAcc, total], utxo) =>
@@ -813,9 +898,10 @@ const buildUTXO = async ({
         keyPairs[derivePath] = ECPair.fromWIF(tempPrivateKey, customNetwork);
       } else if (!keyPairs[derivePath] && !tempPrivateKey) {
         const root = bip32.fromBase58(extendedPrivateKey, customNetwork);
-        const childNode = root
-          .derive(getLastIndexOfDerivations(derivePath))
-          .derive(0);
+        // Works for both standard (…/chain/index) and legacy (…/index/0)
+        // paths: always derive the last two path segments in order.
+        const {chainIndex, addressIndex} = parsePathTail(derivePath);
+        const childNode = root.derive(chainIndex).derive(addressIndex);
         // Convert BIP32 node to ECPair for React Native compatibility
         keyPairs[derivePath] = ECPair.fromPrivateKey(
           // eslint-disable-next-line no-undef
@@ -890,6 +976,7 @@ const buildUTXO = async ({
       const changeAddress = getChangeAddress(
         usedDerivedAddress,
         deriveAddresses,
+        extendedPrivateKey,
       );
       tx.addOutput({
         address: changeAddress,
@@ -913,7 +1000,7 @@ const buildUTXO = async ({
   }
   if (isGenerateFee) {
     vSize = vSize || createdTx.virtualSize();
-    const feeRate = await BitcoinFork.getTransactionFees({chain: 'btc'});
+    const feeRate = await fetchBitcoinFeeRate();
     const feeRateNumber = validateNumber(feeRate) || 20;
     const normal = feeMultiplier?.normal || 1.4;
     const recommended = feeMultiplier?.recommended || 1.65;
@@ -951,45 +1038,37 @@ const getDeriveAddressByChain = chain_name => {
     : "m/44'/0'/0'/0/0";
 };
 
-const getNetworkByChainName = chain_name => {
-  return chain_name === 'bitcoin' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin_legacy' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_legacy'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_segwit' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_segwit,
-      })
-    : chain_name === 'bitcoin_segwit'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_segwit,
-      })
-    : '';
-};
-
-const getChangeAddress = (usedAddresses, allDeriveAddresses) => {
-  if (
-    usedAddresses?.length === allDeriveAddresses?.length &&
-    usedAddresses.length > 0
-  ) {
-    return usedAddresses[0].address;
-  }
-  const lastUsedAddresses = usedAddresses[usedAddresses?.length - 1];
-  const lastAddressIndex = getLastIndexOfDerivations(
-    lastUsedAddresses?.derivePath,
+// Change goes to the first unused internal-chain address (…/1/i), like
+// BlueWallet/Electrum. Falls back to the sending address for coins without
+// an internal chain (private-key imports).
+const getChangeAddress = (
+  usedAddresses,
+  allDeriveAddresses,
+  extendedPrivateKey,
+) => {
+  const allItems = Array.isArray(allDeriveAddresses) ? allDeriveAddresses : [];
+  const spendingSet = new Set((usedAddresses || []).map(item => item?.address));
+  // Watch-only entries are only spendable later through the xprv fallback in
+  // buildUTXO — never route change to one when that key is unavailable.
+  const canSpendXpubDerived = !!extendedPrivateKey;
+  const internal = allItems
+    .filter(
+      item =>
+        parsePathTail(item?.derivePath).chainIndex === CHANGE_CHAIN &&
+        (item?.privateKey || canSpendXpubDerived),
+    )
+    .sort(
+      (a, b) =>
+        parsePathTail(a?.derivePath).addressIndex -
+        parsePathTail(b?.derivePath).addressIndex,
+    );
+  const unused = internal.find(
+    item => !(Number(item?.balance) > 0) && !spendingSet.has(item?.address),
   );
-  const changeAddressIndex = lastAddressIndex === 19 ? 1 : lastAddressIndex + 1;
-  return allDeriveAddresses[changeAddressIndex]?.address;
+  return (
+    unused?.address ||
+    internal[0]?.address ||
+    usedAddresses?.[0]?.address ||
+    allItems[0]?.address
+  );
 };

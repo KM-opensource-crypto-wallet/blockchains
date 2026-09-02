@@ -12,7 +12,7 @@ import {
 import BigNumber from 'bignumber.js';
 import {showToast} from 'utils/toast';
 import {
-  getAdditionalL1Fee,
+  getAdditionalL1FeePercentage,
   getBitcoinCashFeeMultiplier,
   getBitcoinFeeMultiplier,
   getDogecoinFeeMultiplier,
@@ -47,6 +47,10 @@ const initialState = {
     amount: 0,
     toAddress: '',
     transactionFee: 0,
+    // EIP-1559 only: gasLimit * min(baseFee + tip, maxFee) — what the sender
+    // will actually pay; `transactionFee` is the reserved maximum.
+    estimatedFee: 0,
+    baseFeePerGas: null,
     fiatEstimateFee: 0,
     feesOptions: [],
     l1Fees: 0,
@@ -97,7 +101,8 @@ export const calculateEstimateFee = createAsyncThunk(
       const bitcoinFeeMultiplier = getBitcoinFeeMultiplier(currentState);
       const litecoinFeeMultiplier = getLitecoinFeeMultiplier(currentState);
       const dogecoinFeeMultiplier = getDogecoinFeeMultiplier(currentState);
-      const additionalL1Fee = getAdditionalL1Fee(currentState);
+      const additionalL1FeePercentage =
+        getAdditionalL1FeePercentage(currentState);
       const bitcoinCashFeeMultiplier =
         getBitcoinCashFeeMultiplier(currentState);
       const selectedWallet = payload?.selectedWallet;
@@ -127,6 +132,10 @@ export const calculateEstimateFee = createAsyncThunk(
         selectedWallet,
       );
       if (!nativeCoin) {
+        // setCurrentTransferLoading(true) already ran, so returning
+        // without resolving it would pin Transfer on its spinner forever
+        // and make the error view unreachable.
+        dispatch(setCurrentTransferSuccess(false));
         return null;
       }
 
@@ -134,7 +143,7 @@ export const calculateEstimateFee = createAsyncThunk(
       if (payload?.isNFT) {
         respData = await nativeCoin?.getNFTEstimateFee({
           ...payload,
-          additionalL1Fee: additionalL1Fee[chain_name],
+          additionalL1FeePercentage: additionalL1FeePercentage[chain_name],
         });
       } else if (payload?.isCreateStaking) {
         respData = await nativeCoin?.getEstimateFeeForStaking({
@@ -159,20 +168,32 @@ export const calculateEstimateFee = createAsyncThunk(
         respData = await nativeCoin?.getEstimateSwapFee({
           ...payload,
           swapData: transfer?.swapData,
-          additionalL1Fee: additionalL1Fee[chain_name],
+          additionalL1FeePercentage: additionalL1FeePercentage[chain_name],
         });
       } else {
         respData = await nativeCoin?.getEstimateFee({
           selectedUTXOs: transfer?.selectedUTXOs,
           ...payload,
           feeMultiplier: multiplier[chain_name],
-          additionalL1Fee: additionalL1Fee[chain_name],
+          additionalL1FeePercentage: additionalL1FeePercentage[chain_name],
         });
+      }
+      // A chain that resolves without a fee has failed even though it did not
+      // throw. Without this the thunk prices the transaction off
+      // `new BigNumber(undefined)` -- NaN, silently -- and reports success, so
+      // Transfer renders the form instead of its error view. `== null` is
+      // deliberate: a real fee of 0 / '0' must still go through.
+      if (!respData || respData.fee == null) {
+        console.error('Estimate returned no fee', {chain_name, respData});
+        dispatch(setCurrentTransferSuccess(false));
+        return null;
       }
       const estimateGas = respData?.estimateGas;
       const gasFee = respData?.gasFee;
       const maxPriorityFeePerGas = respData?.maxPriorityFeePerGas;
       const fee = respData?.fee;
+      const estimatedFee = respData?.estimatedFee ?? fee;
+      const baseFeePerGas = respData?.baseFeePerGas ?? null;
       const nonce = respData?.nonce;
       const feesOptions = respData?.feesOptions;
       const l1Fees = respData?.l1Fees || 0;
@@ -199,6 +220,8 @@ export const calculateEstimateFee = createAsyncThunk(
       dispatch(
         setEstimateFees({
           transactionFee: fee,
+          estimatedFee,
+          baseFeePerGas,
           fiatEstimateFee: feeAmountBN.multipliedBy(currencyRateBN).toString(),
           gasFee,
           estimateGas,
@@ -444,6 +467,9 @@ export const currentTransferSlice = createSlice({
     },
     setEstimateFees(state, {payload}) {
       state.transferData.transactionFee = payload?.transactionFee;
+      state.transferData.estimatedFee =
+        payload?.estimatedFee ?? payload?.transactionFee;
+      state.transferData.baseFeePerGas = payload?.baseFeePerGas ?? null;
       state.transferData.isLoading = false;
       state.transferData.fiatEstimateFee = payload?.fiatEstimateFee;
       state.transferData.estimateGas = payload?.estimateGas;
@@ -489,6 +515,39 @@ export const currentTransferSlice = createSlice({
       const currencyBN = new BigNumber(state?.transferData?.currencyRate);
       state.transferData.gasFee = BigInt(gasPriceBN.toString());
       state.transferData.transactionFee = transactionFee;
+      // Optional custom tip (gwei, EVM only). A tip above the cap is
+      // meaningless under EIP-1559 (the node would reject it), so clamp to the
+      // cap the same way EVMChain.validatePriorityFee does at signing time.
+      const customPriorityFee = payload?.maxPriorityFeePerGas;
+      if (isEVM && customPriorityFee != null && customPriorityFee !== '') {
+        const tipBN = new BigNumber(
+          convertToSmallAmount(customPriorityFee.toString(), 9)?.toString(),
+        );
+        if (tipBN.isFinite() && !tipBN.isNegative()) {
+          const clampedTipBN = tipBN.gt(gasPriceBN) ? gasPriceBN : tipBN;
+          state.transferData.maxPriorityFeePerGas = BigInt(
+            clampedTipBN.toFixed(0),
+          );
+        }
+      }
+      // Custom cap changes what is reserved; what is paid stays
+      // min(baseFee + tip, cap) on EIP-1559 chains.
+      let estimatedFee = transactionFee;
+      const baseFeePerGas = state.transferData?.baseFeePerGas;
+      const maxPriorityFeePerGas = state.transferData?.maxPriorityFeePerGas;
+      if (isEVM && baseFeePerGas != null && maxPriorityFeePerGas != null) {
+        const marketPriceBN = new BigNumber(baseFeePerGas.toString()).plus(
+          new BigNumber(maxPriorityFeePerGas.toString()),
+        );
+        const effectiveBN = marketPriceBN.lt(gasPriceBN)
+          ? marketPriceBN
+          : gasPriceBN;
+        estimatedFee = parseBalance(
+          effectiveBN.multipliedBy(estimateGasBN).plus(l1FeesBn).toString(),
+          18,
+        );
+      }
+      state.transferData.estimatedFee = estimatedFee;
       state.transferData.fiatEstimateFee = currencyBN
         .multipliedBy(transactionFeeEtherBN)
         .toFixed(2);

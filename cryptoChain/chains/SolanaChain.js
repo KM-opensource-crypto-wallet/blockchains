@@ -1,4 +1,4 @@
-import {config, isWeb} from 'dok-wallet-blockchain-networks/config/config';
+import {config} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {
   Authorized,
@@ -36,7 +36,11 @@ import {Buffer} from 'buffer';
 import nacl from 'tweetnacl';
 import {getSolanaContract} from 'dok-wallet-blockchain-networks/service/solflare';
 import {nanoid} from 'nanoid';
-import {getFreeRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  getFreeRPCUrl,
+  getPremiumRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {withRpcSessionFetch} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {getStakingByChain} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {StakeWiz} from 'dok-wallet-blockchain-networks/service/stakeWiz';
 import {getStakeActivation} from '@anza-xyz/solana-rpc-get-stake-activation';
@@ -198,14 +202,15 @@ const readComputeBudget = message => {
 };
 
 export const SolanaChain = () => {
-  const retryFunc = async (cb, defaultResponse, isTransaction = false) => {
-    const solanaRpc = getFreeRPCUrl('solana');
-    const transactionSolanaRpc = getFreeRPCUrl(isWeb ? 'solana' : 'tx_solana');
-    const rpcs = isTransaction ? transactionSolanaRpc : solanaRpc;
+  const retryFunc = async (cb, defaultResponse) => {
+    const rpcs = [
+      getPremiumRPCUrl('solana'),
+      ...getFreeRPCUrl('solana'),
+    ].filter(Boolean);
     for (let i = 0; i < rpcs.length; i++) {
       try {
         const solanaProvider = new Connection(rpcs[i], {
-          fetch: customFetchWithTimeout,
+          fetch: withRpcSessionFetch(customFetchWithTimeout),
         });
         return await cb(solanaProvider);
       } catch (e) {
@@ -218,9 +223,9 @@ export const SolanaChain = () => {
         }
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
-            return defaultResponse;
-          } else {
             throw e;
+          } else {
+            return defaultResponse;
           }
         }
       }
@@ -271,12 +276,15 @@ export const SolanaChain = () => {
   // Sends the SAME bytes to every transaction RPC in turn. "Already
   // processed" from a node that saw a previous attempt is success.
   const broadcastRawTransaction = async ({serializedTx, signature}) => {
-    const rpcs = getFreeRPCUrl(isWeb ? 'solana' : 'tx_solana');
+    const rpcs = [
+      getPremiumRPCUrl('solana'),
+      ...getFreeRPCUrl('solana'),
+    ].filter(Boolean);
     let lastError = null;
     for (let i = 0; i < rpcs.length; i++) {
       try {
         const solanaProvider = new Connection(rpcs[i], {
-          fetch: customFetchWithTimeout,
+          fetch: withRpcSessionFetch(customFetchWithTimeout),
         });
         await solanaProvider.sendRawTransaction(serializedTx, {
           skipPreflight: true,
@@ -295,19 +303,22 @@ export const SolanaChain = () => {
     throw lastError ?? new Error('Failed to broadcast Solana transaction');
   };
 
-  // Read-only status probe; undefined default so a total RPC outage reads
-  // as "unknown" rather than throwing (the caller decides what to do).
-  const getSignatureStatus = async signature =>
-    retryFunc(
-      async solanaProvider => {
+  // Read-only status probe; a total RPC outage resolves to undefined so it
+  // reads as "unknown" rather than throwing (the caller decides what to do).
+  const getSignatureStatus = async signature => {
+    try {
+      return await retryFunc(async solanaProvider => {
         const resp = await solanaProvider.getSignatureStatuses([signature], {
           searchTransactionHistory: true,
         });
         return resp?.value?.[0] ?? null;
-      },
-      undefined,
-      true,
-    );
+      });
+    } catch (e) {
+      // Every status RPC failed: unknown, which is not evidence of expiry.
+      console.error('Error fetching solana signature status', e);
+      return undefined;
+    }
+  };
 
   // Polls a signature until it reaches the commitment. Never rebuilds:
   // resolves 'confirmed' when landed, throws when the transaction failed
@@ -342,11 +353,15 @@ export const SolanaChain = () => {
         return 'confirmed';
       }
       if (status === null && lastValidBlockHeight) {
-        const blockHeight = await retryFunc(
-          async solanaProvider => solanaProvider.getBlockHeight('confirmed'),
-          undefined,
-          true,
-        );
+        let blockHeight;
+        try {
+          blockHeight = await retryFunc(async solanaProvider =>
+            solanaProvider.getBlockHeight('confirmed'),
+          );
+        } catch (e) {
+          // Unknown height proves nothing; the check below stays inconclusive.
+          console.error('Error fetching solana block height', e);
+        }
         if (
           typeof blockHeight === 'number' &&
           blockHeight > lastValidBlockHeight + EXPIRY_MARGIN_BLOCKS
@@ -432,38 +447,34 @@ export const SolanaChain = () => {
       }
     },
     sendRawTransaction: async ({payload, privateKey}) =>
-      retryFunc(
-        async solanaProvider => {
-          try {
-            const finalPayload = payload?.signTypeData?.transaction;
-            const secretKey = bs58.decode(privateKey);
-            const keypair = Keypair.fromSecretKey(secretKey, {
-              skipValidation: true,
-            });
+      retryFunc(async solanaProvider => {
+        try {
+          const finalPayload = payload?.signTypeData?.transaction;
+          const secretKey = bs58.decode(privateKey);
+          const keypair = Keypair.fromSecretKey(secretKey, {
+            skipValidation: true,
+          });
 
-            const txBuffer = Buffer.from(finalPayload, 'base64');
-            const versionedTransaction =
-              VersionedTransaction.deserialize(txBuffer);
-            const finalTransaction = new VersionedTransaction(
-              versionedTransaction.message,
-            );
-            finalTransaction.sign([keypair]);
-            const txHash = await solanaProvider.sendTransaction(
-              finalTransaction,
-              {
-                skipPreflight: true,
-                preflightCommitment: 'processed',
-              },
-            );
-            return {signature: txHash};
-          } catch (e) {
-            console.error('Error in solana signAndSendTransaction', e);
-            throw e;
-          }
-        },
-        null,
-        true,
-      ),
+          const txBuffer = Buffer.from(finalPayload, 'base64');
+          const versionedTransaction =
+            VersionedTransaction.deserialize(txBuffer);
+          const finalTransaction = new VersionedTransaction(
+            versionedTransaction.message,
+          );
+          finalTransaction.sign([keypair]);
+          const txHash = await solanaProvider.sendTransaction(
+            finalTransaction,
+            {
+              skipPreflight: true,
+              preflightCommitment: 'processed',
+            },
+          );
+          return {signature: txHash};
+        } catch (e) {
+          console.error('Error in solana signAndSendTransaction', e);
+          throw e;
+        }
+      }),
     signMessage: async ({signTypeData, privateKey}) => {
       try {
         const message = signTypeData;
@@ -603,8 +614,8 @@ export const SolanaChain = () => {
         // Minimum amount the user must stake = network minimum delegation +
         // rent-exempt reserve (the entered amount funds the whole stake account
         // and the delegatable stake = amount - rentExemptReserve must be >=
-        // minimum delegation). Wrapped in retryFunc so an RPC failure degrades
-        // gracefully to null, in which case no minimum validation is applied.
+        // minimum delegation). An RPC failure throws out of retryFunc and the
+        // catch below falls back to a 1 SOL minimum.
         let minAmount = null;
         try {
           minAmount = await retryFunc(async solanaProvider => {
@@ -622,7 +633,7 @@ export const SolanaChain = () => {
               new BigNumber(rentExemptReserve),
             );
             return parseBalance(totalMinAmount.toString(), 9);
-          }, null);
+          });
         } catch (e) {
           minAmount = '1';
         }
@@ -763,7 +774,7 @@ export const SolanaChain = () => {
           console.error('error in get token fees for solana', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForNFT: async props => {
       return await SolanaChain().getEstimateFeeForToken(props);
     },
@@ -791,7 +802,7 @@ export const SolanaChain = () => {
           console.error('Error in solana gas fee', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStaking: async ({fromAddress, amount, validatorPubKey}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -816,7 +827,7 @@ export const SolanaChain = () => {
           console.error('Error in solana getEstimateFeeForStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForDeactivateStaking: async ({fromAddress, stakingAddress}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -843,7 +854,7 @@ export const SolanaChain = () => {
           );
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForWithdrawStaking: async ({
       fromAddress,
       amount,
@@ -872,7 +883,7 @@ export const SolanaChain = () => {
           console.error('Error in solana getEstimateFeeForWithdrawStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -1003,12 +1014,12 @@ export const SolanaChain = () => {
           throw e;
         }
       }, []),
-    getTransaction: async ({txHash}) =>
+    getTransaction: async ({txHash, contractAddress}) =>
       retryFunc(
         async solanaProvider => {
           try {
             if (!txHash) return null;
-            const item = solanaProvider.getParsedTransaction(txHash, {
+            const item = await solanaProvider.getParsedTransaction(txHash, {
               maxSupportedTransactionVersion: 0,
             });
             if (!item) return {data: null};
@@ -1075,6 +1086,46 @@ export const SolanaChain = () => {
             const transactionDetails = instructions.find(
               ix => ix?.parsed?.info?.lamports != null,
             )?.parsed?.info;
+            // SPL token transfers carry no lamports — match the token
+            // instruction the way getTokenTransactions does.
+            const tokenDetails = instructions.find(
+              ix =>
+                (ix?.parsed?.type === 'transferChecked' ||
+                  ix?.parsed?.type === 'transfer') &&
+                (ix?.parsed?.info?.amount != null ||
+                  ix?.parsed?.info?.tokenAmount?.amount != null),
+            )?.parsed?.info;
+
+            if (tokenDetails && (contractAddress || !transactionDetails)) {
+              const tokenAmount =
+                tokenDetails?.amount?.toString() ||
+                tokenDetails?.tokenAmount?.amount?.toString();
+              // source/destination are token accounts (ATAs); resolve the
+              // recipient's wallet address from postTokenBalances.
+              const accountKeys = item?.transaction?.message?.accountKeys || [];
+              const destinationOwner = item?.meta?.postTokenBalances?.find(
+                balance =>
+                  accountKeys[balance?.accountIndex]?.pubkey?.toString() ===
+                  tokenDetails?.destination,
+              )?.owner;
+              return {
+                data: {
+                  amount: tokenAmount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from:
+                    tokenDetails?.authority ||
+                    tokenDetails?.multisigAuthority ||
+                    tokenDetails?.source,
+                  to: destinationOwner || tokenDetails?.destination,
+                  totalCourse: '0',
+                  blockNumber,
+                },
+              };
+            }
+
             if (!transactionDetails?.lamports?.toString()) return null;
             const bnValue = transactionDetails?.lamports?.toString() || 0;
             return {
@@ -1109,7 +1160,11 @@ export const SolanaChain = () => {
               mint: tokenMintAddress,
             },
           );
-          const tokenAccount = tokenAccounts.value[0].pubkey;
+          const tokenAccount = tokenAccounts?.value?.[0]?.pubkey;
+          if (!tokenAccount) {
+            // no token account for this mint — no transaction history yet
+            return [];
+          }
           let transactionList = await solanaProvider.getSignaturesForAddress(
             tokenAccount,
             {limit: 20},
@@ -1166,19 +1221,16 @@ export const SolanaChain = () => {
       try {
         // Prepare (reads only) may retry across RPCs; sign+broadcast happens
         // exactly once outside the retry so no replay can re-sign.
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            prepareTransferMessage({
-              fromAddress: from,
-              toAddress: to,
-              amount,
-              memo,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            }),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          prepareTransferMessage({
+            fromAddress: from,
+            toAddress: to,
+            amount,
+            memo,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1195,18 +1247,15 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            prepareCreateStaking({
-              from,
-              validatorPubKey,
-              amount,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            }),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          prepareCreateStaking({
+            from,
+            validatorPubKey,
+            amount,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1222,17 +1271,14 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            buildStakingDeactivateTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              gasFee,
-              estimateGas,
-            ),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          buildStakingDeactivateTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            gasFee,
+            estimateGas,
+          ),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1249,18 +1295,15 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            buildStakingWithdrawTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              amount,
-              gasFee,
-              estimateGas,
-            ),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          buildStakingWithdrawTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            amount,
+            gasFee,
+            estimateGas,
+          ),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1281,23 +1324,20 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const {transactionMessage} = await retryFunc(
-          async solanaProvider =>
-            prepareTokenTransferMessage({
-              toAddress: to,
-              contractAddress,
-              amount,
-              decimals: decimal,
-              tokenAmount,
-              mint,
-              memo,
-              solanaProvider: solanaProvider,
-              privateKey,
-              estimateGas,
-              gasFee,
-            }),
-          null,
-          true,
+        const {transactionMessage} = await retryFunc(async solanaProvider =>
+          prepareTokenTransferMessage({
+            toAddress: to,
+            contractAddress,
+            amount,
+            decimals: decimal,
+            tokenAmount,
+            mint,
+            memo,
+            solanaProvider: solanaProvider,
+            privateKey,
+            estimateGas,
+            gasFee,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1356,7 +1396,7 @@ export const SolanaChain = () => {
             }
           }, interval);
         });
-      }, null),
+      }),
     // Executes a provider-built DEX swap (LI.FI / Relay). Solana needs no
     // allowance step — the whole route is instruction-bundled into the
     // transaction(s) signed here. Returns the last signature string (the
@@ -1409,8 +1449,6 @@ export const SolanaChain = () => {
             }
             return built;
           },
-          null,
-          true,
         );
         // Sign ONCE. From here the signature is this leg's fixed identity —
         // no code below may rebuild or re-sign this transaction.
@@ -1500,7 +1538,7 @@ export const SolanaChain = () => {
           console.error('Error in getEpochTime', e);
           throw e;
         }
-      }, null),
+      }),
   };
 };
 

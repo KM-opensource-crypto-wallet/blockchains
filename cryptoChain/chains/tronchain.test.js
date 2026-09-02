@@ -1,413 +1,317 @@
 import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronChain';
+import {TronWeb} from 'tronweb';
+import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 
-jest.mock('tronweb', () => {
-  return jest.fn().mockImplementation(() => {
-    return {
-      trx: {
-        getBalance: jest.fn().mockResolvedValue(1000000),
-        getTransactionInfo: jest
-          .fn()
-          .mockResolvedValue({id: 'testTransactionId'}),
-        sign: jest.fn().mockResolvedValue('signedTransaction'),
-        sendRawTransaction: jest.fn().mockResolvedValue('transactionResult'),
-        // mock other methods as necessary
-      },
-      transactionBuilder: {
-        sendTrx: jest.fn().mockResolvedValue('transaction'),
-        triggerSmartContract: jest
-          .fn()
-          .mockResolvedValue({transaction: 'triggeredTransaction'}),
-        // mock other methods as necessary
-      },
-      contract: () => ({
-        at: jest.fn().mockResolvedValue({
-          toString: () => 'contract', // Add this line
-          balanceOf: () => ({
-            call: jest.fn().mockResolvedValue(5000000),
-          }),
-        }),
-      }),
-      setAddress: jest.fn(),
-      toSun: jest.fn().mockReturnValue('sunAmount'),
-      address: {
-        fromPrivateKey: jest.fn().mockReturnValue('addressFromPrivateKey'),
-        toHex: jest.fn().mockReturnValue('hexAddress'),
-        fromHex: jest.fn().mockReturnValue('fromHexAddress'),
-      },
-      // mock other properties and methods as necessary
-    };
-  });
+// TronChain builds its provider list from these. getPremiumRPCUrl returns a
+// URL string ('' when the chain has no proxy); tests that need failover
+// override it to add a second, earlier provider.
+jest.mock('dok-wallet-blockchain-networks/rpcUrls/rpcUrls', () => ({
+  getPremiumRPCUrl: jest.fn(() => ''),
+  getRPCUrl: jest.fn(key =>
+    key === 'tron_full_host' ? 'http://tron.test' : null,
+  ),
+}));
+
+jest.mock('dok-wallet-blockchain-networks/service/tronScan', () => ({
+  TronScan: {getTransactionByHash: jest.fn()},
+}));
+
+jest.mock('tronweb', () => ({TronWeb: jest.fn()}));
+
+const {
+  getPremiumRPCUrl,
+} = require('dok-wallet-blockchain-networks/rpcUrls/rpcUrls');
+
+/**
+ * A TronWeb test double. Only the surface TronChain actually touches is
+ * implemented; overrides are merged in per test.
+ *
+ * NB: getAccount results deliberately carry no `address` field. TronChain
+ * caches account info at module scope for 10s and busts that cache by
+ * comparing `accountInfo.address` against the requested address — leaving it
+ * undefined keeps every call a real fetch, so tests stay order-independent.
+ */
+const fakeTronWeb = (overrides = {}) => ({
+  trx: {
+    getAccount: jest.fn().mockResolvedValue({balance: 1000000}),
+    sign: jest.fn(async txn => ({...txn, signature: ['sig'], txID: 'txid1'})),
+    sendRawTransaction: jest.fn().mockResolvedValue({result: true}),
+    getTransactionInfo: jest.fn().mockResolvedValue({id: 'testTransactionId'}),
+    ...(overrides.trx || {}),
+  },
+  transactionBuilder: {
+    sendTrx: jest.fn().mockResolvedValue({raw_data: {}, txID: 'txid1'}),
+    triggerSmartContract: jest
+      .fn()
+      .mockResolvedValue({transaction: {raw_data: {}, txID: 'txid1'}}),
+    addUpdateData: jest.fn(txn => txn),
+    ...(overrides.transactionBuilder || {}),
+  },
+  contract: jest.fn(() => ({
+    at: jest.fn().mockResolvedValue({}),
+    balanceOf: () => ({call: jest.fn().mockResolvedValue(5000000)}),
+    name: () => ({call: jest.fn().mockResolvedValue('Tether')}),
+    symbol: () => ({call: jest.fn().mockResolvedValue('USDT')}),
+    decimals: () => ({call: jest.fn().mockResolvedValue(6)}),
+    ...(overrides.contract || {}),
+  })),
+  // withRpcSession swaps the axios adapter on both HTTP providers.
+  fullNode: {
+    request: jest.fn().mockResolvedValue({data: []}),
+    instance: {defaults: {}},
+    ...(overrides.fullNode || {}),
+  },
+  solidityNode: {
+    instance: {defaults: {}},
+    ...(overrides.solidityNode || {}),
+  },
+  setAddress: jest.fn(),
+  toSun: jest.fn(amount => amount),
+  toUtf8: jest.fn(value => value),
+  isAddress: jest.fn(() => true),
+  address: {
+    fromPrivateKey: jest.fn(() => 'addressFromPrivateKey'),
+    toHex: jest.fn(() => 'hexAddress'),
+    fromHex: jest.fn(hex => `from:${hex}`),
+  },
+  ...overrides,
 });
 
+// Every provider attempt gets the same double unless a test says otherwise.
+const useTronWeb = instance => TronWeb.mockImplementation(() => instance);
+
 describe('TronChain', () => {
+  let tronWeb;
   let instance;
 
   beforeEach(() => {
-    // Global mock for fetch
-    global.fetch = jest.fn(url => {
-      console.log(`in fetch, url: ${url}`);
-      if (url.includes('/transactions')) {
-        return Promise.resolve({
-          json: () => {
-            return Promise.resolve({
-              data: [
-                {
-                  raw_data: {
-                    contract: [
-                      {
-                        parameter: {
-                          value: {
-                            owner_address: 'fromHexAddress',
-                            amount: 5000000,
-                            to_address: 'toHexAddress',
-                          },
-                        },
-                      },
-                    ],
-                    timestamp: new Date(),
-                  },
-                  txID: 'txID123',
-                  blockNumber: 10,
-                  ret: [
-                    {
-                      contractRet: 'SUCCESS',
-                      fee: 10,
-                    },
-                  ],
-                  net_fee: 5,
-                },
-              ],
-            });
-          },
-        });
-      } else {
-        return Promise.resolve({
-          json: () => {
-            return Promise.resolve({
-              data: [
-                {
-                  balance: 1000000,
-                  trc20: [
-                    {
-                      contractAddress: '5000000',
-                    },
-                  ],
-                },
-              ],
-            });
-          },
-        });
-      }
-    });
-
-    instance = TronChain('yourPrivateKey');
+    jest.clearAllMocks();
+    getPremiumRPCUrl.mockReturnValue('');
+    tronWeb = fakeTronWeb();
+    useTronWeb(tronWeb);
+    instance = TronChain();
   });
 
   it('should get icon name', async () => {
-    const iconName = await instance.getIconName();
-    expect(iconName).toEqual('TRX');
+    await expect(instance.getIconName()).resolves.toEqual('TRX');
   });
 
-  it('should get contract', async () => {
-    const contract = await instance.getContract({
-      contractAddress: 'contractAddress',
-    });
-    expect(contract).toEqual({name: '', symbol: '', decimals: ''});
-  });
-
-  it('should get balance', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [
-              {
-                balance: 1000000,
-                trc20: [
-                  {
-                    contractAddress: '5000000',
-                  },
-                ],
-              },
-            ],
-          }),
-      }),
-    );
-    const balance = await instance.getBalance({address: 'address'});
-    expect(balance).toEqual('1000000');
-  });
-
-  it('should get balance 0 for empty address', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [
-              {
-                balance: 0,
-                trc20: [
-                  {
-                    contractAddress: '5000000',
-                  },
-                ],
-              },
-            ],
-          }),
-      }),
-    );
-    const balance = await instance.getBalance({address: 'unknown_address'});
-    expect(balance).toEqual('0');
-  });
-
-  it('should get balance 0 for empty address even if api returns empty data array', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [],
-          }),
-      }),
-    );
-    const balance = await instance.getBalance({address: 'unknown_address'});
-    expect(balance).toEqual('0');
-  });
-
-  it('should get token balance', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [
-              {
-                balance: 0,
-                trc20: [
-                  {
-                    contractAddress: '5000000',
-                  },
-                ],
-              },
-            ],
-          }),
-      }),
-    );
-
-    const contract = await instance.getContract('contractAddress');
-    const balance = await instance.getTokenBalance({
-      address: 'address',
-      contractAddress: 'contractAddress',
-      decimal: 6,
-    });
-    expect(balance).toEqual('5000000');
-  });
-
-  it('should get bal 0 for non existing token balance diff api resp', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [
-              {
-                balance: 0,
-                trc20: [],
-              },
-            ],
-          }),
-      }),
-    );
-
-    const balance = await instance.getTokenBalance({
-      address: 'address',
-      contractAddress: 'contractAddressNotOwned',
-      decimal: 6,
-    });
-    expect(balance).toEqual('0');
-  });
-
-  it('should get bal 0 for non existing token balance', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            data: [],
-          }),
-      }),
-    );
-
-    const balance = await instance.getTokenBalance({
-      address: 'address',
-      contractAddress: 'contractAddressNotOwned',
-      decimal: 6,
-    });
-    expect(balance).toEqual('0');
-  });
-
-  it('should get transactions', async () => {
-    const transactions = await instance.getTransactions({address: 'address'});
-    expect(transactions).toBeDefined();
-    expect(transactions[0].amount).toEqual('5000000');
-  });
-
-  it('should send trx', async () => {
-    const result = await instance.send({
-      to: 'to',
-      from: 'from',
-      privateKey: 'privateKey',
-      amount: '1.0',
-    });
-    expect(result).toEqual('transactionResult');
-  });
-
-  it('should send token', async () => {
-    const result = await instance.sendToken({
-      contractAddress: 'contractAddress',
-      to: 'to',
-      from: 'from',
-      amount: '1.0',
-      privateKey: 'privateKey',
-      transactionFee: 'transactionFee',
-      decimals: 6,
-    });
-    expect(result).toEqual('transactionResult');
-  });
-
-  it('should wait for confirmation', async () => {
-    const result = await instance.waitForConfirmation({
-      transaction: {
-        txid: 'a2c07d4713147c8dfeb734f3027291a1f510c84d3500246bfefd154e7e1f653a',
-      },
-      interval: 3000,
-      retries: 5,
-    });
-    expect(result).toBeDefined();
-    expect(result.id).toEqual('testTransactionId');
-  });
-
-  it('should throw an error when creating tronWeb fails', () => {
+  // The default instance is created lazily on first offline use, so
+  // TronChain() itself never constructs TronWeb.
+  it('constructs TronWeb lazily and propagates a construction failure', () => {
+    expect(TronWeb).not.toHaveBeenCalled();
     const error = new Error('TronWeb creation error');
-    require('tronweb').mockImplementationOnce(() => {
+    TronWeb.mockImplementationOnce(() => {
       throw error;
     });
-
-    expect(() => TronChain('yourPrivateKey')).toThrow(error);
+    expect(() => instance.isValidAddress({address: 'address'})).toThrow(error);
   });
 
-  it('should throw an error when getting account fails', async () => {
-    const error = new Error('Get account error');
-    global.fetch.mockImplementationOnce(() => {
-      throw error;
+  describe('getBalance', () => {
+    it('returns the account balance as a string', async () => {
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '1000000',
+      );
     });
 
-    await expect(instance.getBalance({address: 'address'})).rejects.toThrow(
-      error,
-    );
+    it('returns 0 when the account has no balance', async () => {
+      tronWeb.trx.getAccount.mockResolvedValue({balance: 0});
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '0',
+      );
+    });
+
+    it('returns 0 for an account the node does not know', async () => {
+      tronWeb.trx.getAccount.mockResolvedValue({});
+      await expect(
+        instance.getBalance({address: 'unknown_address'}),
+      ).resolves.toEqual('0');
+    });
+
+    // retryFunc falls back to its default rather than surfacing the error,
+    // so a dead provider set reads as a zero balance, not a crash.
+    it('falls back to 0 when every provider fails', async () => {
+      tronWeb.trx.getAccount.mockRejectedValue(new Error('node down'));
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '0',
+      );
+    });
+
+    it('falls through to the next provider when the first one fails', async () => {
+      // Two providers: a premium one first, then the trongrid fallback.
+      getPremiumRPCUrl.mockReturnValue('http://premium.test');
+      const dead = fakeTronWeb();
+      dead.trx.getAccount.mockRejectedValue(new Error('node down'));
+      const healthy = fakeTronWeb();
+      healthy.trx.getAccount.mockResolvedValue({balance: 4242});
+
+      TronWeb.mockImplementationOnce(() => dead) // provider 0 — fails
+        .mockImplementationOnce(() => healthy); // provider 1 — succeeds
+
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '4242',
+      );
+    });
   });
 
-  describe('exception handling', () => {
-    const error = new Error('Mocked error');
-    beforeEach(() => {
-      require('tronweb').mockImplementationOnce(() => {
-        console.log('in mocked tronweb');
-        return {
-          contract: () => {
-            return {
-              at: jest.fn().mockRejectedValue(error),
-            };
-          },
+  describe('getTokenBalance', () => {
+    it('reads balanceOf from the trc20 contract', async () => {
+      await expect(
+        instance.getTokenBalance({
+          address: 'address',
+          contractAddress: 'contractAddress',
+        }),
+      ).resolves.toEqual('5000000');
+    });
 
-          toSun: jest.fn().mockReturnValue('sunAmount'),
-          address: {
-            toHex: jest.fn().mockReturnValue('mockedHexValue'),
-            fromPrivateKey: jest.fn().mockReturnValue('mockedHexValue'),
-          },
-          transactionBuilder: {
-            sendTrx: jest.fn().mockReturnValue('transactionResult'),
-          },
-          trx: {
-            sendRawTransaction: async () => {
-              console.log('in sendRawTransaction');
-              throw error;
-            }, //jest.fn().mockRejectedValue(error),
-            sign: jest.fn().mockReturnValue('signedTransaction'),
-          },
-        };
+    it('falls back to 0 when the contract call fails', async () => {
+      tronWeb.contract.mockImplementation(() => ({
+        balanceOf: () => ({
+          call: jest.fn().mockRejectedValue(new Error('reverted')),
+        }),
+      }));
+      await expect(
+        instance.getTokenBalance({
+          address: 'address',
+          contractAddress: 'contractAddressNotOwned',
+        }),
+      ).resolves.toEqual('0');
+    });
+  });
+
+  describe('getContract', () => {
+    it('returns name, symbol and decimals', async () => {
+      await expect(
+        instance.getContract({contractAddress: 'contractAddress'}),
+      ).resolves.toEqual({name: 'Tether', symbol: 'USDT', decimals: 6});
+    });
+
+    // The `at` lookup resolves to a contract with no name, and TronChain
+    // retries through the local trc20 ABI before giving up.
+    it('returns empty fields when the contract exposes no metadata', async () => {
+      tronWeb.contract.mockImplementation(() => ({
+        at: jest.fn().mockResolvedValue({}),
+      }));
+      await expect(
+        instance.getContract({contractAddress: 'contractAddress'}),
+      ).resolves.toEqual({name: '', symbol: '', decimals: ''});
+    });
+
+    it('falls back to an empty object when every provider fails', async () => {
+      tronWeb.contract.mockImplementation(() => {
+        throw new Error('Mocked error');
       });
-      instance = TronChain('yourPrivateKey');
-    });
-
-    it('should throw an error when getting contract fails', async () => {
-      // const error = new Error('Get contract error');
-      // require('tronweb').mockImplementationOnce(() => {
-      //   return {
-      //     contract: () => {
-      //       return {
-      //         at: jest.fn().mockRejectedValue(error),
-      //       };
-      //     },
-      //   };
-      // });
-      // instance = TronChain('yourPrivateKey');
       await expect(
         instance.getContract({contractAddress: null}),
       ).resolves.toEqual({});
     });
+  });
 
-    it('should throw an error when sending trx fails', async () => {
+  describe('getTransactions', () => {
+    it('maps a TRX transfer into the wallet transaction shape', async () => {
+      tronWeb.fullNode.request.mockResolvedValue({
+        data: [
+          {
+            txID: 'txID123',
+            blockNumber: 10,
+            ret: [{contractRet: 'SUCCESS', fee: 10}],
+            raw_data: {
+              timestamp: 1700000000000,
+              contract: [
+                {
+                  type: 'TransferContract',
+                  parameter: {
+                    value: {
+                      owner_address: 'ownerHex',
+                      to_address: 'toHex',
+                      amount: 5000000,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+      const transactions = await instance.getTransactions({address: 'address'});
+
+      expect(transactions).toHaveLength(1);
+      expect(transactions[0]).toMatchObject({
+        amount: '5000000',
+        link: 'txID123',
+        status: 'SUCCESS',
+        blockNumber: 10,
+        transactionType: 'regular',
+        from: 'from:ownerHex',
+        to: 'from:toHex',
+      });
+    });
+  });
+
+  describe('send', () => {
+    it('signs once and returns the broadcast result', async () => {
+      const result = await instance.send({
+        to: 'to',
+        from: 'from',
+        privateKey: 'privateKey',
+        amount: '1.0',
+      });
+
+      expect(result).toMatchObject({result: true, txid: 'txid1'});
+      expect(tronWeb.transactionBuilder.sendTrx).toHaveBeenCalledWith(
+        'to',
+        '1.0',
+        'from',
+      );
+      // The idempotency contract: build+sign happen exactly once, so a
+      // broadcast retry can never produce a second txID.
+      expect(tronWeb.trx.sign).toHaveBeenCalledTimes(1);
+    });
+
+    it('strips a 0x prefix from the private key before signing', async () => {
+      await instance.send({
+        to: 'to',
+        from: 'from',
+        privateKey: '0xPRIVATEKEY',
+        amount: '1.0',
+      });
+      expect(tronWeb.trx.sign).toHaveBeenCalledWith(
+        expect.anything(),
+        'PRIVATEKEY',
+      );
+    });
+
+    it('treats a duplicate broadcast as success', async () => {
+      tronWeb.trx.sendRawTransaction.mockResolvedValue({
+        code: 'DUP_TRANSACTION_ERROR',
+      });
       await expect(
         instance.send({
           to: 'to',
           from: 'from',
-          amount: '1',
           privateKey: 'privateKey',
+          amount: '1.0',
+        }),
+      ).resolves.toMatchObject({result: true, txid: 'txid1', duplicated: true});
+    });
+
+    it('rejects when the build step fails on every provider', async () => {
+      const error = new Error('Mocked error');
+      tronWeb.transactionBuilder.sendTrx.mockRejectedValue(error);
+      await expect(
+        instance.send({
+          to: 'to',
+          from: 'from',
+          privateKey: 'privateKey',
+          amount: '1.0',
         }),
       ).rejects.toThrow(error);
     });
+  });
 
-    it('should throw an error when sending token fails', async () => {
-      // const error = new Error('Send token error');
-      // require('tronweb').mockImplementationOnce(() => {
-      //   return {
-      //     trx: {
-      //       sendRawTransaction: jest.fn().mockRejectedValue(error),
-      //     },
-      //   };
-      // });
-
-      require('tronweb').mockImplementationOnce(() => {
-        console.log('in mocked tronweb');
-        return {
-          contract: () => {
-            return {
-              at: jest.fn().mockRejectedValue(error),
-            };
-          },
-
-          toSun: jest.fn().mockReturnValue('sunAmount'),
-          address: {
-            toHex: jest.fn().mockReturnValue('mockedHexValue'),
-            fromPrivateKey: jest.fn().mockReturnValue('mockedHexValue'),
-          },
-          transactionBuilder: {
-            sendTrx: jest.fn().mockReturnValue('transactionResult'),
-            triggerSmartContract: jest
-              .fn()
-              .mockResolvedValue({transaction: 'triggeredTransaction'}),
-          },
-          trx: {
-            sendRawTransaction: async () => {
-              console.log('in sendRawTransaction');
-              throw error;
-            }, //jest.fn().mockRejectedValue(error),
-            sign: jest.fn().mockReturnValue('signedTransaction'),
-          },
-        };
-      });
-
-      const coinWrapper = {
-        token: {
-          address: 'tokenAddress',
-        },
-      };
-      instance = TronChain('yourPrivateKey');
+  describe('sendToken', () => {
+    it('returns the broadcast result', async () => {
       await expect(
         instance.sendToken({
           contractAddress: 'contractAddress',
@@ -415,28 +319,51 @@ describe('TronChain', () => {
           from: 'from',
           amount: '1.0',
           privateKey: 'privateKey',
-          transactionFee: 'transactionFee',
-          decimals: 6,
+          decimal: 6,
+        }),
+      ).resolves.toMatchObject({result: true, txid: 'txid1'});
+      expect(
+        tronWeb.transactionBuilder.triggerSmartContract,
+      ).toHaveBeenCalledTimes(1);
+      expect(tronWeb.trx.sign).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the build step fails on every provider', async () => {
+      const error = new Error('Mocked error');
+      tronWeb.transactionBuilder.triggerSmartContract.mockRejectedValue(error);
+      await expect(
+        instance.sendToken({
+          contractAddress: 'contractAddress',
+          to: 'to',
+          from: 'from',
+          amount: '1.0',
+          privateKey: 'privateKey',
+          decimal: 6,
         }),
       ).rejects.toThrow(error);
     });
+  });
 
-    it('should throw an error when waiting for confirmation times out', async () => {
-      require('tronweb').mockImplementationOnce(() => {
-        return {
-          trx: {
-            getTransactionInfo: jest.fn().mockResolvedValue(null),
-          },
-        };
-      });
-      instance = TronChain('yourPrivateKey');
+  describe('waitForConfirmation', () => {
+    it('resolves once TronScan reports SUCCESS', async () => {
+      TronScan.getTransactionByHash.mockResolvedValue({data: 'SUCCESS'});
       await expect(
         instance.waitForConfirmation({
-          transaction: {txid: 'transaction'},
-          interval: 3000,
+          transaction: {txid: 'txid1'},
+          interval: 1,
+          retries: 5,
+        }),
+      ).resolves.toEqual({data: 'SUCCESS'});
+    });
+
+    it('resolves to null when the transaction has no id', async () => {
+      await expect(
+        instance.waitForConfirmation({
+          transaction: {},
+          interval: 1,
           retries: 1,
         }),
-      ).resolves.toEqual(null);
+      ).resolves.toBeNull();
     });
   });
 });

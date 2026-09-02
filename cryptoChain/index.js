@@ -1,76 +1,68 @@
-import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronChain';
-import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
 import {
   isAddressOrPrivateKeyExists,
   isBitcoinChain,
   mergeUniqueAccounts,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
-import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-import {BitcoinChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
-import {SolanaChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/SolanaChain';
-import {StellarChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/StellarChain';
-import {RippleChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/RippleChain';
-import {ThorChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/ThorChain';
-import {TezosChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TezosChain';
-import {CosmosChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/CosmosChain';
+import {
+  CHAIN_CONFIG,
+  IS_SANDBOX,
+} from 'dok-wallet-blockchain-networks/config/config';
 import {createWallet} from 'myWallet/wallet.service';
-import {PolkadotChain} from './chains/PolkadotChain';
-import {TonChain} from './chains/TonChain';
-import {DogecoinOrLitecoinChain} from './chains/DogecoinOrLitecoinChain';
-import {AptosChain} from './chains/AptosChain';
-import {HederaChain} from './chains/HederaChain';
-import {CardanoChain} from './chains/CardanoChain';
-import {FilecoinChain} from './chains/FilecoinChain';
-import {BitcoinLightningChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinLightningChain';
 import {APP_VERSION} from 'utils/common';
 
-const chains = {
-  tron: TronChain,
-  ethereum: EVMChain,
-  hyperliquid: EVMChain,
-  binance_smart_chain: EVMChain,
-  bitcoin: BitcoinChain, // this is native segwit
-  bitcoin_legacy: BitcoinChain,
-  bitcoin_segwit: BitcoinChain,
-  bitcoin_lightning: BitcoinLightningChain,
-  // bitcoin_taproot: BitcoinChain,
-  solana: SolanaChain,
-  polygon: EVMChain,
-  base: EVMChain,
-  arbitrum: EVMChain,
-  optimism: EVMChain,
-  litecoin: DogecoinOrLitecoinChain,
-  stellar: StellarChain,
-  ripple: RippleChain,
-  thorchain: ThorChain,
-  tezos: TezosChain,
-  optimism_binance_smart_chain: EVMChain,
-  avalanche: EVMChain,
-  cosmos: CosmosChain,
-  fantom: EVMChain,
-  gnosis: EVMChain,
-  viction: EVMChain,
-  polkadot: PolkadotChain,
-  ton: TonChain,
-  dogecoin: DogecoinOrLitecoinChain,
-  aptos: AptosChain,
-  linea: EVMChain,
-  zksync: EVMChain,
-  ethereum_classic: EVMChain,
-  ethereum_pow: EVMChain,
-  kava: EVMChain,
-  bitcoin_cash: DogecoinOrLitecoinChain,
-  hedera: HederaChain,
-  ink: EVMChain,
-  sei: EVMChain,
-  robinhood: EVMChain,
-  cardano: CardanoChain,
-  filecoin: FilecoinChain,
+const loadEVMChain = () => require('./chains/EVMChain').EVMChain;
+const loadBitcoinChain = () => require('./chains/BitcoinChain').BitcoinChain;
+const loadDogecoinOrLitecoinChain = () =>
+  require('./chains/DogecoinOrLitecoinChain').DogecoinOrLitecoinChain;
+const loadBitcoinLightningChain = () =>
+  require('./chains/BitcoinLightningChain').BitcoinLightningChain;
+const loadTronChain = () => require('./chains/TronChain').TronChain;
+const loadSolanaChain = () => require('./chains/SolanaChain').SolanaChain;
+const loadStellarChain = () => require('./chains/StellarChain').StellarChain;
+const loadRippleChain = () => require('./chains/RippleChain').RippleChain;
+const loadThorChain = () => require('./chains/ThorChain').ThorChain;
+const loadTezosChain = () => require('./chains/TezosChain').TezosChain;
+const loadCosmosChain = () => require('./chains/CosmosChain').CosmosChain;
+const loadPolkadotChain = () => require('./chains/PolkadotChain').PolkadotChain;
+const loadTonChain = () => require('./chains/TonChain').TonChain;
+const loadAptosChain = () => require('./chains/AptosChain').AptosChain;
+const loadHederaChain = () => require('./chains/HederaChain').HederaChain;
+const loadCardanoChain = () => require('./chains/CardanoChain').CardanoChain;
+const loadFilecoinChain = () => require('./chains/FilecoinChain').FilecoinChain;
+
+const CHAIN_LOADERS = {
+  evm: loadEVMChain,
+  bitcoin: loadBitcoinChain,
+  doge_ltc: loadDogecoinOrLitecoinChain,
+  lightning: loadBitcoinLightningChain,
+  tron: loadTronChain,
+  solana: loadSolanaChain,
+  stellar: loadStellarChain,
+  ripple: loadRippleChain,
+  thorchain: loadThorChain,
+  tezos: loadTezosChain,
+  cosmos: loadCosmosChain,
+  polkadot: loadPolkadotChain,
+  ton: loadTonChain,
+  aptos: loadAptosChain,
+  hedera: loadHederaChain,
+  cardano: loadCardanoChain,
+  filecoin: loadFilecoinChain,
 };
 
+const chainLoaders = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.chain_loader)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      CHAIN_LOADERS[chainConfig.chain_loader],
+    ]),
+);
+
 export const getChain = (chain, phrase, customRpcUrl) => {
-  return chains[chain]?.(chain, phrase, customRpcUrl);
+  const loadChain = chainLoaders[chain];
+  return loadChain ? loadChain()(chain, phrase, customRpcUrl) : undefined;
 };
 
 const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
@@ -104,13 +96,16 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
       extendedPrivateKey: chain_existing_coin.extendedPrivateKey,
     };
   } else if (phrase && chainName === 'bitcoin_lightning') {
+    const BitcoinLightningChain = loadBitcoinLightningChain();
     wallet = await BitcoinLightningChain(
       chainName,
       phrase,
     ).generateSparkAddress();
   } else if (phrase && chainName === 'stellar') {
+    const StellarChain = loadStellarChain();
     wallet = StellarChain().createStellarWallet({mnemonic: phrase});
   } else if (phrase && chainName === 'hedera') {
+    const HederaChain = loadHederaChain();
     wallet = await HederaChain().getOrCreateHederaWallet({mnemonic: phrase});
   } else if (phrase) {
     wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
@@ -152,11 +147,11 @@ export const getCoin = async (
   if (coin?.type === 'token' && coin.contractAddress) {
     return await getTokenCoin(chain, wallet, coin, transactionFee);
   } else {
-    return await getBaseCoin(chain, wallet, coin);
+    return await getBaseCoin(chain, wallet, coin, walletData);
   }
 };
 
-const getBaseCoin = async (chain, wallet, coin) => {
+const getBaseCoin = async (chain, wallet, coin, walletData) => {
   // Prefer coin's stored deriveAddresses (from Redux); fall back to native wallet result
   const effectiveDeriveAddresses = wallet?.isNew
     ? mergeUniqueAccounts(coin?.deriveAddresses, wallet?.deriveAddresses)
@@ -178,6 +173,9 @@ const getBaseCoin = async (chain, wallet, coin) => {
         extendedPublicKey: wallet.extendedPublicKey,
         deriveAddresses: effectiveDeriveAddresses,
         chain_name: coin?.chain_name,
+        isLegacyScanDone: !!(
+          coin?.isLegacyScanDone || walletData?.isLegacyFree
+        ),
       }),
     getStakingBalance: async () =>
       await chain.getStakingBalance({
@@ -693,47 +691,11 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
   return coinWrapper;
 };
 
-const hashObject = {
-  tron: 'txid',
-  ethereum: 'hash',
-  binance_smart_chain: 'hash',
-  bitcoin: '',
-  bitcoin_legacy: '',
-  bitcoin_segwit: '',
-  solana: '',
-  polygon: 'hash',
-  base: 'hash',
-  arbitrum: 'hash',
-  optimism: 'hash',
-  litecoin: '',
-  stellar: '',
-  ripple: 'result.hash',
-  thorchain: '',
-  tezos: 'opHash',
-  optimism_binance_smart_chain: 'hash',
-  avalanche: 'hash',
-  cosmos: '',
-  fantom: 'hash',
-  gnosis: 'hash',
-  viction: 'hash',
-  // ! polkadot: 'hash',
-  ton: 'hash',
-  dogecoin: '',
-  aptos: '',
-  linea: 'hash',
-  zksync: 'hash',
-  ethereum_classic: 'hash',
-  ethereum_pow: 'hash',
-  kava: 'hash',
-  bitcoin_cash: '',
-  hedera: 'transactionHash',
-  ink: 'hash',
-  sei: 'hash',
-  robinhood: 'hash',
-  hyperliquid: 'hash',
-  cardano: '',
-  filecoin: '',
-};
+const hashObject = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.tx_hash_path)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.tx_hash_path]),
+);
 
 export const createWalletForChain = async (
   phrase,

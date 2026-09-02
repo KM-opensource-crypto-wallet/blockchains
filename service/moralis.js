@@ -1,8 +1,8 @@
-import Moralis from 'moralis';
-import 'dok-wallet-blockchain-networks/config/moralis';
+import {getMoralis} from 'dok-wallet-blockchain-networks/config/moralis';
 
 export const fetchEVMNftApi = async (address, chain, cursor) => {
   try {
+    const Moralis = await getMoralis();
     const response = await Moralis.EvmApi.nft.getWalletNFTs({
       address,
       chain,
@@ -31,6 +31,7 @@ export const fetchEVMNftApi = async (address, chain, cursor) => {
 
 export const fetchSolanaNftApi = async (address, network) => {
   try {
+    const Moralis = await getMoralis();
     const response = await Moralis.SolApi.account.getNFTs({
       address,
       network,

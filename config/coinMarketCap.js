@@ -1,9 +1,6 @@
-import axios from 'axios';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const CoinMarketCapAPI = axios.create({
-  baseURL: 'https://pro-api.coinmarketcap.com/v2',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
+export const CoinMarketCapAPI = createProviderClient({
+  proxy: 'coinmarketcap',
+  scan: true,
 });

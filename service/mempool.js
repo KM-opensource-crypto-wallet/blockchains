@@ -1,12 +1,10 @@
 import {LitecoinSpaceAPI} from 'dok-wallet-blockchain-networks/config/litecoinSpace';
 import BigNumber from 'bignumber.js';
 import {BitcoinMempoolAPI} from 'dok-wallet-blockchain-networks/config/bitcoinMempool';
-import {BchMempoolAPI} from 'dok-wallet-blockchain-networks/config/BchMempool';
 
 const APIProvider = {
   btc: BitcoinMempoolAPI,
   ltc: LitecoinSpaceAPI,
-  bch: BchMempoolAPI,
 };
 
 const parseReadableTransactions = (txs, walletAddresses) => {
