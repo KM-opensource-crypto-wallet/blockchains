@@ -41,7 +41,7 @@ const getClient = () => {
 const getNewClient = (localOperatorId, localPrivateKey) => {
   try {
     let tempClient = IS_SANDBOX ? Client.forTestnet() : Client.forMainnet();
-    tempClient = client.setOperator(
+    tempClient = tempClient.setOperator(
       localOperatorId,
       PrivateKey.fromStringECDSA(localPrivateKey),
     );
@@ -52,7 +52,7 @@ const getNewClient = (localOperatorId, localPrivateKey) => {
   }
 };
 export const HederaChain = () => {
-  const hederaClient = getClient();
+  const hederaClient = () => getClient();
 
   const isAccountExists = async address => {
     try {
@@ -70,11 +70,11 @@ export const HederaChain = () => {
       const accountCreateTxResponse = await new AccountCreateTransaction()
         .setKey(accountPrivateKey)
         .setAlias(address)
-        .freezeWith(hederaClient)
-        .execute(hederaClient);
+        .freezeWith(hederaClient())
+        .execute(hederaClient());
       const receipt = await new TransactionReceiptQuery()
         .setTransactionId(accountCreateTxResponse.transactionId)
-        .execute(hederaClient);
+        .execute(hederaClient());
       accountId = receipt.accountId?.toString();
     }
     if (!accountId) {
@@ -255,7 +255,7 @@ export const HederaChain = () => {
     },
     waitForConfirmation: async ({transaction}) => {
       try {
-        const receipt = await transaction.getReceipt(client);
+        const receipt = await transaction.getReceipt(getClient());
         if (receipt.status === Status.Success) {
           return transaction;
         }

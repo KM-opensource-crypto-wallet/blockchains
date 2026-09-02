@@ -37,7 +37,15 @@ import {
   isAddressUsageScanAvailable,
 } from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
-bitcoin.initEccLib(ecc);
+// Registered on first SDK use (taproot needs it) so balance/transaction
+// reads — which are plain HTTP — never load bitcoinjs-lib.
+let eccInitDone = false;
+const ensureEccInit = () => {
+  if (!eccInitDone) {
+    bitcoin.initEccLib(ecc);
+    eccInitDone = true;
+  }
+};
 
 // Sorting weight so UTXOs order by (chainIndex, addressIndex); no chain ever
 // holds this many addresses (bitcoinHdAddress caps chains at 500).
@@ -47,6 +55,7 @@ export const BitcoinChain = () => {
   return {
     isValidAddress: ({address}) => {
       try {
+        ensureEccInit();
         bitcoin.address.toOutputScript(address, config.BITCOIN_NETWORK_STRING);
         return true;
       } catch (e) {
@@ -55,6 +64,7 @@ export const BitcoinChain = () => {
     },
     isValidPrivateKey: ({privateKey}) => {
       try {
+        ensureEccInit();
         const ECPair = ECPairFactory(ecc);
         const keyPair = ECPair.fromWIF(
           privateKey,
@@ -66,6 +76,7 @@ export const BitcoinChain = () => {
       }
     },
     createWalletByPrivateKey: ({privateKey, chain_name}) => {
+      ensureEccInit();
       const customNetwork = getNetworkByChainName(chain_name);
       const ECPair = ECPairFactory(ecc);
       const keyPair = ECPair.fromWIF(privateKey, customNetwork);
@@ -222,6 +233,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinLegacyWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName('bitcoin_legacy');
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -248,6 +260,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinTaprootWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
         const root = bip32.fromSeed(seed, config.BITCOIN_NETWORK_STRING);
@@ -267,6 +280,7 @@ export const BitcoinChain = () => {
     },
     createBitcoinSegwitWallet: async ({mnemonic}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName('bitcoin_segwit');
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -511,6 +525,7 @@ export const BitcoinChain = () => {
     },
     createCustomDerivedAddress: async ({chain_name, mnemonic, derivePath}) => {
       try {
+        ensureEccInit();
         const customNetwork = getNetworkByChainName(chain_name);
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const bip32 = BIP32Factory(ecc);
@@ -563,6 +578,7 @@ const buildUTXO = async ({
   selectedUTXOs,
   memo,
 }) => {
+  ensureEccInit();
   // memo is a hex-encoded OP_RETURN payload (exchange providers like LI.FI
   // route shared-vault BTC deposits by it). Validate up front: a malformed
   // or oversized memo must fail the build, never produce a memo-less send —

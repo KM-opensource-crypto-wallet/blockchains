@@ -1,13 +1,6 @@
-import axios from 'axios';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const BlockScoutAPI = axios.create({
-  baseURL: config.BLOCKSCOUT_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  params: {
-    apikey: config.BLOCKSCOUT_API_KEY,
-  },
-  timeout: 30000,
+export const BlockScoutAPI = createProviderClient({
+  proxy: 'blockscout',
+  scan: true,
 });

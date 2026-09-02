@@ -8,6 +8,7 @@ import {
   formatExchangeArray,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getSelectedCountry} from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
+import {CHAIN_CONFIG} from 'dok-wallet-blockchain-networks/config/config';
 
 const initialState = {
   providers: [],
@@ -22,29 +23,18 @@ const initialState = {
   disableMessage: '',
   google_analytics_key: '',
   exchangeProviders: '',
-  cmc_api_keys: [],
-  bitcoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  litecoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  dogecoin_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  bitcoin_cash_fee_multiplier: {
-    normal: 1.4,
-    recommended: 1.65,
-  },
-  additional_l1_fees: {
-    base: 500000000000,
-    optimism: 500000000000,
-    optimism_binance_smart_chain: 500000000000,
-    ink: 500000000000,
-  },
+  bitcoin_fee_multiplier: {...CHAIN_CONFIG.bitcoin.fee_multiplier},
+  litecoin_fee_multiplier: {...CHAIN_CONFIG.litecoin.fee_multiplier},
+  dogecoin_fee_multiplier: {...CHAIN_CONFIG.dogecoin.fee_multiplier},
+  bitcoin_cash_fee_multiplier: {...CHAIN_CONFIG.bitcoin_cash.fee_multiplier},
+  additional_l1_fee_percentages: Object.fromEntries(
+    Object.entries(CHAIN_CONFIG)
+      .filter(([, chainConfig]) => chainConfig.additional_l1_fee_percentage)
+      .map(([chain_name, chainConfig]) => [
+        chain_name,
+        chainConfig.additional_l1_fee_percentage,
+      ]),
+  ),
 };
 
 export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
@@ -71,12 +61,11 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       disableMessage: data?.disableMessage,
       google_analytics_key: data?.google_analytics_key,
       exchangeProviders: data?.exchangeProviders,
-      cmc_api_keys: data?.cmc_api_keys,
       bitcoin_fee_multiplier: data?.bitcoin_fee_multiplier || {},
       litecoin_fee_multiplier: data?.litecoin_fee_multiplier || {},
       dogecoin_fee_multiplier: data?.dogecoin_fee_multiplier || {},
       bitcoin_cash_fee_multiplier: data?.bitcoin_cash_fee_multiplier || {},
-      additional_l1_fees: data?.additional_l1_fees || {},
+      additional_l1_fee_percentages: data?.additional_l1_fee_percentages || {},
       is_max_wallet_limit_reached: data?.is_max_wallet_limit_reached || false,
       android_latest_version: data?.android_latest_version || null,
       tutorial_videos: Array.isArray(data?.tutorial_videos)
@@ -150,9 +139,6 @@ export const cryptoProviderSlice = createSlice({
         state.messageAllowUrls = payload?.messageAllowUrls;
         state.disableMessage = payload?.disableMessage?.toString();
         state.google_analytics_key = payload?.google_analytics_key?.toString();
-        state.cmc_api_keys = Array.isArray(payload?.cmc_api_keys)
-          ? payload?.cmc_api_keys
-          : [];
         state.bitcoin_fee_multiplier = {
           ...state.bitcoin_fee_multiplier,
           ...payload?.bitcoin_fee_multiplier,
@@ -169,9 +155,9 @@ export const cryptoProviderSlice = createSlice({
           ...state.bitcoin_cash_fee_multiplier,
           ...payload?.bitcoin_cash_fee_multiplier,
         };
-        state.additional_l1_fees = {
-          ...state.additional_l1_fees,
-          ...payload?.additional_l1_fees,
+        state.additional_l1_fee_percentages = {
+          ...state.additional_l1_fee_percentages,
+          ...payload?.additional_l1_fee_percentages,
         };
         state.fetchProvider = false;
         state.exchangeProviders = formatExchangeArray(

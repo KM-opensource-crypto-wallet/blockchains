@@ -1,27 +1,43 @@
 import {
   convertToSmallAmount,
+  fetchRequest,
   getExplorerTxUrl,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
-const {
-  Account,
-  Ed25519PrivateKey,
-  Aptos,
-  AptosConfig,
-  Network,
-  AccountAddress,
-} = require('@aptos-labs/ts-sdk');
+import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+
+let aptosSdk;
+const getAptosSdk = () => (aptosSdk ??= require('@aptos-labs/ts-sdk'));
 
 const APT_COIN = '0x1::aptos_coin::AptosCoin';
+
 export const AptosChain = () => {
-  const aptosConfig = new AptosConfig({
-    network: IS_SANDBOX ? Network.TESTNET : Network.MAINNET,
-  });
-  const aptosProvider = new Aptos(aptosConfig);
+  let aptosProviderInstance;
+  const aptosProvider = () => {
+    if (!aptosProviderInstance) {
+      const {Aptos, AptosConfig, Network} = getAptosSdk();
+      aptosProviderInstance = new Aptos(
+        new AptosConfig({
+          network: IS_SANDBOX ? Network.TESTNET : Network.MAINNET,
+        }),
+      );
+    }
+    return aptosProviderInstance;
+  };
+
+  const fetchAptosApi = path => fetchRequest(`${getRPCUrl('aptos')}${path}`);
+
+  const fetchAptosBalance = async (address, asset) => {
+    const balance = await fetchAptosApi(
+      `/accounts/${address}/balance/${asset}`,
+    );
+    return balance?.toString() || '0';
+  };
 
   const getAccountFromPrivateKey = privateKey => {
+    const {Account, Ed25519PrivateKey} = getAptosSdk();
     const pk = new Ed25519PrivateKey(privateKey);
     return Account.fromPrivateKey({
       privateKey: pk,
@@ -37,7 +53,7 @@ export const AptosChain = () => {
     coinType,
     estimateGas,
   }) => {
-    return aptosProvider.transferCoinTransaction({
+    return aptosProvider().transferCoinTransaction({
       sender: fromAddress,
       recipient: toAddress,
       amount,
@@ -51,7 +67,7 @@ export const AptosChain = () => {
   const calculateFee = async ({transaction, privateKey}) => {
     const account = getAccountFromPrivateKey(privateKey);
     const [userTransactionResponse] =
-      await aptosProvider.transaction.simulate.simple({
+      await aptosProvider().transaction.simulate.simple({
         signerPublicKey: account.publicKey,
         transaction,
       });
@@ -75,13 +91,14 @@ export const AptosChain = () => {
   return {
     isValidAddress: ({address}) => {
       try {
-        return !!AccountAddress.fromStringStrict(address);
+        return !!getAptosSdk().AccountAddress.fromStringStrict(address);
       } catch {
         return false;
       }
     },
     isValidPrivateKey: async ({privateKey}) => {
       try {
+        const {Ed25519PrivateKey} = getAptosSdk();
         return !!new Ed25519PrivateKey(privateKey);
       } catch (e) {
         return false;
@@ -96,10 +113,7 @@ export const AptosChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const balance = await aptosProvider.getAccountAPTAmount({
-          accountAddress: address,
-        });
-        return balance?.toString() || '0';
+        return await fetchAptosBalance(address, APT_COIN);
       } catch (e) {
         console.error('error in get balance from aptos', e);
         return '0';
@@ -109,11 +123,7 @@ export const AptosChain = () => {
       try {
         // Extract base address (before ::) for FA lookup
         const faAddress = contractAddress.split('::')[0];
-        const balance = await aptosProvider.getBalance({
-          accountAddress: address,
-          asset: faAddress,
-        });
-        return balance?.toString() || '0';
+        return await fetchAptosBalance(address, faAddress);
       } catch (e) {
         console.error(`error getting token balance for aptos ${e}`);
         return '0';
@@ -174,10 +184,9 @@ export const AptosChain = () => {
     },
     getTransactions: async ({address}) => {
       try {
-        const transactions = await aptosProvider.getAccountTransactions({
-          accountAddress: address,
-          options: {limit: 10},
-        });
+        const transactions = await fetchAptosApi(
+          `/accounts/${address}/transactions?limit=10`,
+        );
         if (!Array.isArray(transactions)) {
           return [];
         }
@@ -227,9 +236,7 @@ export const AptosChain = () => {
         if (!txHash) {
           return {data: null};
         }
-        const item = await aptosProvider.getTransactionByHash({
-          transactionHash: txHash,
-        });
+        const item = await fetchAptosApi(`/transactions/by_hash/${txHash}`);
         if (!item || item?.type !== 'user_transaction') {
           return null;
         }
@@ -246,7 +253,7 @@ export const AptosChain = () => {
           : null;
         if (txVersion !== null) {
           try {
-            const ledgerInfo = await aptosProvider.getLedgerInfo();
+            const ledgerInfo = await fetchAptosApi('/');
             const currentVersion = parseInt(
               String(ledgerInfo?.ledger_version),
               10,
@@ -291,7 +298,7 @@ export const AptosChain = () => {
         });
 
         const committedTransaction =
-          await aptosProvider.signAndSubmitTransaction({
+          await aptosProvider().signAndSubmitTransaction({
             signer: account,
             transaction,
           });
@@ -321,7 +328,7 @@ export const AptosChain = () => {
           estimateGas,
         });
         const committedTransaction =
-          await aptosProvider.signAndSubmitTransaction({
+          await aptosProvider().signAndSubmitTransaction({
             signer: account,
             transaction,
           });
@@ -331,7 +338,7 @@ export const AptosChain = () => {
       }
     },
     waitForConfirmation: async ({transaction}) => {
-      return aptosProvider.waitForTransaction({
+      return aptosProvider().waitForTransaction({
         transactionHash: transaction,
         options: {
           checkSuccess: true,

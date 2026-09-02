@@ -146,7 +146,7 @@ export const FilecoinChain = chain_name => {
             amount: item?.amount?.toString(),
             link: txHash ? txHash : '',
             url: getExplorerTxUrl('filecoin', txHash),
-            status: item?.status === true ? 'SUCCESS' : 'FAILED',
+            status: item?.status || 'PENDING',
             date: item?.timestamp ? new Date(item.timestamp) : new Date(),
             from: item?.from,
             to: item?.to,
@@ -169,7 +169,7 @@ export const FilecoinChain = chain_name => {
               amount: finalTransaction?.amount?.toString(),
               link: txHash ? txHash : '',
               url: getExplorerTxUrl('filecoin', txHash),
-              status: finalTransaction?.status === true ? 'SUCCESS' : 'FAILED',
+              status: finalTransaction?.status || 'PENDING',
               date: finalTransaction?.timestamp
                 ? new Date(finalTransaction.timestamp)
                 : new Date(),

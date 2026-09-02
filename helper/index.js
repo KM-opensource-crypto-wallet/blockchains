@@ -1,11 +1,5 @@
 import BigNumber from 'bignumber.js';
-import {
-  ethers,
-  formatUnits,
-  isHexString,
-  parseUnits,
-  toUtf8String,
-} from 'ethers';
+import {ethers, isHexString, parseUnits, toUtf8String} from 'ethers';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import {APP_VERSION} from 'utils/common';
@@ -13,9 +7,13 @@ import {
   config,
   SCAN_URL,
   IS_SANDBOX,
+  CHAIN_CONFIG,
 } from 'dok-wallet-blockchain-networks/config/config';
+
 import bs58 from 'bs58';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import axios from 'axios';
 dayjs.extend(duration);
 
 export const getTokenLogoUrl = contractAddress => {
@@ -99,54 +97,6 @@ export function parseCryptoQrCodeString(qrCodeString) {
   };
 }
 
-const ethereumChains = {
-  ethereum: 'ethereum',
-  binance_smart_chain: 'ethereum',
-  polygon: 'ethereum',
-  base: 'ethereum',
-  arbitrum: 'ethereum',
-  optimism: 'ethereum',
-  optimism_binance_smart_chain: 'ethereum',
-  avalanche: 'ethereum',
-  fantom: 'ethereum',
-  gnosis: 'ethereum',
-  viction: 'ethereum',
-  linea: 'ethereum',
-  zksync: 'ethereum',
-  ethereum_classic: 'ethereum',
-  ethereum_pow: 'ethereum',
-  kava: 'ethereum',
-  ink: 'ethereum',
-  sei: 'ethereum',
-  hyperliquid: 'ethereum',
-  robinhood: 'ethereum',
-};
-
-const supportedChain = [
-  'bitcoin',
-  'ethereum',
-  'tron',
-  'solana',
-  'litecoin',
-  'bitcoin_legacy',
-  'bitcoin_segwit',
-  'stellar',
-  'ripple',
-  'thorchain',
-  'tezos',
-  'cosmos',
-  'polkadot',
-  'ton',
-  'dogecoin',
-  'aptos',
-  'hedera',
-  'bitcoin_cash',
-  'cardano',
-  'filecoin',
-  // 'bitcoin_taproot'
-  'bitcoin_lightning',
-];
-
 export function validateSupportedChain(chain_name) {
   if (ethereumChains[chain_name]) {
     return ethereumChains[chain_name];
@@ -158,6 +108,20 @@ export function validateSupportedChain(chain_name) {
 
 export function generateUniqueKeyForChain(chainData) {
   return `${chainData?.chain_name?.toLowerCase()}_${chainData?.symbol?.toUpperCase()}`;
+}
+function formatUnits(value, decimals) {
+  let digits = BigInt(value).toString();
+  const sign = digits.startsWith('-') ? '-' : '';
+  if (sign) {
+    digits = digits.slice(1);
+  }
+  if (!decimals) {
+    return sign + digits;
+  }
+  digits = digits.padStart(decimals + 1, '0');
+  const whole = digits.slice(0, -decimals);
+  const fraction = digits.slice(-decimals).replace(/0+$/, '') || '0';
+  return `${sign}${whole}.${fraction}`;
 }
 
 export function parseBalance(tokenPrice, tokenDecimals) {
@@ -305,42 +269,59 @@ export const isValidBigInt = value => {
   }
 };
 
-const BITCOIN_CHAINS = [
-  'bitcoin',
-  'bitcoin_segwit',
-  'bitcoin_legacy',
-  // 'bitcoin_taproot',
+const chainEntries = Object.entries(CHAIN_CONFIG);
+
+const chainsWith = flag =>
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig[flag])
+    .map(([chain_name]) => chain_name);
+
+const supportedChain = chainsWith('supported');
+const BITCOIN_CHAINS = chainsWith('is_bitcoin');
+const LITECOIN_CHAINS = chainsWith('is_litecoin');
+const EVM_CHAINS = chainsWith('is_evm');
+const ethereumChains = Object.fromEntries(
+  EVM_CHAINS.map(chain_name => [chain_name, 'ethereum']),
+);
+const OPTIONS_GAS_FEES_CHAIN = chainsWith('gas_fee_options');
+const EIP_1559_NOT_SUPPORTED = chainsWith('eip_1559_not_supported');
+const UNCLAIM_DEPOSIT_SUPPORTED_CHAINS = chainsWith('unclaim_deposit');
+const EIP_7702_SUPPORTED_CHAIN = chainsWith('eip_7702');
+const DERIVE_ADDRESS_SUPPORT_CHAIN = [
+  ...EVM_CHAINS,
+  ...chainsWith('derive_address'),
 ];
+const STAKING_CHAINS = chainEntries
+  .filter(([, chainConfig]) => chainConfig.staking_keys)
+  .flatMap(([chain_name, chainConfig]) =>
+    chainConfig.staking_keys.map(symbol => `${chain_name}_${symbol}`),
+  );
+const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = chainsWith(
+  'staking_validators_screen',
+);
+const SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN =
+  chainsWith('staking_resources');
+const feesOptionsChains = chainsWith('fees_options');
+const TRANSACTION_LIST_LIMIT_100 = chainsWith('tx_list_limit_100');
+const EPOCH_TIME_SUPPORT_CHAIN = chainsWith('epoch_time');
+const UNSTAKING_BUTTON_CHAIN = chainsWith('unstaking_button');
+const VOTE_BUTTON_CHAIN = chainsWith('vote_button');
+const MEMO_SUPPORT_CHAIN = chainsWith('memo_support');
+const NAME_SUPPORT_IN_ADDRESS = chainsWith('address_name_support');
+const TRANSACTION_LIST_NOT_SUPPORTED_CHAINS = chainsWith(
+  'tx_list_not_supported',
+);
+const CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS = chainsWith(
+  'custom_address_not_supported',
+);
+const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = chainsWith(
+  'private_key_not_supported',
+);
 
 export const isBitcoinChain = chain_name => BITCOIN_CHAINS.includes(chain_name);
 
-const LITECOIN_CHAINS = ['litecoin'];
-
 export const isLitecoinChain = chain_name =>
   LITECOIN_CHAINS.includes(chain_name);
-
-const EVM_CHAINS = [
-  'ethereum',
-  'binance_smart_chain',
-  'polygon',
-  'base',
-  'arbitrum',
-  'optimism',
-  'optimism_binance_smart_chain',
-  'avalanche',
-  'fantom',
-  'gnosis',
-  'viction',
-  'linea',
-  'zksync',
-  'ethereum_classic',
-  'ethereum_pow',
-  'kava',
-  'ink',
-  'sei',
-  'hyperliquid',
-  'robinhood',
-];
 
 export const isEVMChain = chain_name => EVM_CHAINS.includes(chain_name);
 
@@ -372,39 +353,26 @@ export const SWAP_QUOTE_EXPIRED_ERROR =
 export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
-const OPTIONS_GAS_FEES_CHAIN = [
-  'ethereum',
-  'binance_smart_chain',
-  'fantom',
-  'avalanche',
-  'gnosis',
-  'linea',
-];
-
-const EIP_1559_NOT_SUPPORTED = [
-  'binance_smart_chain',
-  'kava',
-  'ethereum_classic',
-  'ethereum_pow',
-];
-
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
-const UNCLAIM_DEPOSIT_SUPPORTED_CHAINS = ['bitcoin_lightning'];
+export const isEip1559Chain = chain_name =>
+  isEVMChain(chain_name) && !isEip1559NotSupported(chain_name);
+
+// Formats a wei value (BigInt/string/number) as a trimmed gwei string.
+// Returns null for null/undefined so callers can hide the row.
+export const weiToGwei = (wei, decimals = 9) => {
+  if (wei == null) {
+    return null;
+  }
+  return new BigNumber(wei.toString())
+    .dividedBy(1e9)
+    .toFixed(decimals)
+    .replace(/\.?0+$/, '');
+};
 
 export const isUnclaimDepositSupportedChain = chain_name =>
   UNCLAIM_DEPOSIT_SUPPORTED_CHAINS.includes(chain_name);
-
-const EIP_7702_SUPPORTED_CHAIN = [
-  'ethereum',
-  // 'binance_smart_chain',
-  'base',
-  'optimism',
-  'ink',
-  'arbitrum',
-  'gnosis',
-];
 
 export const isEip7702SupportedChain = chain_name =>
   EIP_7702_SUPPORTED_CHAIN.includes(chain_name);
@@ -412,151 +380,61 @@ export const isEip7702SupportedChain = chain_name =>
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
 
-const DERIVE_ADDRESS_SUPPORT_CHAIN = [
-  ...EVM_CHAINS,
-  'tron',
-  'solana',
-  'bitcoin',
-  'bitcoin_segwit',
-  'bitcoin_legacy',
-];
 export const isDeriveAddressSupportChain = chain_name =>
   DERIVE_ADDRESS_SUPPORT_CHAIN.includes(chain_name);
-
-const STAKING_CHAINS = [
-  'solana_sol',
-  'tron_trx',
-  'ethereum_usdt',
-  'ethereum_usdc',
-];
 
 export const isStakingChain = chain_name => STAKING_CHAINS.includes(chain_name);
 
 export const getStakignKey = (chain_name, symbol) =>
   `${chain_name}_${symbol}`.toLowerCase();
 
-const VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN = ['solana', 'ethereum'];
-
 export const isValidatorSupportCreateStakingScreen = chain_name =>
   VALIDATORS_SUPPORT_IN_CREATE_STAKING_SCREEN.includes(chain_name);
-
-const SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN = ['tron'];
 
 export const isHaveResourceTypeInCreateStakingScreen = chain_name =>
   SUPPORT_RESOURCE_TYPE_CREATE_STAKING_SCREEN.includes(chain_name);
 
-const tronResourcesData = [
-  {
-    label: 'BANDWIDTH',
-    value: 'BANDWIDTH',
-  },
-  {
-    label: 'ENERGY',
-    value: 'ENERGY',
-  },
-];
-
-export const resourcesData = {
-  tron: tronResourcesData,
-};
-
-const layer2Chains = [
-  // 'arbitrum',
-  'base',
-  'optimism',
-  'optimism_binance_smart_chain',
-  'ink',
-];
+// "Layer 2" here means an OP-Stack chain that exposes the GasPriceOracle
+// predeploy and charges the L1 data fee separately from execution gas.
+// Arbitrum / Arbitrum Orbit (robinhood), zkSync and Linea fold the L1 cost
+// into the gas the user already caps with maxFeePerGas, so they must NOT be
+// given a gas_oracle.
+const layer2Chains = Object.keys(CHAIN_CONFIG).filter(
+  chain_name => CHAIN_CONFIG[chain_name].gas_oracle,
+);
 
 export const isLayer2Chain = chain_name => layer2Chains.includes(chain_name);
-
-const feesOptionsChains = [
-  'ethereum',
-  'bitcoin',
-  'bitcoin_segwit',
-  'bitcoin_legacy',
-  'litecoin',
-  'dogecoin',
-  'bitcoin_cash',
-];
 
 export const isFeesOptionChain = chain_name =>
   feesOptionsChains.includes(chain_name);
 
-const TRANSACTION_LIST_LIMIT_100 = [
-  'ethereum',
-  'polygon',
-  'binance_smart_chain',
-  'base',
-  'arbitrum',
-  'optimism',
-  'optimism_binance_smart_chain',
-  'avalanche',
-  'fantom',
-  'gnosis',
-  'viction',
-  'linea',
-  'zksync',
-  'sei',
-  'robinhood',
-];
-
 export const isTransactionListLimit100 = chain_name =>
   TRANSACTION_LIST_LIMIT_100.includes(chain_name);
-
-const EPOCH_TIME_SUPPORT_CHAIN = ['solana'];
 
 export const isSupportEpochTime = chain_name =>
   EPOCH_TIME_SUPPORT_CHAIN.includes(chain_name);
 
-const UNSTAKING_BUTTON_CHAIN = ['tron', 'ethereum'];
-
 export const isShowUnstakingButton = chain_name =>
   UNSTAKING_BUTTON_CHAIN.includes(chain_name);
-
-const VOTE_BUTTON_CHAIN = ['tron'];
 
 export const isShowVoteButton = chain_name =>
   VOTE_BUTTON_CHAIN.includes(chain_name);
 
-const MEMO_SUPPORT_CHAIN = [
-  'cosmos',
-  'ton',
-  'ripple',
-  'solana',
-  'stellar',
-  'hedera',
-  'thorchain',
-  'tron',
-];
-
 export const isMemoSupportChain = chain_name =>
   MEMO_SUPPORT_CHAIN.includes(chain_name);
-
-const NAME_SUPPORT_IN_ADDRESS = ['ethereum', 'binance_smart_chain'];
 
 export const isNameSupportChain = chain_name =>
   NAME_SUPPORT_IN_ADDRESS.includes(chain_name);
 
-const TRANSACTION_LIST_NOT_SUPPORTED_CHAINS = ['aptos', 'kava'];
-
 export const isTransactionListNotSupported = (chain_name, type) =>
   TRANSACTION_LIST_NOT_SUPPORTED_CHAINS.includes(chain_name) ||
   (chain_name === 'solana' && type !== 'coin');
-
-const CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS = ['hedera'];
 
 export const isCustomAddressNotSupportedChain = chain_name =>
   CUSTOM_ADDRESS_NOT_SUPPORTED_CHAINS.includes(chain_name);
 
 export const isPendingTransactionSupportedChain = chain_name =>
   EVM_CHAINS.includes(chain_name);
-
-const PRIVATE_KEY_NOT_SUPPORTED_CHAINS = [
-  'ripple',
-  'cardano',
-  'bitcoin_lightning',
-];
 
 export const isPrivateKeyNotSupportedChain = chain_name => {
   return PRIVATE_KEY_NOT_SUPPORTED_CHAINS.includes(chain_name);
@@ -659,351 +537,89 @@ export function getCosmosRequiredFeeAmount(errorString) {
   const match = errorString.match(/required: (\d+)uatom/);
   return match ? match[1] : null;
 }
-export const ModalAddTokenList = [
-  {
-    label: 'Ethereum',
-    value: 'ethereum',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Polygon',
-    value: 'polygon',
-    chain_symbol: 'POL',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Base',
-    value: 'base',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Binance Smart Chain',
-    value: 'binance_smart_chain',
-    chain_symbol: 'BNB',
-    type: 'token',
-    token_type: 'BEP20',
-    isEVM: true,
-  },
-  {
-    label: 'Tron',
-    value: 'tron',
-    chain_symbol: 'TRX',
-    type: 'token',
-    token_type: 'TRC20',
-  },
-  {
-    label: 'Solana',
-    value: 'solana',
-    chain_symbol: 'SOL',
-    type: 'token',
-    token_type: 'SPL20',
-  },
-  {
-    label: 'Arbitrum',
-    value: 'arbitrum',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Optimism',
-    value: 'optimism',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Optimism Binance Smart Chain',
-    value: 'optimism_binance_smart_chain',
-    chain_symbol: 'BNB',
-    type: 'token',
-    token_type: 'BEP20',
-    isEVM: true,
-  },
-  {
-    label: 'Avalanche',
-    value: 'avalanche',
-    chain_symbol: 'AVAX',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Fantom',
-    value: 'fantom',
-    chain_symbol: 'FTM',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Gnosis',
-    value: 'gnosis',
-    chain_symbol: 'XDAI',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Kava',
-    value: 'kava',
-    chain_symbol: 'KAVA',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Linea',
-    value: 'linea',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'zkSync Era',
-    value: 'zksync',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Viction',
-    value: 'viction',
-    chain_symbol: 'VIC',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Ethereum Classic',
-    value: 'ethereum_classic',
-    chain_symbol: 'ETC',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'EthereumPoW',
-    value: 'ethereum_pow',
-    chain_symbol: 'ETHW',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Ink',
-    value: 'ink',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'SEI',
-    value: 'sei',
-    chain_symbol: 'SEI',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Hyperliquid',
-    value: 'hyperliquid',
-    chain_symbol: 'HYPE',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-  {
-    label: 'Robinhood',
-    value: 'robinhood',
-    chain_symbol: 'ETH',
-    type: 'token',
-    token_type: 'ERC20',
-    isEVM: true,
-  },
-];
 
-export const PrivateKeyList = [
-  {
-    label: 'Aptos',
-    value: 'aptos',
-  },
-  {
-    label: 'Arbitrum',
-    value: 'arbitrum',
-  },
-  {
-    label: 'Avalanche',
-    value: 'avalanche',
-  },
-  {
-    label: 'Base',
-    value: 'base',
-  },
-  {
-    label: 'Binance Smart Chain',
-    value: 'binance_smart_chain',
-  },
-  {
-    label: 'Bitcoin Cash',
-    value: 'bitcoin_cash',
-  },
-  {
-    label: 'Bitcoin Legacy',
-    value: 'bitcoin_legacy',
-  },
-  {
-    label: 'Bitcoin Segwit',
-    value: 'bitcoin_segwit',
-  },
-  {
-    label: 'Bitcoin Native Segwit',
-    value: 'bitcoin',
-  },
-  {
-    label: 'Cosmos',
-    value: 'cosmos',
-  },
-  {
-    label: 'Dogecoin',
-    value: 'dogecoin',
-  },
-  {
-    label: 'Ethereum',
-    value: 'ethereum',
-  },
-  {
-    label: 'Ethereum Classic',
-    value: 'ethereum_classic',
-  },
-  {
-    label: 'EthereumPoW',
-    value: 'ethereum_pow',
-  },
-  {
-    label: 'Fantom',
-    value: 'fantom',
-  },
-  {
-    label: 'Gnosis',
-    value: 'gnosis',
-  },
-  {
-    label: 'Hedera',
-    value: 'hedera',
-  },
-  {
-    label: 'Hyperliquid',
-    value: 'hyperliquid',
-  },
-  {
-    label: 'Ink',
-    value: 'ink',
-  },
-  {
-    label: 'Kava',
-    value: 'kava',
-  },
-  {
-    label: 'Linea',
-    value: 'linea',
-  },
-  {
-    label: 'Litecoin',
-    value: 'litecoin',
-  },
-  {
-    label: 'Optimism',
-    value: 'optimism',
-  },
-  {
-    label: 'Optimism Binance Smart Chain',
-    value: 'optimism_binance_smart_chain',
-  },
-  {
-    label: 'Polkadot',
-    value: 'polkadot',
-  },
-  {
-    label: 'Polygon',
-    value: 'polygon',
-  },
-  {
-    label: 'Sei',
-    value: 'sei',
-  },
-  {
-    label: 'Solana',
-    value: 'solana',
-  },
-  {
-    label: 'Stellar',
-    value: 'stellar',
-  },
-  {
-    label: 'Tezos',
-    value: 'tezos',
-  },
-  {
-    label: 'Ton',
-    value: 'ton',
-  },
-  {
-    label: 'Tron',
-    value: 'tron',
-  },
-  {
-    label: 'Viction',
-    value: 'viction',
-  },
-  {
-    label: 'zkSync Era',
-    value: 'zksync',
-  },
-  {
-    label: 'Filecoin',
-    value: 'filecoin',
-  },
-];
+export const GAS_CURRENCY = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.gas_currency)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.gas_currency]),
+);
 
-export const CustomRPCList = [
-  {label: 'Ethereum', value: 'ethereum'},
-  {label: 'Binance Smart Chain', value: 'binance_smart_chain'},
-  {label: 'Polygon', value: 'polygon'},
-  {label: 'Base', value: 'base'},
-  {label: 'Arbitrum', value: 'arbitrum'},
-  {label: 'Optimism', value: 'optimism'},
-  {
-    label: 'Optimism Binance Smart Chain',
-    value: 'optimism_binance_smart_chain',
-  },
-  {label: 'Avalanche', value: 'avalanche'},
-  {label: 'Fantom', value: 'fantom'},
-  {label: 'Gnosis', value: 'gnosis'},
-  {label: 'Viction', value: 'viction'},
-  {label: 'Linea', value: 'linea'},
-  {label: 'zkSync Era', value: 'zksync'},
-  {label: 'Ethereum Classic', value: 'ethereum_classic'},
-  {label: 'EthereumPoW', value: 'ethereum_pow'},
-  {label: 'Kava', value: 'kava'},
-  {label: 'Ink', value: 'ink'},
-  {label: 'Sei', value: 'sei'},
-  {label: 'Hyperliquid', value: 'hyperliquid'},
-  {label: 'Robinhood', value: 'robinhood'},
-];
+export const PrivateKeyList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.private_key_list)
+  .sort(([, a], [, b]) => a.private_key_list.order - b.private_key_list.order)
+  .map(([value, chainConfig]) => ({
+    label: chainConfig.private_key_list.label,
+    value,
+  }));
+
+export const ModalAddTokenList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.add_token)
+  .sort(([, a], [, b]) => a.add_token.order - b.add_token.order)
+  .map(([value, chainConfig]) => {
+    const {label, order, ...rest} = chainConfig.add_token;
+    return {label, value, ...rest};
+  });
+
+export const CustomRPCList = chainEntries
+  .filter(([, chainConfig]) => chainConfig.custom_rpc)
+  .sort(([, a], [, b]) => a.custom_rpc.order - b.custom_rpc.order)
+  .map(([value, chainConfig]) => ({
+    label: chainConfig.custom_rpc.label,
+    value,
+  }));
+
+export const MORALIS_CHAIN_TO_CHAIN = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.moralis)
+    .map(([chain_name, chainConfig]) => [chainConfig.moralis.key, chain_name]),
+);
+
+export const allDerivePath = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.derivation_paths)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.derivation_paths,
+    ]),
+);
+
+const DERIVE_INDEX = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.derive_index)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.derive_index]),
+);
+
+export const resourcesData = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.staking_resources)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.staking_resources,
+    ]),
+);
+
+// NFTs are fetched via Moralis, so the supported chains are exactly the ones
+// with a moralis entry (the display keys the Moralis map uses)
+export const NFT_SUPPORTED_CHAIN = chainEntries
+  .filter(([, chainConfig]) => chainConfig.moralis)
+  .map(([, chainConfig]) => chainConfig.moralis.key);
+
+// Custom-derivation path templates and chain logos — both apps consume these
+// (each app's 'assets' alias resolves the logo files to its own bundle).
+export const DERIVATION_CONFIG = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.custom_derivation)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.custom_derivation,
+    ]),
+);
+
+export const chainLogoMap = Object.fromEntries(
+  chainEntries
+    .filter(([, chainConfig]) => chainConfig.logo)
+    .map(([chain_name, chainConfig]) => [chain_name, chainConfig.logo]),
+);
 export const AUTO_LOCK = [
   {
     label: 'Immediate',
@@ -1034,26 +650,6 @@ export const getTimeOrDateAsPerToday = anotherDate => {
     return tempDate.format('HH:mm A');
   }
   return tempDate.format('DD/MM/YY');
-};
-
-export const NFT_SUPPORTED_CHAIN = [
-  'Ethereum',
-  'BSC',
-  'Polygon',
-  'Solana',
-  'Arbitrum',
-  'Base',
-  'Optimism',
-];
-
-export const MORALIS_CHAIN_TO_CHAIN = {
-  Ethereum: 'ethereum',
-  Polygon: 'polygon',
-  BSC: 'binance_smart_chain',
-  Solana: 'solana',
-  Arbitrum: 'arbitrum',
-  Base: 'base',
-  Optimism: 'optimism',
 };
 
 export const getAddressDetailsUrl = (chain_name, type, address) => {
@@ -1195,61 +791,6 @@ export function fetchWordsStartingWith(arr, char) {
   return results;
 }
 
-const EVMDerivationPath = [
-  {
-    label: "Ledger (m/44'/60'/1'/0/0)",
-    value: "m/44'/60'/1'/0/0",
-  },
-  {
-    label: "Metamask (m/44'/60'/0'/0/1)",
-    value: "m/44'/60'/0'/0/1",
-  },
-];
-
-const tronDerivationPath = [
-  {
-    label: "Ledger (m/44'/195'/1'/0/0)",
-    value: "m/44'/195'/1'/0/0",
-  },
-];
-
-const solanaMDerivationPath = [
-  {
-    label: "Ledger (m/44'/501'/1')",
-    value: "m/44'/501'/1'",
-  },
-];
-
-const bitcoinNativeSegwitDerivationPath = [
-  {
-    label: "Ledger (m/84'/0'/1'/0/0)",
-    value: "m/84'/0'/1'/0/0",
-  },
-];
-
-const bitcoinSegwitDerivationPath = [
-  {
-    label: "Ledger (m/49'/0'/1'/0/0)",
-    value: "m/49'/0'/1'/0/0",
-  },
-];
-
-const bitcoinLegacyDerivationPath = [
-  {
-    label: "Ledger (m/44'/0'/1'/0/0)",
-    value: "m/44'/0'/1'/0/0",
-  },
-];
-
-export const allDerivePath = {
-  ethereum: EVMDerivationPath,
-  solana: solanaMDerivationPath,
-  tron: tronDerivationPath,
-  bitcoin: bitcoinNativeSegwitDerivationPath,
-  bitcoin_segwit: bitcoinSegwitDerivationPath,
-  bitcoin_legacy: bitcoinLegacyDerivationPath,
-};
-
 export const customObj = {
   label: 'Custom',
   value: 'custom',
@@ -1367,11 +908,6 @@ export const commonRetryFunc = async (
   }
 };
 
-const DERIVE_INDEX = {
-  ethereum: 4,
-  tron: 4,
-  solana: 3,
-};
 export const getIndexFromDerivePath = (derivePath, chainname) => {
   const dIndex = DERIVE_INDEX[chainname] || 4;
   const parts1 = derivePath?.split('/'); // Split the string by '/'
@@ -1397,16 +933,6 @@ const fingerPrintName = {
 
 export const getFingerprintName = name => {
   return fingerPrintName[name] || 'Fingerprint';
-};
-
-export const GAS_CURRENCY = {
-  ethereum: 'Gwei',
-  bitcoin: 'sat/B',
-  bitcoin_legacy: 'sat/B',
-  bitcoin_segwit: 'sat/B',
-  litecoin: 'lit/B',
-  dogecoin: 'sat/B',
-  bitcoin_cash: 'sat/B',
 };
 
 export function insertSorted(arr, newElement, key) {
@@ -1487,6 +1013,44 @@ export function customFetchWithTimeout(url, options = {}) {
       clearTimeout(timeoutId);
       throw error;
     });
+}
+
+export async function fetchRequest(url, options) {
+  try {
+    const response = await axios.request({
+      url,
+      timeout: 20000, // Timeout duration in milliseconds (5 seconds)
+      ...options,
+    });
+    return response.data;
+  } catch (e) {
+    // Surface the provider's own error message instead of a bare status code
+    const body = e?.response?.data;
+    const errorMessage =
+      body?.error?.message ||
+      body?.message ||
+      body?.detail ||
+      body?.title ||
+      body?.error ||
+      (typeof body === 'string' && body.trim().slice(0, 200));
+    const detail = typeof candidate === 'string' ? errorMessage : null;
+    if (detail) {
+      e.message = `${detail} (status ${e.response.status})`;
+    }
+    throw e;
+  }
+}
+
+export async function fetchRPCRequest(url, method, params) {
+  const data = await fetchRequest(url, {
+    method: 'post',
+    data: {jsonrpc: '2.0', id: 1, method, params},
+    adapter: rpcSessionAdapter,
+  });
+  if (data?.error) {
+    throw new Error(data.error?.message || 'RPC error');
+  }
+  return data?.result;
 }
 
 export const isNewerVersion = (v1, v2) => {
