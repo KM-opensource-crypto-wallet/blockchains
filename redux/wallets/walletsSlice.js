@@ -2664,6 +2664,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption,
         hideNotification,
+        deleteScheduleNotification,
       } = payload || {};
       if (!secretCodeSalt || !secretCodeHash) {
         throw new Error('setWalletHideSettings: missing secret code hash/salt');
@@ -2675,6 +2676,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
         hideNotification: hideNotification ?? true,
+        deleteScheduleNotification: deleteScheduleNotification ?? true,
       };
       reassignCurrentWalletIfHiddenState(state);
     },
