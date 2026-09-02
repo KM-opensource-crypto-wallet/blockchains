@@ -1146,7 +1146,7 @@ export const CHAIN_CONFIG = {
     },
     wallet_connect_key: {
       sandbox: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
-      production: 'solana:4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZ',
+      production: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
     },
     stake_wiz_base_url: 'https://api.stakewiz.com',
     rpc_contract_chain_id: {
@@ -1366,6 +1366,10 @@ export const CHAIN_CONFIG = {
     logo: require('assets/chain_logo/cosmos.png'),
   },
   polkadot: {
+    // Premium RPC goes through the secure-rpc proxy (/rpc/polkadot). Subscan
+    // shares that route and is told apart by the x-rpc-type: scan header,
+    // which scan_only makes the axios adapter add; plain fetch never sets it.
+    premium: {mainnet: true, testnet: true},
     scan_only: true,
     supported: true,
     chain_loader: 'polkadot',
@@ -1374,6 +1378,22 @@ export const CHAIN_CONFIG = {
         mainnet: 'https://dot-rpc.stakeworld.io/assethub',
         testnet: 'https://dot-rpc.stakeworld.io/assethub',
       },
+    },
+    // Polkadot balances live on Asset Hub; these are public Asset Hub HTTPS
+    // JSON-RPC endpoints used when the proxy is unavailable.
+    free_rpc_urls: {
+      mainnet: [
+        'https://dot-rpc.stakeworld.io/assethub',
+        'https://polkadot-asset-hub-rpc.polkadot.io',
+        'https://statemint.api.onfinality.io/public',
+        'https://asset-hub-polkadot-rpc.n.dwellir.com',
+      ],
+      testnet: [
+        'https://dot-rpc.stakeworld.io/assethub',
+        'https://polkadot-asset-hub-rpc.polkadot.io',
+        'https://statemint.api.onfinality.io/public',
+        'https://asset-hub-polkadot-rpc.n.dwellir.com',
+      ],
     },
     scan: {
       sandbox: 'https://polkadot.subscan.io',
@@ -1770,6 +1790,7 @@ export const WalletConnectMethods = {
   solana_signAndSendTransaction: 'sendRawTransaction',
   solana_signTransaction: 'signRawTransaction',
   solana_signMessage: 'signMessage',
+  solana_signAllTransactions: 'signAllTransactions',
 
   ton_sendMessage: 'sendRawTransaction',
   ton_signData: 'signMessage',
@@ -1809,6 +1830,25 @@ export const WalletConnectMethods = {
   getAccountAddresses: 'getAccounts',
 };
 
+// Methods answered outside WalletConnectMethods: wallet_sendCalls is batched in
+// redux/wallets/walletsSlice.js; the other two are auto-answered in
+// service/walletconnect.js.
+export const WALLET_CONNECT_SPECIAL_METHODS = [
+  'wallet_sendCalls',
+  'wallet_addEthereumChain',
+  'wallet_getCapabilities',
+];
+
+// Single source of truth for "can this wallet answer this method". Used to
+// reject unsupported session_requests before any UI opens.
+export const SUPPORTED_WALLET_CONNECT_METHODS = new Set([
+  ...Object.keys(WalletConnectMethods),
+  ...WALLET_CONNECT_SPECIAL_METHODS,
+]);
+
+export const isSupportedWalletConnectMethod = method =>
+  typeof method === 'string' && SUPPORTED_WALLET_CONNECT_METHODS.has(method);
+
 // Keyed by the raw WalletConnect method strings defined in WalletConnectMethods
 // (dok-wallet-blockchain-networks/config/config.js) for the chain-specific request shape.
 export const NON_EVM_METHOD_HANDLERS = {
@@ -1832,6 +1872,10 @@ export const NON_EVM_METHOD_HANDLERS = {
   }),
   solana_signAndSendTransaction: params => ({
     finaltransactionData: params?.transaction,
+    signTypeData: params,
+  }),
+  solana_signAllTransactions: params => ({
+    finaltransactionData: params?.transactions,
     signTypeData: params,
   }),
   ton_sendMessage: params => ({

@@ -4,53 +4,93 @@ import {
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {ApiPromise, HttpProvider, WsProvider} from '@polkadot/api';
+import {ApiPromise, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
 import {u8aToHex, stringToU8a, u8aConcat} from '@polkadot/util';
 import {decodeAddress, encodeAddress} from '@polkadot/util-crypto';
 import {PolkadotScan} from 'dok-wallet-blockchain-networks/service/PolkadotScan';
-import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {
+  getFreeRPCUrl,
+  getPremiumRPCUrl,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {PolkadotHttpProvider} from 'dok-wallet-blockchain-networks/rpcUrls/polkadotHttpProvider';
 
-const POLKADOT_INIT_MAX_ATTEMPTS = 4;
-const POLKADOT_INIT_RETRY_DELAY_MS = 3000;
+// Errors that come from our own validation, not from the RPC. They are
+// deterministic, so retrying them on another endpoint would only repeat them.
+const POLKADOT_BUSINESS_ERRORS = ['polkadot_receiver_should_1_dot'];
+const isPolkadotBusinessError = e =>
+  POLKADOT_BUSINESS_ERRORS.includes(e?.message);
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Premium (secure-rpc proxy) first, then the public Asset Hub endpoints.
+const getPolkadotRpcUrls = () =>
+  [getPremiumRPCUrl('polkadot'), ...getFreeRPCUrl('polkadot')].filter(Boolean);
 
-const createPolkadotApi = async () => {
-  const rpcUrl = getRPCUrl('polkadot');
-  const isWs = rpcUrl?.startsWith('ws');
-  for (let attempt = 1; attempt <= POLKADOT_INIT_MAX_ATTEMPTS; attempt++) {
-    try {
-      const provider = isWs ? new WsProvider(rpcUrl) : new HttpProvider(rpcUrl);
-      return await ApiPromise.create({provider: provider});
-    } catch (e) {
-      const isRateLimited = e?.message?.includes('429');
-      if (!isRateLimited || attempt === POLKADOT_INIT_MAX_ATTEMPTS) {
-        throw e;
-      }
-      // dot-rpc.stakeworld.io is a shared public endpoint that rate-limits
-      // bursts of state_getMetadata calls during API init; back off and
-      // retry instead of failing the whole sign/send flow immediately.
-      await delay(POLKADOT_INIT_RETRY_DELAY_MS * attempt);
-    }
+// One HTTP transport for proxy and public endpoints: it attaches the
+// short-lived x-rpc-session token for proxy URLs (passthrough otherwise),
+// applies the 20s fetch timeout.
+const createProvider = url =>
+  url.startsWith('ws') ? new WsProvider(url) : new PolkadotHttpProvider(url);
+
+// ApiPromise.create downloads the chain metadata, so unlike Solana's cheap
+// Connection the api is cached per URL. Concurrent callers share the same
+// in-flight init promise.
+const apiCache = new Map();
+
+// Identity check so a slow, failing caller can't drop a newer healthy entry.
+// Eviction is also the only metadata refresh path: an HTTP api never
+// re-fetches metadata after a runtime upgrade.
+const evictApi = (url, promise) => {
+  if (apiCache.get(url) !== promise) {
+    return;
   }
+  apiCache.delete(url);
+  promise.then(api => api.disconnect()).catch(() => {});
 };
 
-let polkadotProviderPromise;
-const createOrGetPolkadotProvider = () => {
-  if (!polkadotProviderPromise) {
-    polkadotProviderPromise = createPolkadotApi().catch(e => {
-      // Reset so a later call can retry against a fresh provider instead
-      // of staying stuck on a rejected promise.
-      polkadotProviderPromise = undefined;
-      console.error('Error in createOrGetPolkadotProvider', e);
+const getOrCreateApi = url => {
+  let promise = apiCache.get(url);
+  if (!promise) {
+    // Without throwOnConnect, create() resolves only on success and never
+    // rejects, so a dead endpoint would hang instead of falling through.
+    promise = ApiPromise.create({
+      provider: createProvider(url),
+      throwOnConnect: true,
+      noInitWarn: true,
+    }).catch(e => {
+      evictApi(url, promise);
       throw e;
     });
+    apiCache.set(url, promise);
   }
-  return polkadotProviderPromise;
+  return promise;
 };
 
 export const PolkadotChain = () => {
+  // Runs cb against each endpoint in turn. Business errors are rethrown at
+  // once; anything else evicts that endpoint's api and moves to the next.
+  // On the last endpoint: throw, or return defaultResponse when given.
+  const retryFunc = async (cb, defaultResponse) => {
+    const rpcs = getPolkadotRpcUrls();
+    for (let i = 0; i < rpcs.length; i++) {
+      const apiPromise = getOrCreateApi(rpcs[i]);
+      try {
+        return await cb(await apiPromise);
+      } catch (e) {
+        console.log('Error for polkadot rpc', rpcs[i], 'Errors:', e);
+        if (isPolkadotBusinessError(e)) {
+          throw e;
+        }
+        evictApi(rpcs[i], apiPromise);
+        if (i === rpcs.length - 1) {
+          if (defaultResponse === undefined) {
+            throw e;
+          }
+          return defaultResponse;
+        }
+      }
+    }
+  };
+
   return {
     isValidAddress: ({address}) => {
       try {
@@ -83,28 +123,39 @@ export const PolkadotChain = () => {
         privateKey: privateKey,
       };
     },
+    // WalletConnect polkadot_signTransaction: signs only, the dApp broadcasts.
     sendRawTransaction: async ({signTypeData, privateKey}) => {
       try {
-        const provider = await createOrGetPolkadotProvider();
-        const keyring = new Keyring({ss58Format: 0});
-        const keypair = keyring.addFromSeed(
-          // eslint-disable-next-line no-undef
-          Buffer.from(privateKey, 'hex'),
-        );
-        const transactionPayload =
-          signTypeData?.transactionPayload ?? signTypeData;
-        if (transactionPayload?.signedExtensions) {
-          provider.registry.setSignedExtensions(
-            transactionPayload.signedExtensions,
+        return await retryFunc(async api => {
+          const keyring = new Keyring({ss58Format: 0});
+          const keypair = keyring.addFromSeed(
+            // eslint-disable-next-line no-undef
+            Buffer.from(privateKey, 'hex'),
           );
-        }
-        const payload = provider.registry.createType(
-          'ExtrinsicPayload',
-          transactionPayload,
-          {version: transactionPayload?.version ?? 4},
-        );
-        const {signature} = payload.sign(keypair);
-        return {id: 1, signature};
+          const transactionPayload =
+            signTypeData?.transactionPayload ?? signTypeData;
+          // The registry is shared by every call on this cached api, so
+          // restore its signed extensions after signing with the dApp's.
+          const previousSignedExtensions = api.registry.signedExtensions;
+          try {
+            if (transactionPayload?.signedExtensions) {
+              api.registry.setSignedExtensions(
+                transactionPayload.signedExtensions,
+              );
+            }
+            const payload = api.registry.createType(
+              'ExtrinsicPayload',
+              transactionPayload,
+              {version: transactionPayload?.version ?? 4},
+            );
+            const {signature} = payload.sign(keypair);
+            return {id: 1, signature};
+          } finally {
+            if (transactionPayload?.signedExtensions) {
+              api.registry.setSignedExtensions(previousSignedExtensions);
+            }
+          }
+        });
       } catch (e) {
         console.error('Error in polkadot signTransaction', e);
         throw e;
@@ -130,37 +181,33 @@ export const PolkadotChain = () => {
         throw e;
       }
     },
-    getBalance: async ({address}) => {
-      try {
-        const provider = await createOrGetPolkadotProvider();
-        const resp = await provider.query.system.account(address);
+    getBalance: async ({address}) =>
+      retryFunc(async api => {
+        const resp = await api.query.system.account(address);
         return resp?.data.free?.toString() || '0';
-      } catch (e) {
-        console.error('error in get balance from polkadot', e);
-        return '0';
-      }
-    },
+      }, '0'),
     getEstimateFee: async ({toAddress, amount, privateKey, fromAddress}) => {
       try {
-        const provider = await createOrGetPolkadotProvider();
-        const BNamount = new BigNumber(amount);
-        if (BNamount.lt(new BigNumber(1))) {
-          const resp = await provider.query.system.account(toAddress);
-          const receiverAmount = new BigNumber(
-            resp?.data.free?.toString() || '0',
-          );
-          if (receiverAmount.lte(new BigNumber(0))) {
-            throw new Error('polkadot_receiver_should_1_dot');
+        return await retryFunc(async api => {
+          const BNamount = new BigNumber(amount);
+          if (BNamount.lt(new BigNumber(1))) {
+            const resp = await api.query.system.account(toAddress);
+            const receiverAmount = new BigNumber(
+              resp?.data.free?.toString() || '0',
+            );
+            if (receiverAmount.lte(new BigNumber(0))) {
+              throw new Error('polkadot_receiver_should_1_dot');
+            }
           }
-        }
-        const info = await provider.tx.balances
-          .transferAllowDeath(toAddress, convertToSmallAmount(amount, 10))
-          .paymentInfo(fromAddress);
-        return {
-          fee: parseBalance(info?.partialFee?.toString(), 10),
-          estimateGas: '',
-          gasFee: '',
-        };
+          const info = await api.tx.balances
+            .transferAllowDeath(toAddress, convertToSmallAmount(amount, 10))
+            .paymentInfo(fromAddress);
+          return {
+            fee: parseBalance(info?.partialFee?.toString(), 10),
+            estimateGas: '',
+            gasFee: '',
+          };
+        });
       } catch (e) {
         console.error('Error in polkadot gas fee', e);
         throw e;
@@ -290,40 +337,48 @@ export const PolkadotChain = () => {
     },
     send: async ({to, from, amount, privateKey, transactionFee, gasFee}) => {
       try {
-        const provider = await createOrGetPolkadotProvider();
-        const BNamount = new BigNumber(amount);
-        if (BNamount.lt(new BigNumber(1))) {
-          const resp = await provider.query.system.account(to);
-          const receiverAmount = new BigNumber(
-            resp?.data.free?.toString() || '0',
-          );
-          if (receiverAmount.lt(new BigNumber(0))) {
-            throw new Error('polkadot_receiver_should_1_dot');
+        // Reads and signing may rotate across endpoints; the broadcast below
+        // happens exactly once, through the api that signed, so a transport
+        // error can never re-submit the transfer on another endpoint.
+        const {api, signedTx} = await retryFunc(async currentApi => {
+          const BNamount = new BigNumber(amount);
+          if (BNamount.lt(new BigNumber(1))) {
+            const resp = await currentApi.query.system.account(to);
+            const receiverAmount = new BigNumber(
+              resp?.data.free?.toString() || '0',
+            );
+            if (receiverAmount.lt(new BigNumber(0))) {
+              throw new Error('polkadot_receiver_should_1_dot');
+            }
           }
-        }
-        const keyring = new Keyring({ss58Format: 0});
-        const keypair = keyring.addFromSeed(
-          // eslint-disable-next-line no-undef
-          Buffer.from(privateKey, 'hex'),
-        );
-        return await provider.tx.balances
-          .transferAllowDeath(to, convertToSmallAmount(amount, 10))
-          .signAndSend(keypair);
+          const keyring = new Keyring({ss58Format: 0});
+          const keypair = keyring.addFromSeed(
+            // eslint-disable-next-line no-undef
+            Buffer.from(privateKey, 'hex'),
+          );
+          // signAsync fetches nonce and blockHash like signAndSend but does
+          // not broadcast.
+          const tx = await currentApi.tx.balances
+            .transferAllowDeath(to, convertToSmallAmount(amount, 10))
+            .signAsync(keypair);
+          return {api: currentApi, signedTx: tx};
+        });
+        return await api.rpc.author.submitExtrinsic(signedTx);
       } catch (e) {
         console.error('Error in send polkadot transaction', e);
+        throw e;
       }
     },
-    waitForConfirmation: async () => {
-      return new Promise(async (resolve, reject) => {
-        const provider = await createOrGetPolkadotProvider();
-
+    waitForConfirmation: async () =>
+      retryFunc(async api => {
         // no blockHash is specified, so we retrieve the latest
-        const signedBlock = await provider.rpc.chain.getBlock();
+        const signedBlock = await api.rpc.chain.getBlock();
 
         // get the api and events at a specific block
-        const apiAt = await provider.at(signedBlock.block.header.hash);
+        const apiAt = await api.at(signedBlock.block.header.hash);
         const allRecords = await apiAt.query.system.events();
 
+        let outcome;
         // map between the extrinsics and events
         signedBlock.block.extrinsics.forEach(
           ({method: {method, section}}, index) => {
@@ -336,21 +391,19 @@ export const PolkadotChain = () => {
               )
               // test the events against the specific types we are looking for
               .forEach(({event}) => {
-                if (provider.events.system.ExtrinsicSuccess.is(event)) {
-                  // extract the data for this event
-                  // (In TS, because of the guard above, these will be typed)
-                  return resolve(true);
-                } else if (provider.events.system.ExtrinsicFailed.is(event)) {
-                  // extract the data for this event
-                  const [dispatchError, dispatchInfo] = event.data;
+                if (outcome) {
+                  return;
+                }
+                if (api.events.system.ExtrinsicSuccess.is(event)) {
+                  outcome = {success: true};
+                } else if (api.events.system.ExtrinsicFailed.is(event)) {
+                  const [dispatchError] = event.data;
                   let errorInfo;
 
                   // decode the error
                   if (dispatchError.isModule) {
                     // for module errors, we have the section indexed, lookup
-                    // (For specific known errors, we can also do a check against the
-                    // api.errors.<module>.<ErrorName>.is(dispatchError.asModule) guard)
-                    const decoded = provider.registry.findMetaError(
+                    const decoded = api.registry.findMetaError(
                       dispatchError.asModule,
                     );
 
@@ -363,12 +416,17 @@ export const PolkadotChain = () => {
                   console.log(
                     `${section}.${method}:: ExtrinsicFailed:: ${errorInfo}`,
                   );
-                  return reject(false);
+                  outcome = {success: false, errorInfo};
                 }
               });
           },
         );
-      });
-    },
+        if (outcome && !outcome.success) {
+          throw new Error(outcome.errorInfo);
+        }
+        // Resolves true when the latest block carries a successful extrinsic;
+        // like before, stays pending-shaped (undefined) when nothing matched.
+        return outcome?.success ? true : undefined;
+      }),
   };
 };

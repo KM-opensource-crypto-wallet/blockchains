@@ -65,6 +65,23 @@ const getBip137FlagBase = chain_name => {
 
 const firstOf = data => (Array.isArray(data) ? data[0] : data);
 
+// Indexes of PSBT inputs spendable by `address`: the input's witnessUtxo
+// script, or the referenced nonWitnessUtxo output's script, equals ours.
+const findOwnedInputs = (psbtObj, address, network) => {
+  const ownScript = bitcoin.address.toOutputScript(address, network);
+  return psbtObj.data.inputs.reduce((owned, input, index) => {
+    let script = input.witnessUtxo?.script;
+    if (!script && input.nonWitnessUtxo) {
+      const prevTx = bitcoin.Transaction.fromBuffer(input.nonWitnessUtxo);
+      script = prevTx.outs[psbtObj.txInputs[index].index]?.script;
+    }
+    if (script && script.equals(ownScript)) {
+      owned.push({index});
+    }
+    return owned;
+  }, []);
+};
+
 const getSimpleNetwork = () => config.BITCOIN_NETWORK_STRING;
 
 const getKeyPairAndAddress = (privateKey, chain_name) => {
@@ -181,14 +198,31 @@ export const BitcoinChain = () => {
       try {
         const data = firstOf(signTypeData);
         const {psbt, signInputs, broadcast} = data;
-        const {keyPair, network} = getKeyPairAndAddress(privateKey, chain_name);
+        const {keyPair, address, network} = getKeyPairAndAddress(
+          privateKey,
+          chain_name,
+        );
         const psbtObj = bitcoin.Psbt.fromBase64(psbt, {network});
-        const inputs = signInputs ?? [];
+        // bip122 spec lists signInputs as required, but dApps (AppKit Lab,
+        // Unisat/OKX-style connectors) send it empty to mean "sign every
+        // input you own", so fall back to matching inputs by our script.
+        const inputs = signInputs?.length
+          ? signInputs
+          : findOwnedInputs(psbtObj, address, network);
+        if (!inputs.length) {
+          throw new Error('No PSBT inputs belong to this wallet');
+        }
         inputs.forEach(input => {
           psbtObj.signInput(input.index, keyPair, input.sighashTypes);
           psbtObj.finalizeInput(input.index);
         });
         if (broadcast) {
+          const unsigned = psbtObj.data.inputs.filter(
+            input => !input.finalScriptSig && !input.finalScriptWitness,
+          );
+          if (unsigned.length) {
+            throw new Error('PSBT has unsigned inputs; cannot broadcast');
+          }
           const txHex = psbtObj.extractTransaction().toHex();
           const txid = await broadcastBitcoinTransaction({txHex});
           return {psbt: psbtObj.toBase64(), txid};

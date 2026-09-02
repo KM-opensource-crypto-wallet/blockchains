@@ -19,7 +19,11 @@ import {
   loadStateInit,
   storeStateInit,
 } from '@ton/ton';
-import {keyPairFromSeed, sign, sha256_sync} from '@ton/crypto';
+import {keyPairFromSeed, sign} from '@ton/crypto';
+import {
+  createCellHash,
+  createTextBinaryHash,
+} from 'dok-wallet-blockchain-networks/helper/tonSignData';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   buildRpcProxyUrl,
@@ -45,60 +49,6 @@ const getNormalizedExtMessageHash = (walletAddress, transferBody) => {
 
 const getDomainFromUrl = url => {
   return (url || '').replace(/^[a-zA-Z]+:\/\//, '').split(/[/?#]/)[0];
-};
-
-// message = 0xffff || "ton-connect/sign-data/" || workchain || address_hash
-//   || domain_len || domain || timestamp || type_prefix || payload_len || payload
-const createTextBinaryHash = ({
-  type,
-  content,
-  workChain,
-  addressHash,
-  domain,
-  timestamp,
-}) => {
-  // eslint-disable-next-line no-undef
-  const wcBuffer = Buffer.alloc(4);
-  wcBuffer.writeInt32BE(workChain);
-
-  // eslint-disable-next-line no-undef
-  const domainBuffer = Buffer.from(domain, 'utf8');
-  // eslint-disable-next-line no-undef
-  const domainLenBuffer = Buffer.alloc(4);
-  domainLenBuffer.writeUInt32BE(domainBuffer.length);
-
-  // eslint-disable-next-line no-undef
-  const tsBuffer = Buffer.alloc(8);
-  tsBuffer.writeBigUInt64BE(BigInt(timestamp));
-
-  // eslint-disable-next-line no-undef
-  const typePrefix = Buffer.from(type === 'text' ? 'txt' : 'bin');
-  // eslint-disable-next-line no-undef
-  const payloadBuffer = Buffer.from(
-    content,
-    type === 'text' ? 'utf8' : 'base64',
-  );
-  // eslint-disable-next-line no-undef
-  const payloadLenBuffer = Buffer.alloc(4);
-  payloadLenBuffer.writeUInt32BE(payloadBuffer.length);
-
-  // eslint-disable-next-line no-undef
-  const message = Buffer.concat([
-    // eslint-disable-next-line no-undef
-    Buffer.from([0xff, 0xff]),
-    // eslint-disable-next-line no-undef
-    Buffer.from('ton-connect/sign-data/'),
-    wcBuffer,
-    addressHash,
-    domainLenBuffer,
-    domainBuffer,
-    tsBuffer,
-    typePrefix,
-    payloadLenBuffer,
-    payloadBuffer,
-  ]);
-
-  return sha256_sync(message);
 };
 
 export const TonChain = () => {
@@ -206,6 +156,23 @@ export const TonChain = () => {
         });
         const timestamp = Math.floor(Date.now() / 1000);
         const parsedDomain = getDomainFromUrl(domain);
+        // Spec: when `from` is set the wallet MUST NOT sign from another
+        // address. Accept raw ("0:...") or friendly forms of our own address.
+        if (data?.from) {
+          let fromAddress;
+          try {
+            fromAddress = Address.parse(data.from);
+          } catch (e) {
+            throw new Error(`Cannot sign from invalid address ${data.from}`);
+          }
+          if (!fromAddress.equals(wallet.address)) {
+            throw new Error(
+              `Cannot sign from ${
+                data.from
+              }: connected TON address is ${wallet.address.toString()}`,
+            );
+          }
+        }
         let messageHash;
         if (data?.type === 'text' || data?.type === 'binary') {
           messageHash = createTextBinaryHash({
@@ -216,6 +183,25 @@ export const TonChain = () => {
             domain: parsedDomain,
             timestamp,
           });
+        } else if (data?.type === 'cell') {
+          if (typeof data.schema !== 'string' || !data.schema) {
+            throw new Error(
+              'Invalid ton_signData cell payload: missing schema',
+            );
+          }
+          try {
+            messageHash = createCellHash({
+              schema: data.schema,
+              cell: data.cell,
+              address: wallet.address,
+              domain: parsedDomain,
+              timestamp,
+            });
+          } catch (e) {
+            throw new Error(
+              `Invalid ton_signData cell payload: ${e?.message || 'bad cell'}`,
+            );
+          }
         } else {
           throw new Error('Unsupported ton_signData type');
         }

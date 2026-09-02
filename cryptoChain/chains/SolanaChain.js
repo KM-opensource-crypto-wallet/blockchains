@@ -446,6 +446,33 @@ export const SolanaChain = () => {
         throw e;
       }
     },
+    // solana_signAllTransactions: sign each base64 VersionedTransaction and
+    // return the signed transactions base64-encoded, in the order received.
+    signAllTransactions: async ({payload, privateKey}) => {
+      try {
+        const transactions = payload?.signTypeData?.transactions;
+        if (!Array.isArray(transactions) || !transactions.length) {
+          throw new Error('No transactions to sign');
+        }
+        const secretKey = bs58.decode(privateKey);
+        const keypair = Keypair.fromSecretKey(secretKey, {
+          skipValidation: true,
+        });
+        const signed = transactions.map(tx => {
+          const versionedTransaction = VersionedTransaction.deserialize(
+            Buffer.from(tx, 'base64'),
+          );
+          versionedTransaction.sign([keypair]);
+          return Buffer.from(versionedTransaction.serialize()).toString(
+            'base64',
+          );
+        });
+        return {transactions: signed};
+      } catch (e) {
+        console.error('Error in solana signAllTransactions', e);
+        throw e;
+      }
+    },
     sendRawTransaction: async ({payload, privateKey}) =>
       retryFunc(async solanaProvider => {
         try {

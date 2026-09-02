@@ -9,6 +9,9 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getSdkError} from '@walletconnect/utils';
+import {isSupportedWalletConnectMethod} from 'dok-wallet-blockchain-networks/config/config';
+import {showToast} from 'utils/toast';
+import {logWalletConnectEvent} from 'utils/logger';
 
 let walletConnectSubscribe = false;
 
@@ -104,13 +107,51 @@ export const subscribeWalletConnectEvent = () => {
     );
   };
   const onSessionRequest = async proposal => {
+    const {topic, params, id} = proposal;
+    const {request} = params || {};
     try {
-      const {topic, params, id} = proposal;
       if (requestIds[id]) {
         return;
       }
       requestIds[id] = true;
-      const {request} = params;
+      const requestSessionData =
+        walletConnect.engine.signClient.session.get(topic);
+      const peerMeta = requestSessionData?.peer?.metadata;
+
+      // Reject methods this wallet cannot answer before any UI opens.
+      // JSON-RPC -32601 ("Method not found") is what the WalletKit docs use
+      // for unsupported session_request methods.
+      if (!isSupportedWalletConnectMethod(request?.method)) {
+        logWalletConnectEvent('warn', 'session_request.unsupported_method', {
+          method: request?.method,
+          chainId: params?.chainId,
+          topic,
+          requestId: id,
+          peerName: peerMeta?.name,
+          peerUrl: peerMeta?.url,
+        });
+        showToast({
+          type: 'errorToast',
+          title: 'Unsupported request',
+          message: `${peerMeta?.name || 'The dApp'} requested ${
+            request?.method
+          }, which this wallet does not support.`,
+        });
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            error: {
+              code: -32601,
+              message: `Method ${request?.method} not supported`,
+              data: {method: request?.method, chainId: params?.chainId},
+            },
+          },
+        });
+        return;
+      }
+
       if (request?.method?.includes('wallet_addEthereumChain')) {
         await walletConnect.respondSessionRequest({
           topic,
@@ -135,8 +176,6 @@ export const subscribeWalletConnectEvent = () => {
           response: {id, jsonrpc: '2.0', result: capabilities},
         });
       } else {
-        const requestSessionData =
-          walletConnect.engine.signClient.session.get(topic);
         const {pairingTopic} = requestSessionData;
         const sessionId = pairingTopic + '';
         store.dispatch(
@@ -145,7 +184,7 @@ export const subscribeWalletConnectEvent = () => {
             topic,
             ...request,
             sessionData: requestSessionData,
-            peerMeta: requestSessionData?.peer?.metadata,
+            peerMeta,
             id,
             chainId: params?.chainId,
           }),
@@ -153,6 +192,13 @@ export const subscribeWalletConnectEvent = () => {
       }
     } catch (e) {
       console.error('Error in onSessionRequest', e);
+      logWalletConnectEvent('error', 'session_request.handler_error', {
+        method: request?.method,
+        chainId: params?.chainId,
+        topic,
+        requestId: id,
+        message: e?.message,
+      });
     }
   };
 
