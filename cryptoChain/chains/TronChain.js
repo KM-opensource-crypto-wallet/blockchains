@@ -53,15 +53,14 @@ const encodeSignedTronTxHex = (rawDataHex, signatureHex) =>
   signatureHex;
 
 export const TronChain = () => {
+  // Only `fullHost` is read: TronWeb derives solidityNode and eventServer
+  // from it, so one instance can never straddle two providers. The backend's
+  // tron_solidity_node / tron_event_server keys are intentionally ignored.
   const buildTronProviders = () => {
     const premiumUrl = getPremiumRPCUrl('tron');
     return [
       ...(premiumUrl ? [{fullHost: premiumUrl}] : []),
-      {
-        fullHost: getRPCUrl('tron_full_host'),
-        solidityNode: getRPCUrl('tron_solidity_node'),
-        eventServer: getRPCUrl('tron_event_server'),
-      },
+      {fullHost: getRPCUrl('tron_full_host')},
     ];
   };
 
@@ -72,8 +71,6 @@ export const TronChain = () => {
       try {
         defaultTronWebInstance = new TronWeb({
           fullHost: getRPCUrl('tron_full_host'),
-          solidityNode: getRPCUrl('tron_solidity_node'),
-          eventServer: getRPCUrl('tron_event_server'),
         });
       } catch (e) {
         console.error(`error creating tronWeb ${e}`);
@@ -141,7 +138,7 @@ export const TronChain = () => {
     const providers = buildTronProviders();
     let lastError = null;
     for (let i = 0; i < providers.length; i++) {
-      const tronWeb = new TronWeb(providers[i]);
+      const tronWeb = withRpcSession(new TronWeb(providers[i]));
       try {
         const broadcast = signedHex
           ? await tronWeb.trx.sendHexTransaction(signedHex)
@@ -182,7 +179,8 @@ export const TronChain = () => {
   };
 
   // Polls for the receipt of a broadcast transaction; transport errors keep
-  // polling (rotating providers) instead of aborting into any retry path.
+  // polling instead of aborting into any retry path. Stays on the premium
+  // provider and only advances to the next one after a failed poll.
   // getTransactionInfo returns {} until the tx is confirmed. Returns null
   // when no receipt appeared within the window.
   const waitForTronReceipt = async (
@@ -190,16 +188,18 @@ export const TronChain = () => {
     {retries = 15, interval = 3000} = {},
   ) => {
     const providers = buildTronProviders();
+    let providerIndex = 0;
     for (let i = 0; i < retries; i++) {
       await new Promise(resolve => setTimeout(resolve, interval));
       try {
-        const tronWeb = new TronWeb(providers[i % providers.length]);
+        const tronWeb = withRpcSession(new TronWeb(providers[providerIndex]));
         const info = await tronWeb.trx.getTransactionInfo(txid);
         if (info?.receipt) {
           return info;
         }
       } catch (e) {
         console.error('Error polling tron receipt', e);
+        providerIndex = (providerIndex + 1) % providers.length;
       }
     }
     return null;
@@ -1252,7 +1252,7 @@ export const TronChain = () => {
           from,
         );
         return await addUpdateData(tronWeb, transaction, memo);
-      }, null);
+      });
       // Sign ONCE (offline) — the txID is now fixed; only the broadcast
       // retries, so a transient error can never double-send.
       const signer = new TronWeb(buildTronProviders()[0]);
@@ -1295,7 +1295,7 @@ export const TronChain = () => {
           tronWeb.address.toHex(from),
         );
         return await addUpdateData(tronWeb, tx.transaction, memo);
-      }, null);
+      });
       // Sign ONCE (offline) — txID fixed; only the broadcast retries.
       const signer = new TronWeb(buildTronProviders()[0]);
       const signedTx = await signer.trx.sign(nexTxn, updatePrivateKey);
