@@ -1103,7 +1103,7 @@ export const CHAIN_CONFIG = {
     },
   },
   solana: {
-    premium: {mainnet: true},
+    premium: {mainnet: true, testnet: true},
     supported: true,
     chain_loader: 'solana',
     free_rpc_urls: {

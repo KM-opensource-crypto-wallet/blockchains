@@ -28,8 +28,6 @@ import {
   getExplorerTxUrl,
   isSwapBlockingError,
   isValidStringWithValue,
-  fetchRequest,
-  fetchRPCRequest,
   parseBalance,
   SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -41,10 +39,7 @@ import {
   getFreeRPCUrl,
   getPremiumRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {
-  rpcSessionAdapter,
-  withRpcSessionFetch,
-} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {withRpcSessionFetch} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {getStakingByChain} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {StakeWiz} from 'dok-wallet-blockchain-networks/service/stakeWiz';
 import {getStakeActivation} from '@anza-xyz/solana-rpc-get-stake-activation';
@@ -225,60 +220,6 @@ export const SolanaChain = () => {
           // replace the message sendFunds keys on.
           throw e;
         }
-        if (i === rpcs.length - 1) {
-          if (defaultResponse === undefined) {
-            throw e;
-          } else {
-            return defaultResponse;
-          }
-        }
-      }
-    }
-  };
-
-  const rpcRequest = async (method, params, defaultResponse) => {
-    const rpcs = [
-      getPremiumRPCUrl('solana'),
-      ...getFreeRPCUrl('solana'),
-    ].filter(Boolean);
-    for (let i = 0; i < rpcs.length; i++) {
-      try {
-        return await fetchRPCRequest(rpcs[i], method, params);
-      } catch (e) {
-        console.log('Error for solana rpc', rpcs[i], 'Errors:', e);
-        if (i === rpcs.length - 1) {
-          if (defaultResponse === undefined) {
-            throw e;
-          } else {
-            return defaultResponse;
-          }
-        }
-      }
-    }
-  };
-
-  // same as we were doing in solana sdk
-  const rpcBatchRequest = async (calls, defaultResponse) => {
-    const rpcs = [
-      getPremiumRPCUrl('solana'),
-      ...getFreeRPCUrl('solana'),
-    ].filter(Boolean);
-    const body = calls.map((call, id) => ({jsonrpc: '2.0', id, ...call}));
-    for (let i = 0; i < rpcs.length; i++) {
-      try {
-        const data = await fetchRequest(rpcs[i], {
-          method: 'post',
-          data: body,
-          adapter: rpcSessionAdapter,
-        });
-        if (!Array.isArray(data)) {
-          throw new Error(data?.error?.message || 'Batch not supported');
-        }
-        return body.map(
-          request => data.find(item => item.id === request.id)?.result ?? null,
-        );
-      } catch (e) {
-        console.log('Error for solana rpc', rpcs[i], 'Errors:', e);
         if (i === rpcs.length - 1) {
           if (defaultResponse === undefined) {
             throw e;
@@ -660,10 +601,17 @@ export const SolanaChain = () => {
         return {};
       }
     },
-    getBalance: async ({address}) => {
-      const result = await rpcRequest('getBalance', [address], '0');
-      return String(result?.value ?? 0);
-    },
+    getBalance: async ({address}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          const publicKey = new PublicKey(address);
+          const balance = await solanaProvider.getBalance(publicKey);
+          return balance.toString();
+        } catch (e) {
+          console.error('error in get balance from solana', e);
+          throw e;
+        }
+      }, '0'),
     getStakingBalance: async ({address}) =>
       retryFunc(
         async solanaProvider => {
@@ -854,42 +802,147 @@ export const SolanaChain = () => {
           throw e;
         }
       }, null),
-    getTokenBalance: async ({address, contractAddress}) => {
-      const result = await rpcRequest(
-        'getTokenAccountsByOwner',
-        [address, {mint: contractAddress}, {encoding: 'jsonParsed'}],
-        '0',
-      );
-      return result?.value?.[0]?.account?.data?.parsed?.info?.tokenAmount
-        ?.amount;
-    },
-    getTransactions: async ({address}) => {
-      try {
-        let transactionList = await rpcRequest(
-          'getSignaturesForAddress',
-          [address, {limit: 20}],
-          [],
-        );
-        let signatureList = (transactionList || []).map(
-          transaction => transaction.signature,
-        );
-        let transactionData = signatureList.length
-          ? await rpcBatchRequest(
-              signatureList.map(signature => ({
-                method: 'getTransaction',
-                params: [
-                  signature,
-                  {encoding: 'jsonParsed', maxSupportedTransactionVersion: 0},
-                ],
-              })),
-              [],
-            )
-          : [];
-        if (Array.isArray(transactionData)) {
-          let finalData = [];
-          transactionData.forEach(item => {
+    getTokenBalance: async ({address, contractAddress}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          const publicKey = new PublicKey(address);
+          const contractAddressKey = new PublicKey(contractAddress);
+          const data = await solanaProvider.getParsedTokenAccountsByOwner(
+            publicKey,
+            {
+              mint: contractAddressKey,
+            },
+          );
+          return data?.value[0]?.account?.data?.parsed?.info?.tokenAmount
+            ?.amount;
+        } catch (e) {
+          console.error(`error getting token balance for solana ${e}`);
+          throw e;
+        }
+      }, '0'),
+    getTransactions: async ({address}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          const pubKey = new PublicKey(address);
+          let transactionList = await solanaProvider.getSignaturesForAddress(
+            pubKey,
+            {limit: 20},
+          );
+          let signatureList = transactionList.map(
+            transaction => transaction.signature,
+          );
+          let transactionData = await solanaProvider.getParsedTransactions(
+            signatureList,
+            {
+              maxSupportedTransactionVersion: 0,
+            },
+          );
+          if (Array.isArray(transactionData)) {
+            let finalData = [];
+            transactionData.forEach(item => {
+              const instructions =
+                item?.transaction?.message?.instructions || [];
+              const txHash = item?.transaction?.signatures[0];
+
+              const stakeInstruction = instructions.find(
+                ix =>
+                  ix?.program === 'stake' ||
+                  ix?.programId?.toString() ===
+                    'Stake11111111111111111111111111111111111111112',
+              );
+
+              if (stakeInstruction) {
+                const stakeType = stakeInstruction?.parsed?.type;
+                const info = stakeInstruction?.parsed?.info || {};
+                let transactionType = 'stake';
+                let amount = '0';
+                let from = address;
+                let to = address;
+
+                if (stakeType === 'delegate' || stakeType === 'initialize') {
+                  transactionType = 'stake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.voteAccount || info?.stakeAccount || address;
+                  const fundIx = instructions.find(
+                    ix =>
+                      ix?.parsed?.info?.lamports != null &&
+                      ix?.program !== 'stake',
+                  );
+                  amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
+                } else if (stakeType === 'deactivate') {
+                  transactionType = 'unstake';
+                  from = info?.stakeAuthority || address;
+                  to = info?.stakeAccount || address;
+                  const accountKeys =
+                    item?.transaction?.message?.accountKeys || [];
+                  const stakeAccountIndex = accountKeys.findIndex(
+                    key => key?.pubkey?.toString() === info?.stakeAccount,
+                  );
+                  if (stakeAccountIndex !== -1) {
+                    amount =
+                      item?.meta?.preBalances?.[
+                        stakeAccountIndex
+                      ]?.toString() || '0';
+                  }
+                } else if (stakeType === 'withdraw') {
+                  transactionType = 'withdraw';
+                  from = info?.stakeAccount || address;
+                  to = info?.destination || address;
+                  amount = info?.lamports?.toString() || '0';
+                }
+
+                finalData.push({
+                  amount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from,
+                  to,
+                  totalCourse: '0$',
+                  transactionType,
+                  blockNumber: item?.slot,
+                });
+                return;
+              }
+
+              const transactionDetails = instructions.find(
+                ix => ix?.parsed?.info?.lamports != null,
+              )?.parsed?.info;
+              if (transactionDetails?.lamports?.toString()) {
+                const bnValue = transactionDetails?.lamports?.toString() || 0;
+                finalData.push({
+                  amount: bnValue?.toString(),
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from: transactionDetails?.source,
+                  to: transactionDetails?.destination,
+                  totalCourse: '0$',
+                  transactionType: 'regular',
+                });
+              }
+            });
+            return finalData;
+          }
+          return [];
+        } catch (e) {
+          console.error(`error getting transactions for solana ${e}`);
+          throw e;
+        }
+      }, []),
+    getTransaction: async ({txHash, contractAddress}) =>
+      retryFunc(
+        async solanaProvider => {
+          try {
+            if (!txHash) return null;
+            const item = await solanaProvider.getParsedTransaction(txHash, {
+              maxSupportedTransactionVersion: 0,
+            });
+            if (!item) return {data: null};
             const instructions = item?.transaction?.message?.instructions || [];
-            const txHash = item?.transaction?.signatures[0];
+            const blockNumber = item?.slot ?? null;
 
             const stakeInstruction = instructions.find(
               ix =>
@@ -901,15 +954,13 @@ export const SolanaChain = () => {
             if (stakeInstruction) {
               const stakeType = stakeInstruction?.parsed?.type;
               const info = stakeInstruction?.parsed?.info || {};
-              let transactionType = 'stake';
               let amount = '0';
-              let from = address;
-              let to = address;
+              let from = null;
+              let to = null;
 
               if (stakeType === 'delegate' || stakeType === 'initialize') {
-                transactionType = 'stake';
-                from = info?.stakeAuthority || address;
-                to = info?.voteAccount || info?.stakeAccount || address;
+                from = info?.stakeAuthority || null;
+                to = info?.voteAccount || info?.stakeAccount || null;
                 const fundIx = instructions.find(
                   ix =>
                     ix?.parsed?.info?.lamports != null &&
@@ -917,9 +968,8 @@ export const SolanaChain = () => {
                 );
                 amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
               } else if (stakeType === 'deactivate') {
-                transactionType = 'unstake';
-                from = info?.stakeAuthority || address;
-                to = info?.stakeAccount || address;
+                from = info?.stakeAuthority || null;
+                to = info?.stakeAccount || null;
                 const accountKeys =
                   item?.transaction?.message?.accountKeys || [];
                 const stakeAccountIndex = accountKeys.findIndex(
@@ -931,33 +981,73 @@ export const SolanaChain = () => {
                     '0';
                 }
               } else if (stakeType === 'withdraw') {
-                transactionType = 'withdraw';
-                from = info?.stakeAccount || address;
-                to = info?.destination || address;
+                from = info?.stakeAccount || null;
+                to = info?.destination || null;
                 amount = info?.lamports?.toString() || '0';
               }
 
-              finalData.push({
-                amount,
-                link: txHash,
-                url: getExplorerTxUrl('solana', txHash),
-                status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-                date: item?.blockTime * 1000,
-                from,
-                to,
-                totalCourse: '0$',
-                transactionType,
-                blockNumber: item?.slot,
-              });
-              return;
+              return {
+                data: {
+                  amount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from,
+                  to,
+                  totalCourse: '0',
+                  blockNumber,
+                },
+              };
             }
 
             const transactionDetails = instructions.find(
               ix => ix?.parsed?.info?.lamports != null,
             )?.parsed?.info;
-            if (transactionDetails?.lamports?.toString()) {
-              const bnValue = transactionDetails?.lamports?.toString() || 0;
-              finalData.push({
+            // SPL token transfers carry no lamports — match the token
+            // instruction the way getTokenTransactions does.
+            const tokenDetails = instructions.find(
+              ix =>
+                (ix?.parsed?.type === 'transferChecked' ||
+                  ix?.parsed?.type === 'transfer') &&
+                (ix?.parsed?.info?.amount != null ||
+                  ix?.parsed?.info?.tokenAmount?.amount != null),
+            )?.parsed?.info;
+
+            if (tokenDetails && (contractAddress || !transactionDetails)) {
+              const tokenAmount =
+                tokenDetails?.amount?.toString() ||
+                tokenDetails?.tokenAmount?.amount?.toString();
+              // source/destination are token accounts (ATAs); resolve the
+              // recipient's wallet address from postTokenBalances.
+              const accountKeys = item?.transaction?.message?.accountKeys || [];
+              const destinationOwner = item?.meta?.postTokenBalances?.find(
+                balance =>
+                  accountKeys[balance?.accountIndex]?.pubkey?.toString() ===
+                  tokenDetails?.destination,
+              )?.owner;
+              return {
+                data: {
+                  amount: tokenAmount,
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000,
+                  from:
+                    tokenDetails?.authority ||
+                    tokenDetails?.multisigAuthority ||
+                    tokenDetails?.source,
+                  to: destinationOwner || tokenDetails?.destination,
+                  totalCourse: '0',
+                  blockNumber,
+                },
+              };
+            }
+
+            if (!transactionDetails?.lamports?.toString()) return null;
+            const bnValue = transactionDetails?.lamports?.toString() || 0;
+            return {
+              data: {
                 amount: bnValue?.toString(),
                 link: txHash,
                 url: getExplorerTxUrl('solana', txHash),
@@ -965,221 +1055,86 @@ export const SolanaChain = () => {
                 date: item?.blockTime * 1000,
                 from: transactionDetails?.source,
                 to: transactionDetails?.destination,
-                totalCourse: '0$',
-                transactionType: 'regular',
-              });
-            }
-          });
-          return finalData;
-        }
-        return [];
-      } catch (e) {
-        console.error(`error getting transactions for solana ${e}`);
-        throw e;
-      }
-    },
-    getTransaction: async ({txHash, contractAddress}) => {
-      try {
-        if (!txHash) return null;
-        const item = await rpcRequest(
-          'getTransaction',
-          [txHash, {encoding: 'jsonParsed', maxSupportedTransactionVersion: 0}],
-          {data: null},
-        );
-        if (!item) return {data: null};
-        const instructions = item?.transaction?.message?.instructions || [];
-        const blockNumber = item?.slot ?? null;
-
-        const stakeInstruction = instructions.find(
-          ix =>
-            ix?.program === 'stake' ||
-            ix?.programId?.toString() ===
-              'Stake11111111111111111111111111111111111111112',
-        );
-
-        if (stakeInstruction) {
-          const stakeType = stakeInstruction?.parsed?.type;
-          const info = stakeInstruction?.parsed?.info || {};
-          let amount = '0';
-          let from = null;
-          let to = null;
-
-          if (stakeType === 'delegate' || stakeType === 'initialize') {
-            from = info?.stakeAuthority || null;
-            to = info?.voteAccount || info?.stakeAccount || null;
-            const fundIx = instructions.find(
-              ix =>
-                ix?.parsed?.info?.lamports != null && ix?.program !== 'stake',
-            );
-            amount = fundIx?.parsed?.info?.lamports?.toString() || '0';
-          } else if (stakeType === 'deactivate') {
-            from = info?.stakeAuthority || null;
-            to = info?.stakeAccount || null;
-            const accountKeys = item?.transaction?.message?.accountKeys || [];
-            const stakeAccountIndex = accountKeys.findIndex(
-              key => key?.pubkey?.toString() === info?.stakeAccount,
-            );
-            if (stakeAccountIndex !== -1) {
-              amount =
-                item?.meta?.preBalances?.[stakeAccountIndex]?.toString() || '0';
-            }
-          } else if (stakeType === 'withdraw') {
-            from = info?.stakeAccount || null;
-            to = info?.destination || null;
-            amount = info?.lamports?.toString() || '0';
+                totalCourse: '0',
+                blockNumber,
+              },
+            };
+          } catch (e) {
+            console.error(`error getting transaction for solana ${e}`);
+            throw e;
           }
+        },
+        {data: null},
+      ),
 
-          return {
-            data: {
-              amount,
-              link: txHash,
-              url: getExplorerTxUrl('solana', txHash),
-              status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-              date: item?.blockTime * 1000,
-              from,
-              to,
-              totalCourse: '0',
-              blockNumber,
+    getTokenTransactions: ({address, contractAddress}) =>
+      retryFunc(async solanaProvider => {
+        try {
+          const pubKey = new PublicKey(address);
+          const tokenMintAddress = new PublicKey(contractAddress);
+          const tokenAccounts = await solanaProvider.getTokenAccountsByOwner(
+            pubKey,
+            {
+              mint: tokenMintAddress,
             },
-          };
-        }
-
-        const transactionDetails = instructions.find(
-          ix => ix?.parsed?.info?.lamports != null,
-        )?.parsed?.info;
-
-        // SPL token transfers carry no lamports — match the token
-        // instruction the way getTokenTransactions does.
-        const tokenDetails = instructions.find(
-          ix =>
-            (ix?.parsed?.type === 'transferChecked' ||
-              ix?.parsed?.type === 'transfer') &&
-            (ix?.parsed?.info?.amount != null ||
-              ix?.parsed?.info?.tokenAmount?.amount != null),
-        )?.parsed?.info;
-
-        if (tokenDetails && (contractAddress || !transactionDetails)) {
-          const tokenAmount =
-            tokenDetails?.amount?.toString() ||
-            tokenDetails?.tokenAmount?.amount?.toString();
-          // source/destination are token accounts (ATAs); resolve the
-          // recipient's wallet address from postTokenBalances.
-          const accountKeys = item?.transaction?.message?.accountKeys || [];
-          const destinationOwner = item?.meta?.postTokenBalances?.find(
-            balance =>
-              accountKeys[balance?.accountIndex]?.pubkey?.toString() ===
-              tokenDetails?.destination,
-          )?.owner;
-          return {
-            data: {
-              amount: tokenAmount,
-              link: txHash,
-              url: getExplorerTxUrl('solana', txHash),
-              status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-              date: item?.blockTime * 1000,
-              from:
-                tokenDetails?.authority ||
-                tokenDetails?.multisigAuthority ||
-                tokenDetails?.source,
-              to: destinationOwner || tokenDetails?.destination,
-              totalCourse: '0',
-              blockNumber,
+          );
+          const tokenAccount = tokenAccounts?.value?.[0]?.pubkey;
+          if (!tokenAccount) {
+            // no token account for this mint — no transaction history yet
+            return [];
+          }
+          let transactionList = await solanaProvider.getSignaturesForAddress(
+            tokenAccount,
+            {limit: 20},
+          );
+          let signatureList = transactionList.map(
+            transaction => transaction.signature,
+          );
+          let transactionData = await solanaProvider.getParsedTransactions(
+            signatureList,
+            {
+              maxSupportedTransactionVersion: 0,
             },
-          };
-        }
-
-        if (!transactionDetails?.lamports?.toString()) return null;
-        const bnValue = transactionDetails?.lamports?.toString() || 0;
-        return {
-          data: {
-            amount: bnValue?.toString(),
-            link: txHash,
-            url: getExplorerTxUrl('solana', txHash),
-            status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-            date: item?.blockTime * 1000,
-            from: transactionDetails?.source,
-            to: transactionDetails?.destination,
-            totalCourse: '0',
-            blockNumber,
-          },
-        };
-      } catch (e) {
-        console.error(`error getting transaction for solana ${e}`);
-        throw e;
-      }
-    },
-
-    getTokenTransactions: async ({address, contractAddress}) => {
-      try {
-        const tokenAccounts = await rpcRequest(
-          'getTokenAccountsByOwner',
-          [address, {mint: contractAddress}, {encoding: 'jsonParsed'}],
-          [],
-        );
-        const tokenAccount = tokenAccounts?.value?.[0]?.pubkey;
-        if (!tokenAccount) {
-          // no token account for this mint — no transaction history yet
+          );
+          if (Array.isArray(transactionData)) {
+            let finalData = [];
+            transactionData.forEach(item => {
+              const instructions = item?.transaction?.message?.instructions;
+              const transactionDetails = instructions?.find(subItem => {
+                return (
+                  subItem?.parsed?.type === 'transferChecked' ||
+                  subItem?.parsed?.type === 'transfer'
+                );
+              })?.parsed?.info;
+              const amount =
+                transactionDetails?.amount?.toString() ||
+                transactionDetails?.tokenAmount?.amount?.toString();
+              if (amount) {
+                const bnValue = amount;
+                const txHash = item?.transaction?.signatures[0];
+                const isSender = transactionDetails?.authority === address;
+                const isReceiver =
+                  transactionDetails?.destination === tokenAccount.toString();
+                finalData.push({
+                  amount: bnValue?.toString(),
+                  link: txHash,
+                  url: getExplorerTxUrl('solana', txHash),
+                  status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
+                  date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
+                  from: isSender ? address : transactionDetails?.source,
+                  to: isReceiver ? address : transactionDetails?.destination,
+                  totalCourse: '0$',
+                });
+              }
+            });
+            return finalData;
+          }
           return [];
+        } catch (e) {
+          console.error(`error getting token transactions for solana ${e}`);
+          throw e;
         }
-        let transactionList = await rpcRequest(
-          'getSignaturesForAddress',
-          [tokenAccount, {limit: 20}],
-          [],
-        );
-        let signatureList = (transactionList || []).map(
-          transaction => transaction.signature,
-        );
-        let transactionData = signatureList.length
-          ? await rpcBatchRequest(
-              signatureList.map(signature => ({
-                method: 'getTransaction',
-                params: [
-                  signature,
-                  {encoding: 'jsonParsed', maxSupportedTransactionVersion: 0},
-                ],
-              })),
-              [],
-            )
-          : [];
-        if (Array.isArray(transactionData)) {
-          let finalData = [];
-          transactionData.forEach(item => {
-            const instructions = item?.transaction?.message?.instructions;
-            const transactionDetails = instructions?.find(subItem => {
-              return (
-                subItem?.parsed?.type === 'transferChecked' ||
-                subItem?.parsed?.type === 'transfer'
-              );
-            })?.parsed?.info;
-            const amount =
-              transactionDetails?.amount?.toString() ||
-              transactionDetails?.tokenAmount?.amount?.toString();
-            if (amount) {
-              const bnValue = amount;
-              const txHash = item?.transaction?.signatures[0];
-              const isSender = transactionDetails?.authority === address;
-              const isReceiver =
-                transactionDetails?.destination === tokenAccount.toString();
-              finalData.push({
-                amount: bnValue?.toString(),
-                link: txHash,
-                url: getExplorerTxUrl('solana', txHash),
-                status: item?.meta?.err == null ? 'SUCCESS' : 'FAILED',
-                date: item?.blockTime * 1000, //new Date(transaction.raw_data.timestamp),
-                from: isSender ? address : transactionDetails?.source,
-                to: isReceiver ? address : transactionDetails?.destination,
-                totalCourse: '0$',
-              });
-            }
-          });
-          return finalData;
-        }
-        return [];
-      } catch (e) {
-        console.error(`error getting token transactions for solana ${e}`);
-        throw e;
-      }
-    },
+      }, []),
     send: async ({to, from, amount, privateKey, memo, gasFee, estimateGas}) => {
       try {
         // Prepare (reads only) may retry across RPCs; sign+broadcast happens
