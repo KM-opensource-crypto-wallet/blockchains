@@ -1,10 +1,6 @@
-import axios from 'axios';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const HEDERA_API = axios.create({
+export const HEDERA_API = createProviderClient({
   baseURL: config.HEDERA_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });

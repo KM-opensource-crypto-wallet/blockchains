@@ -53,8 +53,6 @@ import {
   parseBalance,
   validateSupportedChain,
   isDeriveAddressSupportChain,
-  MORALIS_CHAIN_TO_CHAIN,
-  NFT_SUPPORTED_CHAIN,
   isStakingChain,
   moveItem,
   validateNumber,
@@ -70,6 +68,8 @@ import {
   isPlausibleTxHash,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
+  MORALIS_CHAIN_TO_CHAIN,
+  NFT_SUPPORTED_CHAIN,
 } from 'dok-wallet-blockchain-networks/helper';
 import {derivePrivateKeyForPath} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {

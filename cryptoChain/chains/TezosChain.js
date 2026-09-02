@@ -5,12 +5,16 @@ import BigNumber from 'bignumber.js';
 import {Tzkt} from 'dok-wallet-blockchain-networks/service/tzkt';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
+  fetchRequest,
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 
 export const TezosChain = () => {
-  const tezosProvider = new TezosToolkit(getRPCUrl('tezos'));
+  // Created on first SDK use so balance-only sessions never load taquito.
+  let tezosProviderInstance;
+  const tezosProvider = () =>
+    (tezosProviderInstance ??= new TezosToolkit(getRPCUrl('tezos')));
   return {
     isValidAddress: ({address}) => {
       try {
@@ -25,7 +29,11 @@ export const TezosChain = () => {
     },
     getBalance: async ({address}) => {
       try {
-        const resp = await tezosProvider.tz.getBalance(address);
+        const resp = await fetchRequest(
+          `${getRPCUrl(
+            'tezos',
+          )}/chains/main/blocks/head/context/contracts/${address}/balance`,
+        );
         return resp?.toString();
       } catch (e) {
         console.error('error in get balance from tezos', e);
@@ -39,8 +47,8 @@ export const TezosChain = () => {
         let finalAmount = bnAmount.gt(new BigNumber(1))
           ? bnAmount.minus(new BigNumber(1)).toString()
           : amount;
-        tezosProvider.setProvider({signer: signer});
-        const estimate = await tezosProvider.estimate.transfer({
+        tezosProvider().setProvider({signer: signer});
+        const estimate = await tezosProvider().estimate.transfer({
           to: toAddress,
           amount: finalAmount,
         });
@@ -61,9 +69,9 @@ export const TezosChain = () => {
     send: async ({to, amount, privateKey}) => {
       try {
         const signer = await getSignerConfigure(privateKey);
-        tezosProvider.setProvider({signer: signer});
-        return await tezosProvider.wallet
-          .transfer({
+        tezosProvider().setProvider({signer: signer});
+        return await tezosProvider()
+          .wallet.transfer({
             to: to,
             amount,
           })

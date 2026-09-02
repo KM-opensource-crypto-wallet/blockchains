@@ -1,10 +1,6 @@
-import axios from 'axios';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const BlockDaemonAPI = axios.create({
-  baseURL: 'https://svc.blockdaemon.com',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-KEY': process.env.BLOCKDAEMON_API_KEY,
-  },
-  timeout: 30000,
+export const BlockDaemonAPI = createProviderClient({
+  proxy: 'blockdaemon',
+  scan: true,
 });

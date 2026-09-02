@@ -3,6 +3,7 @@ import {
   getPremiumRPCUrl,
   getRPCUrl,
 } from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
@@ -25,6 +26,13 @@ const removeSubstringFromPrivateKey = privateKey => {
     : privateKey;
 };
 
+const withRpcSession = tronWeb => {
+  for (const node of [tronWeb.fullNode, tronWeb.solidityNode]) {
+    node.instance.defaults.adapter = rpcSessionAdapter;
+  }
+  return tronWeb;
+};
+
 const protoVarintHex = len => {
   let n = len;
   let hex = '';
@@ -45,62 +53,38 @@ const encodeSignedTronTxHex = (rawDataHex, signatureHex) =>
   signatureHex;
 
 export const TronChain = () => {
-  // Build ordered provider list: premium RPCs first, then trongrid with API keys as fallback.
-  // Each entry is a TronWeb options object.
+  // Only `fullHost` is read: TronWeb derives solidityNode and eventServer
+  // from it, so one instance can never straddle two providers. The backend's
+  // tron_solidity_node / tron_event_server keys are intentionally ignored.
   const buildTronProviders = () => {
-    const providers = [];
-
-    // Premium providers (QuickNode, Alchemy, etc.) — each URL is a standalone fullHost
-    const premiumUrls = getPremiumRPCUrl('tron');
-    for (const url of premiumUrls) {
-      providers.push({fullHost: url});
-    }
-
-    // Trongrid fallback — retry with no key, then each API key in turn
-    const tronGridOptions = {
-      fullHost: getRPCUrl('tron_full_host'),
-      solidityNode: getRPCUrl('tron_solidity_node'),
-      eventServer: getRPCUrl('tron_event_server'),
-    };
-    providers.push({...tronGridOptions}); // no API key
-    const apiKey1 = getRPCUrl('tron_api_key');
-    const apiKey2 = getRPCUrl('tron_api_key_2');
-    if (apiKey1) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey1},
-      });
-    }
-    if (apiKey2) {
-      providers.push({
-        ...tronGridOptions,
-        headers: {'TRON-PRO-API-KEY': apiKey2},
-      });
-    }
-
-    return providers;
+    const premiumUrl = getPremiumRPCUrl('tron');
+    return [
+      ...(premiumUrl ? [{fullHost: premiumUrl}] : []),
+      {fullHost: getRPCUrl('tron_full_host')},
+    ];
   };
 
-  let defaultTronWeb = null;
-
-  try {
-    const options = {
-      fullHost: getRPCUrl('tron_full_host'),
-      solidityNode: getRPCUrl('tron_solidity_node'),
-      eventServer: getRPCUrl('tron_event_server'),
-    };
-    defaultTronWeb = new TronWeb(options);
-  } catch (e) {
-    console.error(`error creating tronWeb ${e}`);
-    throw e;
-  }
+  // Created on first SDK use so balance-only sessions never load tronweb.
+  let defaultTronWebInstance = null;
+  const defaultTronWeb = () => {
+    if (!defaultTronWebInstance) {
+      try {
+        defaultTronWebInstance = new TronWeb({
+          fullHost: getRPCUrl('tron_full_host'),
+        });
+      } catch (e) {
+        console.error(`error creating tronWeb ${e}`);
+        throw e;
+      }
+    }
+    return defaultTronWebInstance;
+  };
 
   const retryFunc = async (cb, defaultResponse) => {
     const providers = buildTronProviders();
     for (let i = 0; i < providers.length; i++) {
       try {
-        const tronWeb = new TronWeb(providers[i]);
-        return await cb(tronWeb);
+        return await cb(withRpcSession(new TronWeb(providers[i])));
       } catch (e) {
         console.error(
           'Error for tron provider',
@@ -116,7 +100,7 @@ export const TronChain = () => {
           throw e;
         }
         if (i === providers.length - 1) {
-          if (defaultResponse) {
+          if (defaultResponse !== undefined) {
             return defaultResponse;
           } else {
             throw e;
@@ -154,7 +138,7 @@ export const TronChain = () => {
     const providers = buildTronProviders();
     let lastError = null;
     for (let i = 0; i < providers.length; i++) {
-      const tronWeb = new TronWeb(providers[i]);
+      const tronWeb = withRpcSession(new TronWeb(providers[i]));
       try {
         const broadcast = signedHex
           ? await tronWeb.trx.sendHexTransaction(signedHex)
@@ -195,7 +179,8 @@ export const TronChain = () => {
   };
 
   // Polls for the receipt of a broadcast transaction; transport errors keep
-  // polling (rotating providers) instead of aborting into any retry path.
+  // polling instead of aborting into any retry path. Stays on the premium
+  // provider and only advances to the next one after a failed poll.
   // getTransactionInfo returns {} until the tx is confirmed. Returns null
   // when no receipt appeared within the window.
   const waitForTronReceipt = async (
@@ -203,16 +188,18 @@ export const TronChain = () => {
     {retries = 15, interval = 3000} = {},
   ) => {
     const providers = buildTronProviders();
+    let providerIndex = 0;
     for (let i = 0; i < retries; i++) {
       await new Promise(resolve => setTimeout(resolve, interval));
       try {
-        const tronWeb = new TronWeb(providers[i % providers.length]);
+        const tronWeb = withRpcSession(new TronWeb(providers[providerIndex]));
         const info = await tronWeb.trx.getTransactionInfo(txid);
         if (info?.receipt) {
           return info;
         }
       } catch (e) {
         console.error('Error polling tron receipt', e);
+        providerIndex = (providerIndex + 1) % providers.length;
       }
     }
     return null;
@@ -458,13 +445,13 @@ export const TronChain = () => {
       return 'TRX';
     },
     isValidAddress: ({address}) => {
-      return defaultTronWeb?.isAddress(address);
+      return defaultTronWeb().isAddress(address);
     },
     isValidPrivateKey: ({privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const address = defaultTronWeb.address.toHex(
-          defaultTronWeb.address.fromPrivateKey(updatePrivateKey),
+        const address = defaultTronWeb().address.toHex(
+          defaultTronWeb().address.fromPrivateKey(updatePrivateKey),
         );
         return !!address;
       } catch (e) {
@@ -474,12 +461,12 @@ export const TronChain = () => {
 
     createWalletByPrivateKey: ({privateKey}) => {
       const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-      const address = defaultTronWeb.address.toHex(
-        defaultTronWeb.address.fromPrivateKey(updatePrivateKey),
+      const address = defaultTronWeb().address.toHex(
+        defaultTronWeb().address.fromPrivateKey(updatePrivateKey),
       );
       return {
         privateKey: updatePrivateKey,
-        address: defaultTronWeb.address.fromHex(address),
+        address: defaultTronWeb().address.fromHex(address),
       };
     },
     getContract: async ({contractAddress}) =>
@@ -664,7 +651,7 @@ export const TronChain = () => {
           console.error('error in get token fees', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFee: async ({
       fromAddress,
       toAddress,
@@ -715,7 +702,7 @@ export const TronChain = () => {
           console.error('Error in get estimate fee for tron', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStaking: async ({
       fromAddress,
       amount,
@@ -752,7 +739,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForDeactivateStaking: async ({
       fromAddress,
       amount,
@@ -789,7 +776,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForDeactivateStaking', e);
           throw e;
         }
-      }, null),
+      }),
     estimateFeesForStakeValidators: async ({
       fromAddress,
       privateKey,
@@ -823,7 +810,7 @@ export const TronChain = () => {
           console.error('Error in tron estimateFeesForStakeValidators', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForWithdrawStaking: async ({fromAddress, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -852,7 +839,7 @@ export const TronChain = () => {
           console.error('Error in tron estimateFeesForWithdrawStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStakingRewards: async ({fromAddress, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -881,7 +868,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForStakingRewards', e);
           throw e;
         }
-      }, null),
+      }),
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async tronWeb => {
         try {
@@ -1265,7 +1252,7 @@ export const TronChain = () => {
           from,
         );
         return await addUpdateData(tronWeb, transaction, memo);
-      }, null);
+      });
       // Sign ONCE (offline) — the txID is now fixed; only the broadcast
       // retries, so a transient error can never double-send.
       const signer = new TronWeb(buildTronProviders()[0]);
@@ -1308,7 +1295,7 @@ export const TronChain = () => {
           tronWeb.address.toHex(from),
         );
         return await addUpdateData(tronWeb, tx.transaction, memo);
-      }, null);
+      });
       // Sign ONCE (offline) — txID fixed; only the broadcast retries.
       const signer = new TronWeb(buildTronProviders()[0]);
       const signedTx = await signer.trx.sign(nexTxn, updatePrivateKey);
@@ -1347,7 +1334,7 @@ export const TronChain = () => {
           isApproved: allowance >= required,
           needsReset: false,
         };
-      }, null),
+      }),
     // TRC20 approve for the swap spender. Waits for on-chain confirmation
     // like EVMChain.approve so the subsequent swap never races the approval.
     // Build/sign happen exactly once — the old shape ran the whole method
@@ -1368,19 +1355,17 @@ export const TronChain = () => {
         return {confirmTransaction: null, alreadyApproved: true};
       }
       // Build via read-retry; nothing broadcast yet, so replays are harmless.
-      const tx = await retryFunc(
-        async tronWeb =>
-          tronWeb.transactionBuilder.triggerSmartContract(
-            tronWeb.address.toHex(contractAddress),
-            'approve(address,uint256)',
-            {feeLimit: 1000000000, callValue: 0},
-            [
-              {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
-              {type: 'uint256', value: required.toString()},
-            ],
-            tronWeb.address.toHex(from),
-          ),
-        null,
+      const tx = await retryFunc(async tronWeb =>
+        tronWeb.transactionBuilder.triggerSmartContract(
+          tronWeb.address.toHex(contractAddress),
+          'approve(address,uint256)',
+          {feeLimit: 1000000000, callValue: 0},
+          [
+            {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
+            {type: 'uint256', value: required.toString()},
+          ],
+          tronWeb.address.toHex(from),
+        ),
       );
       // Sign ONCE (offline) — txID fixed; only the broadcast retries.
       const signer = new TronWeb(buildTronProviders()[0]);
@@ -1451,7 +1436,7 @@ export const TronChain = () => {
           nonce: null,
           feesOptions: null,
         };
-      }, null),
+      }),
     // Executes a provider-built DEX swap. Two payload shapes (see backend
     // adapters): Relay sends the exact /wallet/triggersmartcontract body
     // ({parameter, type}); LI.FI sends a pre-built protobuf raw_data as
@@ -1489,7 +1474,7 @@ export const TronChain = () => {
             throw new Error(message);
           }
           return resp.transaction;
-        }, null);
+        });
         // Sign ONCE (offline) — txID fixed; only the broadcast retries.
         const signer = new TronWeb(buildTronProviders()[0]);
         const signedTx = await signer.trx.sign(transaction, updatePrivateKey);
@@ -1541,7 +1526,7 @@ export const TronChain = () => {
             await simulateTronSwapOrThrow(tronWeb, decodedContractValue);
           }
           return true;
-        }, null);
+        });
         const signer = new TronWeb(buildTronProviders()[0]);
         const txID = sha256('0x' + rawDataHex).slice(2);
         const signature = signer.utils.crypto.ECKeySign(
@@ -1637,7 +1622,7 @@ export const TronChain = () => {
           estimateGas: null,
           nonce: null,
         };
-      }, null),
+      }),
     createStaking: async ({from, amount, privateKey, resourceType}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -1652,7 +1637,7 @@ export const TronChain = () => {
             updatePrivateKey,
             resourceType,
           );
-        }, null);
+        });
         return await broadcastSignedTronTx({
           signedTx: txData,
           txid: txData?.txID,
@@ -1665,15 +1650,13 @@ export const TronChain = () => {
     createStakingWithValidator: async ({from, privateKey, selectedVotes}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForVote(
-              tronWeb,
-              from,
-              updatePrivateKey,
-              selectedVotes,
-            ),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForVote(
+            tronWeb,
+            from,
+            updatePrivateKey,
+            selectedVotes,
+          ),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1696,7 +1679,7 @@ export const TronChain = () => {
             updatePrivateKey,
             resourceType,
           );
-        }, null);
+        });
         return await broadcastSignedTronTx({
           signedTx: txData,
           txid: txData?.txID,
@@ -1709,14 +1692,8 @@ export const TronChain = () => {
     withdrawStaking: async ({from, privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForWithdraw(
-              tronWeb,
-              from,
-              updatePrivateKey,
-            ),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForWithdraw(tronWeb, from, updatePrivateKey),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1730,10 +1707,8 @@ export const TronChain = () => {
     stakingRewards: async ({from, privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForRewards(tronWeb, from, updatePrivateKey),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForRewards(tronWeb, from, updatePrivateKey),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1753,7 +1728,7 @@ export const TronChain = () => {
           console.error('Error in sign tron message', e);
           return Promise.reject(e?.message);
         }
-      }, null),
+      }),
     signTransaction: async ({payload, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -1766,7 +1741,7 @@ export const TronChain = () => {
           console.error('Error in sign tron transaction', e);
           return Promise.reject(e?.message);
         }
-      }, null),
+      }),
 
     waitForConfirmation: async ({transaction, interval = 3000, retries = 5}) =>
       retryFunc(async tronWeb => {
@@ -1810,6 +1785,6 @@ export const TronChain = () => {
             }
           }, interval);
         });
-      }, null),
+      }),
   };
 };
