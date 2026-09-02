@@ -1185,7 +1185,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('error in get token fees for batch transaction', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForToken: async ({
       fromAddress,
       toAddress,
@@ -1229,7 +1229,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('error in get token fees for ether', e);
           throw e;
         }
-      }, null),
+      }),
 
     getEstimateFeeForNFT: async ({
       fromAddress,
@@ -1304,7 +1304,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('error in get nft fees for ether chain', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFee: async ({
       fromAddress,
       toAddress,
@@ -1338,7 +1338,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('Error in gas fee', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateSwapFee: async ({
       fromAddress,
       swapData,
@@ -1391,7 +1391,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('Error in getEstimateSwapFee', e);
           throw e;
         }
-      }, null),
+      }),
     createCall: async ({toAddress, amount, decimals}) => {
       try {
         return [toAddress, convertToSmallAmount(amount, decimals || 18), '0x'];
@@ -1483,7 +1483,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('Error in getEstimateFeeForPendingTransaction', reason);
           throw new Error(reason);
         }
-      }, null),
+      }),
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async evmProvider => {
         try {
@@ -2422,7 +2422,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         const wallet = new ethers.Wallet(privateKey);
         const walletSigner = wallet.connect(evmProvider);
         return await revokeAuthorization(walletSigner, evmProvider);
-      }, null),
+      }),
     createStaking: async ({
       from,
       amount,
@@ -2609,7 +2609,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('Error in EVMChain getEstimateFeeForStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForDeactivateStaking: async ({
       fromAddress,
       contractAddress,
@@ -2660,7 +2660,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           );
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStakingRewards: async ({
       fromAddress,
       contractAddress,
@@ -2713,7 +2713,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           console.error('Error in EVMChain getEstimateFeeForStakingRewards', e);
           throw e;
         }
-      }, null),
+      }),
     stakingRewards: async ({
       from,
       contractAddress,
@@ -2816,7 +2816,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             stakingProviderName,
             evmProvider,
           }),
-        null,
       ),
     approve: async ({
       spenderAddress,
@@ -2921,7 +2920,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             firstTrx: resetTrx,
             secondTrx: approveTx,
           };
-        }, null);
+        });
         if (approveResult?.alreadyApproved) {
           return {
             confirmTransaction: null,
@@ -3036,7 +3035,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             ? new BigNumber(obj.fee).multipliedBy(2).toString()
             : obj.fee,
         };
-      }, null),
+      }),
     readAllowance: async ({
       from,
       spenderAddress,
@@ -3069,7 +3068,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           needsReset,
           required,
         };
-      }, null),
+      }),
     swap: async ({
       swapData,
       to,
@@ -3215,7 +3214,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           isApproved,
           required,
         };
-      }, null),
+      }),
     getEstimateFeeForPermitApprove: async ({
       from,
       contractAddress,
@@ -3266,7 +3265,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           fee: obj.fee,
           permit2Amount,
         };
-      }, null),
+      }),
     approvePermit2: async ({
       permitAbi,
       swapTo,

@@ -651,7 +651,7 @@ export const TronChain = () => {
           console.error('error in get token fees', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFee: async ({
       fromAddress,
       toAddress,
@@ -702,7 +702,7 @@ export const TronChain = () => {
           console.error('Error in get estimate fee for tron', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStaking: async ({
       fromAddress,
       amount,
@@ -739,7 +739,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForDeactivateStaking: async ({
       fromAddress,
       amount,
@@ -776,7 +776,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForDeactivateStaking', e);
           throw e;
         }
-      }, null),
+      }),
     estimateFeesForStakeValidators: async ({
       fromAddress,
       privateKey,
@@ -810,7 +810,7 @@ export const TronChain = () => {
           console.error('Error in tron estimateFeesForStakeValidators', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForWithdrawStaking: async ({fromAddress, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -839,7 +839,7 @@ export const TronChain = () => {
           console.error('Error in tron estimateFeesForWithdrawStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStakingRewards: async ({fromAddress, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -868,7 +868,7 @@ export const TronChain = () => {
           console.error('Error in tron getEstimateFeeForStakingRewards', e);
           throw e;
         }
-      }, null),
+      }),
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async tronWeb => {
         try {
@@ -1334,7 +1334,7 @@ export const TronChain = () => {
           isApproved: allowance >= required,
           needsReset: false,
         };
-      }, null),
+      }),
     // TRC20 approve for the swap spender. Waits for on-chain confirmation
     // like EVMChain.approve so the subsequent swap never races the approval.
     // Build/sign happen exactly once — the old shape ran the whole method
@@ -1355,19 +1355,17 @@ export const TronChain = () => {
         return {confirmTransaction: null, alreadyApproved: true};
       }
       // Build via read-retry; nothing broadcast yet, so replays are harmless.
-      const tx = await retryFunc(
-        async tronWeb =>
-          tronWeb.transactionBuilder.triggerSmartContract(
-            tronWeb.address.toHex(contractAddress),
-            'approve(address,uint256)',
-            {feeLimit: 1000000000, callValue: 0},
-            [
-              {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
-              {type: 'uint256', value: required.toString()},
-            ],
-            tronWeb.address.toHex(from),
-          ),
-        null,
+      const tx = await retryFunc(async tronWeb =>
+        tronWeb.transactionBuilder.triggerSmartContract(
+          tronWeb.address.toHex(contractAddress),
+          'approve(address,uint256)',
+          {feeLimit: 1000000000, callValue: 0},
+          [
+            {type: 'address', value: tronWeb.address.toHex(spenderAddress)},
+            {type: 'uint256', value: required.toString()},
+          ],
+          tronWeb.address.toHex(from),
+        ),
       );
       // Sign ONCE (offline) — txID fixed; only the broadcast retries.
       const signer = new TronWeb(buildTronProviders()[0]);
@@ -1438,7 +1436,7 @@ export const TronChain = () => {
           nonce: null,
           feesOptions: null,
         };
-      }, null),
+      }),
     // Executes a provider-built DEX swap. Two payload shapes (see backend
     // adapters): Relay sends the exact /wallet/triggersmartcontract body
     // ({parameter, type}); LI.FI sends a pre-built protobuf raw_data as
@@ -1476,7 +1474,7 @@ export const TronChain = () => {
             throw new Error(message);
           }
           return resp.transaction;
-        }, null);
+        });
         // Sign ONCE (offline) — txID fixed; only the broadcast retries.
         const signer = new TronWeb(buildTronProviders()[0]);
         const signedTx = await signer.trx.sign(transaction, updatePrivateKey);
@@ -1528,7 +1526,7 @@ export const TronChain = () => {
             await simulateTronSwapOrThrow(tronWeb, decodedContractValue);
           }
           return true;
-        }, null);
+        });
         const signer = new TronWeb(buildTronProviders()[0]);
         const txID = sha256('0x' + rawDataHex).slice(2);
         const signature = signer.utils.crypto.ECKeySign(
@@ -1624,7 +1622,7 @@ export const TronChain = () => {
           estimateGas: null,
           nonce: null,
         };
-      }, null),
+      }),
     createStaking: async ({from, amount, privateKey, resourceType}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
@@ -1639,7 +1637,7 @@ export const TronChain = () => {
             updatePrivateKey,
             resourceType,
           );
-        }, null);
+        });
         return await broadcastSignedTronTx({
           signedTx: txData,
           txid: txData?.txID,
@@ -1652,15 +1650,13 @@ export const TronChain = () => {
     createStakingWithValidator: async ({from, privateKey, selectedVotes}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForVote(
-              tronWeb,
-              from,
-              updatePrivateKey,
-              selectedVotes,
-            ),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForVote(
+            tronWeb,
+            from,
+            updatePrivateKey,
+            selectedVotes,
+          ),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1683,7 +1679,7 @@ export const TronChain = () => {
             updatePrivateKey,
             resourceType,
           );
-        }, null);
+        });
         return await broadcastSignedTronTx({
           signedTx: txData,
           txid: txData?.txID,
@@ -1696,14 +1692,8 @@ export const TronChain = () => {
     withdrawStaking: async ({from, privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForWithdraw(
-              tronWeb,
-              from,
-              updatePrivateKey,
-            ),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForWithdraw(tronWeb, from, updatePrivateKey),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1717,10 +1707,8 @@ export const TronChain = () => {
     stakingRewards: async ({from, privateKey}) => {
       try {
         const updatePrivateKey = removeSubstringFromPrivateKey(privateKey);
-        const txData = await retryFunc(
-          async tronWeb =>
-            createStakingTransactionForRewards(tronWeb, from, updatePrivateKey),
-          null,
+        const txData = await retryFunc(async tronWeb =>
+          createStakingTransactionForRewards(tronWeb, from, updatePrivateKey),
         );
         return await broadcastSignedTronTx({
           signedTx: txData,
@@ -1740,7 +1728,7 @@ export const TronChain = () => {
           console.error('Error in sign tron message', e);
           return Promise.reject(e?.message);
         }
-      }, null),
+      }),
     signTransaction: async ({payload, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
@@ -1753,7 +1741,7 @@ export const TronChain = () => {
           console.error('Error in sign tron transaction', e);
           return Promise.reject(e?.message);
         }
-      }, null),
+      }),
 
     waitForConfirmation: async ({transaction, interval = 3000, retries = 5}) =>
       retryFunc(async tronWeb => {
@@ -1797,6 +1785,6 @@ export const TronChain = () => {
             }
           }, interval);
         });
-      }, null),
+      }),
   };
 };

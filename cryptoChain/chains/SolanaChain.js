@@ -302,15 +302,22 @@ export const SolanaChain = () => {
     throw lastError ?? new Error('Failed to broadcast Solana transaction');
   };
 
-  // Read-only status probe; undefined default so a total RPC outage reads
-  // as "unknown" rather than throwing (the caller decides what to do).
-  const getSignatureStatus = async signature =>
-    retryFunc(async solanaProvider => {
-      const resp = await solanaProvider.getSignatureStatuses([signature], {
-        searchTransactionHistory: true,
+  // Read-only status probe; a total RPC outage resolves to undefined so it
+  // reads as "unknown" rather than throwing (the caller decides what to do).
+  const getSignatureStatus = async signature => {
+    try {
+      return await retryFunc(async solanaProvider => {
+        const resp = await solanaProvider.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        });
+        return resp?.value?.[0] ?? null;
       });
-      return resp?.value?.[0] ?? null;
-    }, undefined);
+    } catch (e) {
+      // Every status RPC failed: unknown, which is not evidence of expiry.
+      console.error('Error fetching solana signature status', e);
+      return undefined;
+    }
+  };
 
   // Polls a signature until it reaches the commitment. Never rebuilds:
   // resolves 'confirmed' when landed, throws when the transaction failed
@@ -345,10 +352,15 @@ export const SolanaChain = () => {
         return 'confirmed';
       }
       if (status === null && lastValidBlockHeight) {
-        const blockHeight = await retryFunc(
-          async solanaProvider => solanaProvider.getBlockHeight('confirmed'),
-          undefined,
-        );
+        let blockHeight;
+        try {
+          blockHeight = await retryFunc(async solanaProvider =>
+            solanaProvider.getBlockHeight('confirmed'),
+          );
+        } catch (e) {
+          // Unknown height proves nothing; the check below stays inconclusive.
+          console.error('Error fetching solana block height', e);
+        }
         if (
           typeof blockHeight === 'number' &&
           blockHeight > lastValidBlockHeight + EXPIRY_MARGIN_BLOCKS
@@ -532,8 +544,8 @@ export const SolanaChain = () => {
         // Minimum amount the user must stake = network minimum delegation +
         // rent-exempt reserve (the entered amount funds the whole stake account
         // and the delegatable stake = amount - rentExemptReserve must be >=
-        // minimum delegation). Wrapped in retryFunc so an RPC failure degrades
-        // gracefully to null, in which case no minimum validation is applied.
+        // minimum delegation). An RPC failure throws out of retryFunc and the
+        // catch below falls back to a 1 SOL minimum.
         let minAmount = null;
         try {
           minAmount = await retryFunc(async solanaProvider => {
@@ -551,7 +563,7 @@ export const SolanaChain = () => {
               new BigNumber(rentExemptReserve),
             );
             return parseBalance(totalMinAmount.toString(), 9);
-          }, null);
+          });
         } catch (e) {
           minAmount = '1';
         }
@@ -692,7 +704,7 @@ export const SolanaChain = () => {
           console.error('error in get token fees for solana', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForNFT: async props => {
       return await SolanaChain().getEstimateFeeForToken(props);
     },
@@ -720,7 +732,7 @@ export const SolanaChain = () => {
           console.error('Error in solana gas fee', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForStaking: async ({fromAddress, amount, validatorPubKey}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -745,7 +757,7 @@ export const SolanaChain = () => {
           console.error('Error in solana getEstimateFeeForStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForDeactivateStaking: async ({fromAddress, stakingAddress}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -772,7 +784,7 @@ export const SolanaChain = () => {
           );
           throw e;
         }
-      }, null),
+      }),
     getEstimateFeeForWithdrawStaking: async ({
       fromAddress,
       amount,
@@ -801,7 +813,7 @@ export const SolanaChain = () => {
           console.error('Error in solana getEstimateFeeForWithdrawStaking', e);
           throw e;
         }
-      }, null),
+      }),
     getTokenBalance: async ({address, contractAddress}) =>
       retryFunc(async solanaProvider => {
         try {
@@ -1139,19 +1151,16 @@ export const SolanaChain = () => {
       try {
         // Prepare (reads only) may retry across RPCs; sign+broadcast happens
         // exactly once outside the retry so no replay can re-sign.
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            prepareTransferMessage({
-              fromAddress: from,
-              toAddress: to,
-              amount,
-              memo,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            }),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          prepareTransferMessage({
+            fromAddress: from,
+            toAddress: to,
+            amount,
+            memo,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1168,18 +1177,15 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            prepareCreateStaking({
-              from,
-              validatorPubKey,
-              amount,
-              solanaProvider,
-              gasFee,
-              estimateGas,
-            }),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          prepareCreateStaking({
+            from,
+            validatorPubKey,
+            amount,
+            solanaProvider,
+            gasFee,
+            estimateGas,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1195,17 +1201,14 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            buildStakingDeactivateTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              gasFee,
-              estimateGas,
-            ),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          buildStakingDeactivateTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            gasFee,
+            estimateGas,
+          ),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1222,18 +1225,15 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const transactionMessage = await retryFunc(
-          async solanaProvider =>
-            buildStakingWithdrawTransaction(
-              solanaProvider,
-              stakingAddress,
-              from,
-              amount,
-              gasFee,
-              estimateGas,
-            ),
-          null,
-          true,
+        const transactionMessage = await retryFunc(async solanaProvider =>
+          buildStakingWithdrawTransaction(
+            solanaProvider,
+            stakingAddress,
+            from,
+            amount,
+            gasFee,
+            estimateGas,
+          ),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1254,23 +1254,20 @@ export const SolanaChain = () => {
       estimateGas,
     }) => {
       try {
-        const {transactionMessage} = await retryFunc(
-          async solanaProvider =>
-            prepareTokenTransferMessage({
-              toAddress: to,
-              contractAddress,
-              amount,
-              decimals: decimal,
-              tokenAmount,
-              mint,
-              memo,
-              solanaProvider: solanaProvider,
-              privateKey,
-              estimateGas,
-              gasFee,
-            }),
-          null,
-          true,
+        const {transactionMessage} = await retryFunc(async solanaProvider =>
+          prepareTokenTransferMessage({
+            toAddress: to,
+            contractAddress,
+            amount,
+            decimals: decimal,
+            tokenAmount,
+            mint,
+            memo,
+            solanaProvider: solanaProvider,
+            privateKey,
+            estimateGas,
+            gasFee,
+          }),
         );
         return await signAndBroadcastMessage({transactionMessage, privateKey});
       } catch (e) {
@@ -1329,7 +1326,7 @@ export const SolanaChain = () => {
             }
           }, interval);
         });
-      }, null),
+      }),
     // Executes a provider-built DEX swap (LI.FI / Relay). Solana needs no
     // allowance step — the whole route is instruction-bundled into the
     // transaction(s) signed here. Returns the last signature string (the
@@ -1382,8 +1379,6 @@ export const SolanaChain = () => {
             }
             return built;
           },
-          null,
-          true,
         );
         // Sign ONCE. From here the signature is this leg's fixed identity —
         // no code below may rebuild or re-sign this transaction.
@@ -1473,7 +1468,7 @@ export const SolanaChain = () => {
           console.error('Error in getEpochTime', e);
           throw e;
         }
-      }, null),
+      }),
   };
 };
 
