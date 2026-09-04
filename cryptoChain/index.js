@@ -348,6 +348,18 @@ const getBaseCoin = async (chain, wallet, coin, walletData) => {
         privateKey: wallet.privateKey,
         from: wallet.address,
       }),
+    getSponsoredGasFees: async payload =>
+      await chain.getSponsoredGasFees({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    sendSponsoredBatchTransaction: async payload =>
+      await chain.sendSponsoredBatchTransaction({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
     unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
     approveClaimDeposit: async payload =>
       await chain.approveClaimDeposit(payload),
@@ -537,6 +549,7 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain?.getTransaction({
         txHash: payload.txHash,
         contractAddress: token?.contractAddress,
+        toAddress: payload.toAddress,
       }),
     getTransactionForUpdate: async payload =>
       await chain?.getTransactionForUpdate({
@@ -602,6 +615,18 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       }),
     sendBatchTransaction: async payload =>
       await chain.sendBatchTransaction({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    getSponsoredGasFees: async payload =>
+      await chain.getSponsoredGasFees({
+        ...payload,
+        privateKey: wallet.privateKey,
+        from: wallet.address,
+      }),
+    sendSponsoredBatchTransaction: async payload =>
+      await chain.sendSponsoredBatchTransaction({
         ...payload,
         privateKey: wallet.privateKey,
         from: wallet.address,
