@@ -436,6 +436,18 @@ export const isCustomAddressNotSupportedChain = chain_name =>
 export const HEDERA_UNACTIVATED_MESSAGE =
   'Your Hedera account is not active yet. Deposit HBAR to your address first.';
 
+// Accounts created by an early (June 2024) build of the old operator flow were
+// given the operator's key while their alias is the user's EVM address. The
+// alias lookup still returns them, but the wallet key cannot sign for them.
+export const HEDERA_KEY_MISMATCH_MESSAGE =
+  'This Hedera account is controlled by a different key than this wallet, so it cannot sign transactions.';
+
+// Hedera errors that are safe to show verbatim instead of a generic toast.
+export const HEDERA_USER_MESSAGES = [
+  HEDERA_UNACTIVATED_MESSAGE,
+  HEDERA_KEY_MISMATCH_MESSAGE,
+];
+
 // A Hedera coin's `address` is always the EVM address. The ledger account id
 // (`0.0.N`) only exists after the first deposit (HIP-583) and is kept in a
 // separate `accountId` field. Exchange/on-ramp providers and WalletConnect
@@ -454,6 +466,20 @@ export const isPrivateKeyNotSupportedChain = chain_name => {
   return PRIVATE_KEY_NOT_SUPPORTED_CHAINS.includes(chain_name);
 };
 
+// Address prefixes per bitcoin address type, [mainnet, testnet]. A stored
+// address must match its coin's type or the coin is re-derived.
+const BITCOIN_ADDRESS_PREFIXES = {
+  bitcoin: [['bc1q'], ['tb1q']],
+  bitcoin_taproot: [['bc1p'], ['tb1p']],
+  bitcoin_segwit: [['3'], ['2']],
+  bitcoin_legacy: [['1'], ['m', 'n']],
+};
+
+const hasBitcoinAddressPrefix = (chain_name, address) => {
+  const prefixes = BITCOIN_ADDRESS_PREFIXES[chain_name]?.[IS_SANDBOX ? 1 : 0];
+  return !!prefixes?.some(prefix => address?.startsWith(prefix));
+};
+
 export const isAddressOrPrivateKeyExists = coin => {
   const chain_name = coin?.chain_name;
   if (coin?.privateKey && coin?.address && !isBitcoinChain(chain_name)) {
@@ -462,21 +488,7 @@ export const isAddressOrPrivateKeyExists = coin => {
     if (APP_VERSION !== coin.appVersion) {
       return false;
     }
-    if (chain_name === 'bitcoin' || chain_name === 'bitcoin_taproot') {
-      const prefix = IS_SANDBOX ? 'tb1' : 'bc1';
-      return coin?.address?.startsWith(prefix);
-    } else if (chain_name === 'bitcoin_legacy') {
-      const prefix = IS_SANDBOX ? 'm' : '1';
-      const anotherPrefix = IS_SANDBOX ? 'n' : '1';
-      return (
-        coin?.address?.startsWith(prefix) ||
-        coin?.address?.startsWith(anotherPrefix)
-      );
-    } else if (chain_name === 'bitcoin_segwit') {
-      const prefix = IS_SANDBOX ? '2' : '3';
-      return coin?.address?.startsWith(prefix);
-    }
-    return false;
+    return hasBitcoinAddressPrefix(chain_name, coin.address);
   } else if (coin?.privateKey && coin?.address && isLitecoinChain(chain_name)) {
     if (chain_name === 'litecoin') {
       const prefix = IS_SANDBOX ? 'tltc' : 'ltc';
@@ -684,7 +696,9 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
     return `${config.TRON_SCAN_URL}/address/${address}/${
       type === 'token' ? 'transfers' : ''
     }`;
-  } else if (chain_name === 'bitcoin') {
+  } else if (isBitcoinChain(chain_name)) {
+    // Every bitcoin address type (native segwit, segwit, legacy, taproot)
+    // shares the one explorer configured on `bitcoin`.
     return `${config.BITCOIN_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'litecoin') {
     return `${config.LITECOIN_SCAN_URL}/address/${address}`;
@@ -1209,6 +1223,10 @@ const getScanUrlName = chain_name => {
     return getRPCUrl('polygon_blockscout')
       ? 'polygon_blockscout'
       : 'polygon_scan';
+  }
+  // Only `bitcoin` carries `scan`; the address-type variants share it.
+  if (isBitcoinChain(chain_name)) {
+    return 'bitcoin';
   }
   return chain_name;
 };

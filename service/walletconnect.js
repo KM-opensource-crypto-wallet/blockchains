@@ -9,7 +9,14 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getSdkError} from '@walletconnect/utils';
-import {isSupportedWalletConnectMethod} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  CHAIN_CONFIG,
+  isSupportedWalletConnectMethod,
+} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  answerAddEthereumChain,
+  answerSwitchEthereumChain,
+} from 'dok-wallet-blockchain-networks/helper/walletConnectEvmChain';
 import {showToast} from 'utils/toast';
 import {logWalletConnectEvent} from 'utils/logger';
 
@@ -79,6 +86,21 @@ export const getWalletConnect = () => {
   return walletConnect;
 };
 
+// wallet_sendCalls (EIP-5792) is only atomic where a batch contract is
+// deployed. Both environments' chain ids are listed; the session itself only
+// ever contains the current environment's chains.
+const BATCH_CAPABLE_CHAIN_IDS = new Set(
+  Object.values(CHAIN_CONFIG)
+    .filter(cfg => cfg.batch_contract && cfg.chain_id)
+    .flatMap(cfg =>
+      ['sandbox', 'production']
+        .filter(env => cfg.batch_contract[env] && cfg.chain_id[env])
+        .map(env => Number(cfg.chain_id[env])),
+    ),
+);
+const supportsAtomicBatch = hexChainId =>
+  BATCH_CAPABLE_CHAIN_IDS.has(Number.parseInt(hexChainId, 16));
+
 export const subscribeWalletConnectEvent = () => {
   let requestIds = {};
   if (!walletConnect) {
@@ -88,7 +110,6 @@ export const subscribeWalletConnectEvent = () => {
   const onSessionProposal = proposal => {
     const {id, params} = proposal;
 
-    // console.log('propasdas', JSON.stringify(proposal));
     const {proposer, pairingTopic} = params;
     const sessionId = pairingTopic + '';
     const requiredNamespaces = params?.requiredNamespaces;
@@ -152,28 +173,51 @@ export const subscribeWalletConnectEvent = () => {
         return;
       }
 
-      if (request?.method?.includes('wallet_addEthereumChain')) {
+      if (request?.method === 'wallet_addEthereumChain') {
+        // EIP-3085: null on success; only chains this wallet can serve.
         await walletConnect.respondSessionRequest({
           topic,
           response: {
             id,
             jsonrpc: '2.0',
-            result: request?.params?.[0]?.chainId,
+            ...answerAddEthereumChain(request?.params),
           },
         });
-      } else if (request?.method?.includes('wallet_getCapabilities')) {
+      } else if (request?.method === 'wallet_switchEthereumChain') {
+        // EIP-3326: null when the session covers the chain, 4902 otherwise.
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            ...answerSwitchEthereumChain(requestSessionData, request?.params),
+          },
+        });
+      } else if (request?.method === 'wallet_getCapabilities') {
         const chainIds = request?.params?.[1];
 
         const capabilities = {};
         (chainIds || []).forEach(chainId => {
           capabilities[chainId] = {
-            atomicBatch: {supported: true},
+            atomicBatch: {supported: supportsAtomicBatch(chainId)},
           };
         });
 
         await walletConnect.respondSessionRequest({
           topic,
           response: {id, jsonrpc: '2.0', result: capabilities},
+        });
+      } else if (request?.method === 'hedera_getNodeAddresses') {
+        // HIP-820 read-only method: no signature, nothing to approve.
+        const {
+          HederaChain,
+        } = require('dok-wallet-blockchain-networks/cryptoChain/chains/HederaChain');
+        const result = await HederaChain().getNodeAddresses({
+          network: params?.chainId?.split(':')?.[1],
+        });
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {id, jsonrpc: '2.0', result},
         });
       } else {
         const {pairingTopic} = requestSessionData;

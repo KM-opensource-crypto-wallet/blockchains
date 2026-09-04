@@ -108,7 +108,7 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
     wallet = StellarChain().createStellarWallet({mnemonic: phrase});
   } else if (phrase && chainName === 'hedera') {
     const HederaChain = loadHederaChain();
-    wallet = await HederaChain().getOrCreateHederaWallet({mnemonic: phrase});
+    wallet = await HederaChain().createHederaWallet({mnemonic: phrase});
   } else if (phrase) {
     wallet = await createWallet(chainNameForNative, phrase, IS_SANDBOX);
     wallet.isNew = true;

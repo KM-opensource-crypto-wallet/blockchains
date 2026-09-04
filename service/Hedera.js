@@ -1,37 +1,50 @@
 import {HEDERA_API} from 'dok-wallet-blockchain-networks/config/Hedera';
 
+const isNotFound = e => e?.response?.status === 404;
+
+// The mirror node accepts `0.0.N`, an EVM address or a long-zero address here.
+// A 404 is the normal "no account yet" answer for an unfunded EVM address, so
+// it is reported as `data: null` without logging; any other failure throws so
+// callers can tell "no account" from "mirror node unreachable".
+const fetchAccount = async idOrAddress => {
+  try {
+    const resp = await HEDERA_API.get(`/api/v1/accounts/${idOrAddress}`, {
+      params: {
+        limit: 1,
+        transactions: false,
+      },
+    });
+    return {status: resp?.status, data: resp?.data ?? null};
+  } catch (e) {
+    if (isNotFound(e)) {
+      return {status: 404, data: null};
+    }
+    console.error('Error in HEDERA fetchAccount', e);
+    throw e;
+  }
+};
+
+// `GET /transactions/{id}` returns the parent and every child record (the
+// CryptoCreate of an auto-created recipient, the CryptoUpdate that completes a
+// hollow account, ...) and the children are listed first. Only the parent
+// carries the transfer list.
+const pickParentRecord = transactions => {
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    return null;
+  }
+  return (
+    transactions.find(tx => tx?.nonce === 0) ??
+    transactions.find(tx => tx?.name === 'CRYPTOTRANSFER') ??
+    transactions[0]
+  );
+};
+
 export const HEDERA = {
-  getAccountInfo: async address => {
-    try {
-      const resp = await HEDERA_API.get(`/api/v1/accounts/${address}`, {
-        params: {
-          limit: 1,
-          transactions: false,
-        },
-      });
-      return {status: resp?.status, data: resp?.data};
-    } catch (e) {
-      console.error('Error in HEDERA getAccountInfo', e);
-      return false;
-    }
-  },
-  // `0.0.N` for a funded EVM address, null while no account exists yet. A 404
-  // is the normal "not yet created" answer, not an error.
+  getAccountInfo: fetchAccount,
+  // `0.0.N` for a funded EVM address, null while no account exists yet.
   getAccountByEvmAddress: async evmAddress => {
-    try {
-      const resp = await HEDERA_API.get(`/api/v1/accounts/${evmAddress}`, {
-        params: {
-          limit: 1,
-          transactions: false,
-        },
-      });
-      return resp?.data?.account || null;
-    } catch (e) {
-      if (e?.response?.status !== 404) {
-        console.error('Error in HEDERA getAccountByEvmAddress', e);
-      }
-      return null;
-    }
+    const resp = await fetchAccount(evmAddress);
+    return resp?.data?.account || null;
   },
   getExchangeFee: async () => {
     try {
@@ -94,9 +107,9 @@ export const HEDERA = {
   getTransaction: async txHash => {
     try {
       const resp = await HEDERA_API.get(`/api/v1/transactions/${txHash}`);
-      const tx = resp?.data?.transactions?.[0];
+      const tx = pickParentRecord(resp?.data?.transactions);
       if (!tx) {
-        return {status: resp?.status, data: tx};
+        return {status: resp?.status, data: null};
       }
       const consensusTimestamp = tx?.consensus_timestamp;
       const [txBlockResp, latestBlockResp] = await Promise.all([
@@ -125,8 +138,12 @@ export const HEDERA = {
         data: {...tx, blockNumber, confirmations},
       };
     } catch (e) {
-      console.error('Error in HEDERA getTransaction', e);
-      return {status: null, data: null};
+      // A transaction the mirror node has not indexed yet 404s; the detail
+      // screen polls until it appears.
+      if (!isNotFound(e)) {
+        console.error('Error in HEDERA getTransaction', e);
+      }
+      return {status: e?.response?.status ?? null, data: null};
     }
   },
 };

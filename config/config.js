@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -1243,6 +1243,27 @@ export const CHAIN_CONFIG = {
       order: 7,
     },
   },
+  bitcoin_taproot: {
+    supported: true,
+    is_bitcoin: true,
+    chain_loader: 'bitcoin',
+    gas_currency: 'sat/B',
+    fees_options: true,
+    derivation_paths: [
+      {
+        label: "Ledger (m/86'/0'/1'/0/0)",
+        value: "m/86'/0'/1'/0/0",
+      },
+    ],
+    custom_derivation: {
+      Ledger: j => `m/86'/0'/${j}'/0/0`,
+    },
+    derive_address: true,
+    private_key_list: {
+      label: 'Bitcoin Taproot',
+      order: 9,
+    },
+  },
   bitcoin_lightning: {
     supported: true,
     chain_loader: 'lightning',
@@ -1409,8 +1430,8 @@ export const CHAIN_CONFIG = {
       symbol: 'DOT',
     },
     wallet_connect_key: {
-      sandbox: 'polkadot:e143f23803ac50e8f6f8e62695d1ce9e',
-      production: 'polkadot:68d56f15f85d3136970ec16946040bc1',
+      sandbox: 'polkadot:91b171bb158e2d3848fa23a9f1c25182',
+      production: 'polkadot:91b171bb158e2d3848fa23a9f1c25182',
     },
   },
   tezos: {
@@ -1600,6 +1621,21 @@ export const CHAIN_CONFIG = {
       sandbox: 'hedera:testnet',
       production: 'hedera:mainnet',
     },
+    // Hedera's EVM layer (JSON-RPC relay). Only WalletConnect's eip155
+    // namespace uses it, on the same coin and ECDSA key; balances and history
+    // stay on the mirror node. Not `is_evm`: Hedera remains a native chain.
+    chain_id: {
+      sandbox: 296,
+      production: 295,
+    },
+    free_rpc_urls: {
+      mainnet: ['https://mainnet.hashio.io/api'],
+      testnet: ['https://testnet.hashio.io/api'],
+    },
+    fees_by_rpc: true,
+    wallet_connect_evm: {
+      chain_display_name: 'Hedera EVM',
+    },
     memo_support: true,
     api_base_url: {
       sandbox: 'https://testnet.mirrornode.hedera.com',
@@ -1662,19 +1698,44 @@ export const CHAIN_ID = Object.fromEntries(
     .filter(([, cfg]) => cfg.chain_id)
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.chain_id)]),
 );
+// CAIP-2 chain id → the coin that answers for it. A chain with
+// `wallet_connect_evm` is reachable under two ids (its native namespace and
+// `eip155:<chain_id>`), both served by the same coin and key; `namespace` tells
+// the WalletConnect code which account form and executor to use.
+const walletConnectChainEntry = (key, chain_name, cfg, chain_display_name) => [
+  key,
+  {
+    chain_display_name,
+    chain_name,
+    symbol: cfg.wallet_connect.symbol,
+    namespace: key.split(':')[0],
+  },
+];
 const WALLET_CONNECT_SUPPORTED_CHAIN = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
     .filter(([, cfg]) => cfg.wallet_connect)
-    .map(([chain_name, cfg]) => [
-      cfg.wallet_connect_key
-        ? forEnv(cfg.wallet_connect_key)
-        : `eip155:${forEnv(cfg.chain_id)}`,
-      {
-        chain_display_name: cfg.wallet_connect.chain_display_name,
-        chain_name,
-        symbol: cfg.wallet_connect.symbol,
-      },
-    ]),
+    .flatMap(([chain_name, cfg]) => {
+      const evmKey = () => `eip155:${forEnv(cfg.chain_id)}`;
+      const entries = [
+        walletConnectChainEntry(
+          cfg.wallet_connect_key ? forEnv(cfg.wallet_connect_key) : evmKey(),
+          chain_name,
+          cfg,
+          cfg.wallet_connect.chain_display_name,
+        ),
+      ];
+      if (cfg.wallet_connect_evm) {
+        entries.push(
+          walletConnectChainEntry(
+            evmKey(),
+            chain_name,
+            cfg,
+            cfg.wallet_connect_evm.chain_display_name,
+          ),
+        );
+      }
+      return entries;
+    }),
 );
 export const GAS_ORACLE_CONTRACT_ADDRESS = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
@@ -1786,6 +1847,7 @@ export const WalletConnectMethods = {
   personal_sign: 'personalSign',
   eth_sign: 'personalSign',
   eth_signTypedData: 'signTypedData',
+  eth_signTypedData_v3: 'signTypedData',
   eth_signTypedData_v4: 'signTypedData',
 
   solana_signAndSendTransaction: 'sendRawTransaction',
@@ -1813,9 +1875,13 @@ export const WalletConnectMethods = {
   xrpl_signMessage: 'signMessage',
   // RippleChain has no submit-only method; this re-signs and submits in one call.
 
+  // HIP-820. hedera_getNodeAddresses is read-only and answered in
+  // service/walletconnect.js without opening the modal.
   hedera_signAndExecuteTransaction: 'sendRawTransaction',
   hedera_signTransaction: 'signRawTransaction',
   hedera_signMessage: 'signMessage',
+  hedera_executeTransaction: 'executeTransaction',
+  hedera_signAndExecuteQuery: 'signAndExecuteQuery',
 
   aptos_signAndSubmitTransaction: 'sendRawTransaction',
   aptos_signTransaction: 'signRawTransaction',
@@ -1832,12 +1898,14 @@ export const WalletConnectMethods = {
 };
 
 // Methods answered outside WalletConnectMethods: wallet_sendCalls is batched in
-// redux/wallets/walletsSlice.js; the other two are auto-answered in
-// service/walletconnect.js.
+// redux/wallets/walletsSlice.js; the others are auto-answered in
+// service/walletconnect.js without user interaction.
 export const WALLET_CONNECT_SPECIAL_METHODS = [
   'wallet_sendCalls',
   'wallet_addEthereumChain',
+  'wallet_switchEthereumChain',
   'wallet_getCapabilities',
+  'hedera_getNodeAddresses',
 ];
 
 // Single source of truth for "can this wallet answer this method". Used to
@@ -1849,6 +1917,9 @@ export const SUPPORTED_WALLET_CONNECT_METHODS = new Set([
 
 export const isSupportedWalletConnectMethod = method =>
   typeof method === 'string' && SUPPORTED_WALLET_CONNECT_METHODS.has(method);
+
+const hederaSignerAccountId = params =>
+  params?.signerAccountId?.split(':')?.pop();
 
 // Keyed by the raw WalletConnect method strings defined in WalletConnectMethods
 // (dok-wallet-blockchain-networks/config/config.js) for the chain-specific request shape.
@@ -1928,17 +1999,30 @@ export const NON_EVM_METHOD_HANDLERS = {
     finaltransactionData: params,
     signTypeData: params,
   }),
+  // HIP-820 params carry `signerAccountId` as `hedera:<net>:0.0.N`; the
+  // session account for the hedera namespace is `0.0.N`, so compare on that.
   hedera_signTransaction: params => ({
     finaltransactionData: params,
     signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
   }),
   hedera_signAndExecuteTransaction: params => ({
     finaltransactionData: params,
     signTypeData: params,
-    expectedSignerAddress: params?.signerAccountId?.split(':')?.pop(),
+    expectedSignerAddress: hederaSignerAccountId(params),
+  }),
+  hedera_executeTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  hedera_signAndExecuteQuery: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
   }),
   hedera_signMessage: params => ({
     signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
   }),
   aptos_signTransaction: params => ({
     finaltransactionData: params,
@@ -1985,6 +2069,11 @@ export const NON_EVM_METHOD_HANDLERS = {
   }),
 };
 
+const evmTypedDataRequest = params => ({
+  signTypeData: params?.[1],
+  expectedSignerAddress: params?.[0],
+});
+
 export const EVM_SIGN_REQUEST_HANDLERS = {
   personal_sign: params => ({
     signTypeData: params?.[0],
@@ -1994,6 +2083,9 @@ export const EVM_SIGN_REQUEST_HANDLERS = {
     signTypeData: params?.[1],
     expectedSignerAddress: params?.[0],
   }),
+  eth_signTypedData: evmTypedDataRequest,
+  eth_signTypedData_v3: evmTypedDataRequest,
+  eth_signTypedData_v4: evmTypedDataRequest,
 };
 
 const NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES = {
@@ -2010,7 +2102,7 @@ const NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES = {
   bip122: 'bip122',
 };
 
+// `chainId` is a CAIP-2 id such as `hedera:mainnet` or `eip155:295`.
 export const isNonEVMChain = chainId =>
-  Object.keys(NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES).some(namespace =>
-    chainId?.includes(namespace),
-  );
+  typeof chainId === 'string' &&
+  Boolean(NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES[chainId.split(':')[0]]);

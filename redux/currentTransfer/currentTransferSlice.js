@@ -114,6 +114,7 @@ export const calculateEstimateFee = createAsyncThunk(
         bitcoin: bitcoinFeeMultiplier,
         bitcoin_legacy: bitcoinFeeMultiplier,
         bitcoin_segwit: bitcoinFeeMultiplier,
+        bitcoin_taproot: bitcoinFeeMultiplier,
         litecoin: litecoinFeeMultiplier,
         dogecoin: dogecoinFeeMultiplier,
         bitcoin_cash: bitcoinCashFeeMultiplier,

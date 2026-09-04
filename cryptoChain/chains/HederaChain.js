@@ -5,16 +5,24 @@ import {createWallet} from 'myWallet/wallet.service';
 import {HEDERA} from 'dok-wallet-blockchain-networks/service/Hedera';
 
 import {
+  AccountCreateTransaction,
   AccountId,
   Client,
+  FeeEstimateMode,
+  FeeEstimateQuery,
   Hbar,
+  PrecheckStatusError,
   PrivateKey,
+  Query,
   Status,
   Transaction,
+  TransactionId,
   TransferTransaction,
 } from '@hiero-ledger/sdk';
+import {proto} from '@hiero-ledger/proto';
 import {
   getExplorerTxUrl,
+  HEDERA_KEY_MISMATCH_MESSAGE,
   HEDERA_UNACTIVATED_MESSAGE,
 } from 'dok-wallet-blockchain-networks/helper';
 
@@ -22,27 +30,27 @@ import {
  * Account model (HIP-583).
  *
  * The wallet derives an ECDSA secp256k1 key (same path as the Ethereum coin)
- * and stores its EVM address as `wallet.address` until the account exists on
- * the ledger. Hedera creates the account itself the first time anyone sends
- * HBAR or a token to that EVM address — the *sender* pays the CryptoCreate fee,
- * the recipient receives the full amount and the new account is "hollow" (no
- * key) until the owner's first outgoing transaction completes it. No operator
- * account is involved anywhere.
+ * and its EVM address is `wallet.address`, permanently. Hedera creates the
+ * ledger account itself the first time anyone sends HBAR or a token to that
+ * EVM address — the *sender* pays the CryptoCreate fee, the recipient receives
+ * the full amount and the new account is "hollow" (no key) until the owner's
+ * first outgoing transaction completes it. No operator account is involved.
  *
- * Once the mirror node resolves the EVM address to `0.0.N`, `upgradeWalletAddress`
- * flips the stored address to the account id (see cryptoChain/index.js), so an
- * activated wallet looks exactly like the pre-HIP-583 model the rest of the app
- * (exchange, WalletConnect, tx history) was written against. Every method here
- * therefore accepts either form.
+ * Once the mirror node resolves the EVM address to `0.0.N`, `attachAccountId`
+ * stores that id in a separate `accountId` field (see resolveWallet in
+ * cryptoChain/index.js); the address itself never changes. Wallets saved by
+ * older builds with `0.0.N` as the address are migrated once. Exchange,
+ * WalletConnect and the mirror node's history endpoint need `0.0.N`, so every
+ * method here accepts either form and resolves as needed.
+ *
+ * Legacy caveat: an early (June 2024) build of the removed operator flow
+ * created accounts whose alias is the user's EVM address but whose key is the
+ * operator's (testnet `0.0.4459557` carries the key of `0.0.4454415`). The alias
+ * lookup still returns such an account, but the wallet key cannot sign for it —
+ * the node rejects with INVALID_SIGNATURE at precheck. `send` and
+ * `sendRawTransaction` check the on-chain key first and fail with
+ * HEDERA_KEY_MISMATCH_MESSAGE instead.
  */
-
-// USD ceilings used for max transaction fee. A plain HBAR CryptoTransfer costs
-// ~$0.0001; MAX_HBAR_TRANSFER_USD is the cap we set. Auto-creating the
-// recipient account charges the payer the CryptoCreate fee ($0.05) on top —
-// keep a margin for exchange-rate drift between estimate and submit, otherwise
-// the node rejects the transfer with INSUFFICIENT_TX_FEE.
-const MAX_HBAR_TRANSFER_USD = 0.0021;
-export const ACCOUNT_CREATE_USD = 0.05 * 1.5;
 
 const ACCOUNT_ID_REGEX = /^\d+\.\d+\.\d+$/;
 const EVM_ADDRESS_REGEX = /^(0x)?[0-9a-fA-F]{40}$/;
@@ -52,6 +60,21 @@ const HBAR_DECIMALS = 8;
 const SYSTEM_ACCOUNT_MAX_NUM = 1000;
 // A missing account is re-checked after this long; a found one is immutable.
 const NEGATIVE_LOOKUP_TTL_MS = 30 * 1000;
+
+// Fee estimation (HIP-1261). The mirror node prices the exact transaction we
+// are about to send from its protobuf, in tinycents (USD × 1e-10), using the
+// live network fee schedule. INTRINSIC mode only looks at the transaction body,
+// so a placeholder payer/recipient is fine — the payer's state is irrelevant
+// and the transaction is never submitted.
+const FEE_ESTIMATE_PAYER = '0.0.2';
+const FEE_ESTIMATE_RECIPIENT = '0.0.3';
+const FEE_ESTIMATE_NODE = new AccountId(3);
+const TINYCENTS_PER_USD = 1e10;
+// The estimate is exact at estimate time; the HBAR exchange rate the node uses
+// at consensus can differ (it updates hourly), and setMaxTransactionFee below
+// the real charge fails with INSUFFICIENT_TX_FEE. The margin only caps what
+// the node may charge — the actual fee is what the estimate says.
+const MAX_FEE_MARGIN = 1.5;
 
 const accountIdByEvmAddress = new Map();
 const missingAccountUntil = new Map();
@@ -74,7 +97,8 @@ export const deriveHederaEvmAddress = privateKey =>
  * `0.0.N` for an account id or an EVM address that already has an account;
  * null while the address has never been funded. Successful lookups are cached
  * for the process lifetime (the mapping never changes), misses for 30 s so
- * balance polling and the Receive screen do not hammer the mirror node.
+ * balance polling and the Receive screen do not hammer the mirror node. A
+ * mirror-node failure propagates and is not cached as a miss.
  */
 export const resolveHederaAccountId = async addressOrId => {
   if (isHederaAccountId(addressOrId)) {
@@ -111,7 +135,7 @@ export const __resetHederaAccountCache = () => {
 const newClient = () =>
   IS_SANDBOX ? Client.forTestnet() : Client.forMainnet();
 
-// Receipt queries are free and need no operator.
+// Receipt queries and fee estimates are free and need no operator.
 const getReadOnlyClient = () => newClient();
 
 const getSignerClient = (accountId, privateKey) =>
@@ -128,6 +152,70 @@ const closeClient = client => {
 const parseSignerAccountId = signerAccountId =>
   signerAccountId?.split(':')?.pop();
 
+/*
+ * WalletConnect (HIP-820). Request params and results follow the reference
+ * wallet in @hashgraph/hedera-wallet-connect: messages are signed with the
+ * "Hedera Signed Message" prefix, signatures travel as a base64 protobuf
+ * SignatureMap, submitted transactions return TransactionResponse.toJSON()
+ * and node rejections become JSON-RPC error 9000 with the status code as
+ * `data`. The app is pinned to one network (IS_SANDBOX); the dApp's chain id
+ * is checked against it and never used to build a signing client.
+ */
+const HEDERA_SIGNED_MESSAGE_PREFIX = '\x19Hedera Signed Message:\n';
+const HEDERA_JSON_RPC_ERROR_CODE = 9000;
+
+const appNetwork = () => (IS_SANDBOX ? 'testnet' : 'mainnet');
+
+const assertNetwork = chainId => {
+  const requested = chainId?.split(':')?.[1];
+  if (requested && requested !== appNetwork()) {
+    throw new Error(
+      `This wallet is on Hedera ${appNetwork()}; the dApp requested ${requested}.`,
+    );
+  }
+};
+
+const requireStringParam = (name, value) => {
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid Hedera request: ${name} must be a string`);
+  }
+  return value;
+};
+
+const prefixMessage = message =>
+  // eslint-disable-next-line no-undef
+  Buffer.from(
+    `${HEDERA_SIGNED_MESSAGE_PREFIX}${message.length}${message}`,
+    'utf8',
+  );
+
+// eslint-disable-next-line no-undef
+const toBase64 = bytes => Buffer.from(bytes).toString('base64');
+// eslint-disable-next-line no-undef
+const fromBase64 = value => Buffer.from(value, 'base64');
+
+const encodeSignatureMap = (key, signature) =>
+  toBase64(
+    proto.SignatureMap.encode({
+      sigPair: [key.publicKey._toProtobufSignature(signature)],
+    }).finish(),
+  );
+
+// Node precheck failures carry the ResponseCodeEnum the dApp needs.
+const withJsonRpcError = e => {
+  if (e instanceof PrecheckStatusError) {
+    e.jsonRpcError = {
+      code: HEDERA_JSON_RPC_ERROR_CODE,
+      message: e.message,
+      data: String(e.status?._code),
+    };
+  }
+  throw e;
+};
+
+const encodeQueryResult = result =>
+  toBase64(result instanceof Uint8Array ? result : result.toBytes());
+
 const toHbar = amount =>
   new Hbar(new BigNumber(amount).toFixed(HBAR_DECIMALS, BigNumber.ROUND_DOWN));
 
@@ -140,6 +228,68 @@ export const toMirrorTransactionId = transactionId => {
   const [accountId, timestamp = ''] = transactionId.toString().split('@');
   const [seconds, nanos = '0'] = timestamp.split('?')[0].split('.');
   return `${accountId}-${seconds}-${nanos.padStart(9, '0')}`;
+};
+
+/**
+ * Refuses to sign for an account whose on-chain key is not ours. Hollow
+ * accounts have no key yet (the wallet key completes them), and threshold/key
+ * lists (`ProtobufEncoded`) or an unreachable mirror node are left to the node
+ * to judge. Only a plain key that is provably someone else's is rejected.
+ */
+const assertAccountControlledByKey = async (accountId, privateKey) => {
+  let key;
+  try {
+    const resp = await HEDERA.getAccountInfo(accountId);
+    if (!resp?.data) {
+      return;
+    }
+    key = resp.data.key;
+  } catch (e) {
+    return;
+  }
+  if (!key) {
+    return;
+  }
+  if (key._type === 'ECDSA_SECP256K1') {
+    const ours = PrivateKey.fromStringECDSA(privateKey)
+      .publicKey.toStringRaw()
+      .toLowerCase();
+    if (String(key.key ?? '').toLowerCase() !== ours) {
+      throw new Error(HEDERA_KEY_MISMATCH_MESSAGE);
+    }
+    return;
+  }
+  if (key._type === 'ED25519') {
+    throw new Error(HEDERA_KEY_MISMATCH_MESSAGE);
+  }
+};
+
+// USD cost of one transaction according to the mirror node's fee estimator.
+const estimateUsd = async (client, transaction) => {
+  const frozen = transaction
+    .setTransactionId(TransactionId.generate(FEE_ESTIMATE_PAYER))
+    .setNodeAccountIds([FEE_ESTIMATE_NODE])
+    .freeze();
+  const estimate = await new FeeEstimateQuery()
+    .setTransaction(frozen)
+    .setMode(FeeEstimateMode.INTRINSIC)
+    .execute(client);
+  const tinycents = Number(estimate?.total?.toString());
+  if (!Number.isFinite(tinycents) || tinycents <= 0) {
+    throw new Error('Invalid Hedera fee estimate');
+  }
+  return tinycents / TINYCENTS_PER_USD;
+};
+
+const hbarPerUsd = async () => {
+  const resp = await HEDERA.getExchangeFee();
+  const currentRate = resp?.data?.current_rate;
+  const hbarToDollar =
+    currentRate?.cent_equivalent / currentRate?.hbar_equivalent / 100;
+  if (!Number.isFinite(hbarToDollar) || hbarToDollar <= 0) {
+    throw new Error('Invalid HBAR exchange rate');
+  }
+  return 1 / hbarToDollar;
 };
 
 const isSystemAccount = account => {
@@ -222,15 +372,47 @@ const consensusDateMs = consensusTimestamp => {
   return Number(seconds) * 1000;
 };
 
-export const HederaChain = () => {
+// One mirror-node record → the shape the transaction list and detail screen
+// share. `txHash` is the mirror-style id used for links.
+const toTransactionRecord = (item, txHash, accountId, address) => {
+  const {from, to, amount} = extractTransferParties(item, accountId, address);
+  return {
+    amount: amount?.toString() ?? null,
+    link: txHash,
+    url: getExplorerTxUrl('hedera', txHash),
+    status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
+    date: consensusDateMs(item?.consensus_timestamp),
+    from,
+    to,
+    totalCourse: '0$',
+    transactionType: 'regular',
+    blockNumber: item?.blockNumber ?? null,
+    confirmations: item?.confirmations ?? null,
+  };
+};
+
+export const HederaChain = (chain_name = 'hedera', phrase, customRpcUrl) => {
   const buildWallet = (evmAddress, privateKey) => {
     if (!isHederaEvmAddress(evmAddress) || !privateKey) {
       throw new Error('Unable to derive Hedera key');
     }
     return {address: normalizeEvmAddress(evmAddress), privateKey};
   };
+  let evmChain;
 
   return {
+    /**
+     * Executor for WalletConnect's `eip155:295/296` namespace: the same coin
+     * and key on Hedera's JSON-RPC relay (CHAIN_CONFIG.hedera.free_rpc_urls).
+     * Built on first use so the native path never loads ethers' RPC stack.
+     */
+    get evm() {
+      if (!evmChain) {
+        const {EVMChain} = require('./EVMChain');
+        evmChain = EVMChain(chain_name, phrase, customRpcUrl);
+      }
+      return evmChain;
+    },
     isValidAddress: ({address}) => {
       try {
         return !!AccountId.fromString(address).toString();
@@ -246,8 +428,8 @@ export const HederaChain = () => {
         return false;
       }
     },
-    // Name kept for cryptoChain/index.js; nothing is created on-chain any more.
-    getOrCreateHederaWallet: async ({mnemonic}) => {
+    // Pure derivation; the ledger account appears with the first deposit.
+    createHederaWallet: async ({mnemonic}) => {
       try {
         const etherWallet = await createWallet(
           'ethereum',
@@ -364,81 +546,138 @@ export const HederaChain = () => {
       }
       return {evmAddress, accountId, isActivated: !!accountId};
     },
-    signMessage: ({signTypeData, privateKey}) => {
+    // hedera_getNodeAddresses: consensus nodes of the requested network.
+    getNodeAddresses: async ({network} = {}) => {
+      let client;
       try {
-        const message = signTypeData?.message ?? signTypeData;
+        client = Client.forName(network || appNetwork());
+        return {nodes: Object.values(client.network).map(String)};
+      } finally {
+        closeClient(client);
+      }
+    },
+    // hedera_signMessage: {signerAccountId, message} → {signatureMap}
+    signMessage: async ({signTypeData, privateKey, chainId}) => {
+      try {
+        assertNetwork(chainId);
+        const message = requireStringParam('message', signTypeData?.message);
         const key = PrivateKey.fromStringECDSA(privateKey);
-        // eslint-disable-next-line no-undef
-        const messageBytes = Buffer.from(message, 'base64');
-        const signatureBytes = key.sign(messageBytes);
         return {
-          signatureMap: [
-            {
-              publicKey: key.publicKey.toStringDer(),
-              // eslint-disable-next-line no-undef
-              signature: Buffer.from(signatureBytes).toString('base64'),
-            },
-          ],
+          signatureMap: encodeSignatureMap(
+            key,
+            key.sign(prefixMessage(message)),
+          ),
         };
       } catch (e) {
         console.error('Error in hedera signMessage', e);
         throw e;
       }
     },
-    signRawTransaction: async ({signTypeData, privateKey}) => {
+    // hedera_signTransaction: {signerAccountId, transactionBody} → {signatureMap}
+    // The dApp sends one node's TransactionBody and merges the signature into
+    // its own TransactionList, so only the raw body bytes are signed here.
+    signRawTransaction: async ({signTypeData, privateKey, chainId}) => {
       try {
-        const transactionList = signTypeData?.transactionList ?? signTypeData;
-        const key = PrivateKey.fromStringECDSA(privateKey);
-        const transaction = Transaction.fromBytes(
-          // eslint-disable-next-line no-undef
-          Buffer.from(transactionList, 'base64'),
+        assertNetwork(chainId);
+        if (
+          signTypeData?.transactionBody === undefined &&
+          signTypeData?.transactionList !== undefined
+        ) {
+          throw new Error(
+            'hedera_signTransaction expects transactionBody (base64 TransactionBody bytes), not transactionList',
+          );
+        }
+        const bodyBytes = fromBase64(
+          requireStringParam('transactionBody', signTypeData?.transactionBody),
         );
-        await transaction.sign(key);
-        return {
-          // eslint-disable-next-line no-undef
-          transactionList: Buffer.from(transaction.toBytes()).toString(
-            'base64',
-          ),
-        };
+        proto.TransactionBody.decode(bodyBytes);
+        const key = PrivateKey.fromStringECDSA(privateKey);
+        return {signatureMap: encodeSignatureMap(key, key.sign(bodyBytes))};
       } catch (e) {
         console.error('Error in hedera signTransaction', e);
         throw e;
       }
     },
-    sendRawTransaction: async ({signTypeData, privateKey}) => {
-      let tempClient;
+    // hedera_signAndExecuteTransaction: {signerAccountId, transactionList}
+    // → TransactionResponse.toJSON(). Incomplete transactions (HIP-745) are
+    // frozen with our client first. Returns after precheck like the reference
+    // wallet; the dApp fetches its own receipt.
+    sendRawTransaction: async ({signTypeData, privateKey, chainId}) => {
+      let client;
       try {
-        const transactionList = signTypeData?.transactionList ?? signTypeData;
+        assertNetwork(chainId);
+        const transactionList = requireStringParam(
+          'transactionList',
+          signTypeData?.transactionList,
+        );
         const signerAccountId = parseSignerAccountId(
-          signTypeData?.signerAccountId,
+          requireStringParam('signerAccountId', signTypeData?.signerAccountId),
         );
+        await assertAccountControlledByKey(signerAccountId, privateKey);
         const key = PrivateKey.fromStringECDSA(privateKey);
-        const transaction = Transaction.fromBytes(
-          // eslint-disable-next-line no-undef
-          Buffer.from(transactionList, 'base64'),
-        );
-        tempClient = newClient().setOperator(signerAccountId, key);
+        const transaction = Transaction.fromBytes(fromBase64(transactionList));
+        client = newClient().setOperator(signerAccountId, key);
+        if (!transaction.isFrozen()) {
+          transaction.freezeWith(client);
+        }
         await transaction.sign(key);
-        const response = await transaction.execute(tempClient);
-        const receipt = await response.getReceipt(tempClient);
-        return {
-          transactionId: response.transactionId.toString(),
-          nodeId: response.nodeId?.toString(),
-          // eslint-disable-next-line no-undef
-          transactionHash: Buffer.from(response.transactionHash).toString(
-            'base64',
-          ),
-          status: receipt.status.toString(),
-        };
+        const response = await transaction.execute(client);
+        return response.toJSON();
       } catch (e) {
         console.error('Error in hedera signAndExecuteTransaction', e);
-        throw e;
+        withJsonRpcError(e);
       } finally {
-        closeClient(tempClient);
+        closeClient(client);
       }
     },
-    // The mirror node accepts both `0.0.N` and an EVM address here; an
-    // unfunded address 404s, which reads as a zero balance.
+    // hedera_executeTransaction: {transactionList} (already signed) →
+    // TransactionResponse.toJSON(). No operator: nothing is signed here.
+    executeTransaction: async ({signTypeData, chainId}) => {
+      let client;
+      try {
+        assertNetwork(chainId);
+        const transactionList = requireStringParam(
+          'transactionList',
+          signTypeData?.transactionList,
+        );
+        const transaction = Transaction.fromBytes(fromBase64(transactionList));
+        client = newClient();
+        const response = await transaction.execute(client);
+        return response.toJSON();
+      } catch (e) {
+        console.error('Error in hedera executeTransaction', e);
+        withJsonRpcError(e);
+      } finally {
+        closeClient(client);
+      }
+    },
+    // hedera_signAndExecuteQuery: {signerAccountId, query} → {response}. The
+    // signer pays the query fee, so it runs on an operator client.
+    signAndExecuteQuery: async ({signTypeData, privateKey, chainId}) => {
+      let client;
+      try {
+        assertNetwork(chainId);
+        const queryBytes = requireStringParam('query', signTypeData?.query);
+        const signerAccountId = parseSignerAccountId(
+          requireStringParam('signerAccountId', signTypeData?.signerAccountId),
+        );
+        const key = PrivateKey.fromStringECDSA(privateKey);
+        const query = Query.fromBytes(fromBase64(queryBytes));
+        client = newClient().setOperator(signerAccountId, key);
+        const result = await query.execute(client);
+        return {
+          response: Array.isArray(result)
+            ? result.map(encodeQueryResult).join(',')
+            : encodeQueryResult(result),
+        };
+      } catch (e) {
+        console.error('Error in hedera signAndExecuteQuery', e);
+        withJsonRpcError(e);
+      } finally {
+        closeClient(client);
+      }
+    },
+    // An unfunded EVM address has no account yet, which reads as zero.
     getBalance: async ({address}) => {
       try {
         const resp = await HEDERA.getAccountInfo(address);
@@ -449,33 +688,53 @@ export const HederaChain = () => {
       }
     },
 
-    getEstimateFee: async ({toAddress} = {}) => {
+    /**
+     * Prices the transfer with the network's fee estimator and converts with
+     * the current exchange rate. `estimatedFee` is what the sender will pay
+     * and what the Transfer screen shows; `fee`/`transactionFee` is the cap
+     * handed to setMaxTransactionFee. Sending to an EVM address without an
+     * account also charges the payer for creating it, so that CryptoCreate is
+     * estimated and added.
+     */
+    getEstimateFee: async ({toAddress, privateKey, memo} = {}) => {
+      let client;
       try {
-        const resp = await HEDERA.getExchangeFee();
-        const currentRate = resp?.data?.current_rate;
-        const centEquivalent = currentRate?.cent_equivalent;
-        const hbarEquivalent = currentRate?.hbar_equivalent;
-        const hbarToDollar = centEquivalent / hbarEquivalent / 100;
-        if (!Number.isFinite(hbarToDollar) || hbarToDollar <= 0) {
-          throw new Error('Invalid HBAR exchange rate');
-        }
-        let usd = MAX_HBAR_TRANSFER_USD;
-        // Sending to an address with no account auto-creates it and the
-        // sender is charged the CryptoCreate fee.
-        if (toAddress && !isHederaAccountId(toAddress)) {
+        client = getReadOnlyClient();
+        const recipient = toAddress || FEE_ESTIMATE_RECIPIENT;
+        let usd = await estimateUsd(
+          client,
+          new TransferTransaction()
+            .addHbarTransfer(FEE_ESTIMATE_PAYER, new Hbar(-1))
+            .addHbarTransfer(recipient, new Hbar(1))
+            .setTransactionMemo(memo?.toString() || ''),
+        );
+        if (isHederaEvmAddress(toAddress)) {
           const recipientAccountId = await resolveHederaAccountId(toAddress);
           if (!recipientAccountId) {
-            usd += ACCOUNT_CREATE_USD;
+            const publicKey = privateKey
+              ? PrivateKey.fromStringECDSA(privateKey).publicKey
+              : PrivateKey.generateECDSA().publicKey;
+            usd += await estimateUsd(
+              client,
+              new AccountCreateTransaction()
+                .setKeyWithoutAlias(publicKey)
+                .setAlias(normalizeEvmAddress(toAddress)),
+            );
           }
         }
-        const hbar = usd / hbarToDollar;
-        return {
-          fee: hbar.toFixed(HBAR_DECIMALS),
-          transactionFee: hbar.toFixed(HBAR_DECIMALS),
-        };
+        const rate = await hbarPerUsd();
+        const estimatedFee = new BigNumber(usd)
+          .multipliedBy(rate)
+          .toFixed(HBAR_DECIMALS, BigNumber.ROUND_UP);
+        const fee = new BigNumber(estimatedFee)
+          .multipliedBy(MAX_FEE_MARGIN)
+          .toFixed(HBAR_DECIMALS, BigNumber.ROUND_UP);
+        return {estimatedFee, fee, transactionFee: fee};
       } catch (e) {
         console.error('Error in hedera gas fee', e);
         throw e;
+      } finally {
+        closeClient(client);
       }
     },
 
@@ -487,27 +746,9 @@ export const HederaChain = () => {
         }
         const resp = await HEDERA?.getTransactions(accountId);
         if (Array.isArray(resp?.data)) {
-          return resp.data.map(item => {
-            const {from, to, amount} = extractTransferParties(
-              item,
-              accountId,
-              address,
-            );
-            const txHash = item?.transaction_id;
-            return {
-              amount: amount?.toString() ?? null,
-              link: txHash,
-              url: getExplorerTxUrl('hedera', txHash),
-              status: item?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
-              date: consensusDateMs(item?.consensus_timestamp),
-              from,
-              to,
-              totalCourse: '0$',
-              transactionType: 'regular',
-              blockNumber: item?.blockNumber ?? null,
-              confirmations: item?.confirmations ?? null,
-            };
-          });
+          return resp.data.map(item =>
+            toTransactionRecord(item, item?.transaction_id, accountId, address),
+          );
         }
         return [];
       } catch (e) {
@@ -518,33 +759,14 @@ export const HederaChain = () => {
     getTransaction: async ({txHash, address}) => {
       try {
         const transaction = await HEDERA?.getTransaction(txHash);
-        const finalTransaction = transaction?.data;
-        if (finalTransaction) {
-          const accountId = address
-            ? await resolveHederaAccountId(address)
-            : null;
-          const {from, to, amount} = extractTransferParties(
-            finalTransaction,
-            accountId,
-            address,
-          );
-          return {
-            data: {
-              amount: amount?.toString() ?? null,
-              link: txHash,
-              url: getExplorerTxUrl('hedera', txHash),
-              status:
-                finalTransaction?.result === 'SUCCESS' ? 'SUCCESS' : 'FAIL',
-              date: consensusDateMs(finalTransaction?.consensus_timestamp),
-              from,
-              to,
-              totalCourse: '0$',
-              blockNumber: finalTransaction?.blockNumber ?? null,
-              confirmations: finalTransaction?.confirmations ?? null,
-            },
-          };
+        const record = transaction?.data;
+        if (!record) {
+          return {data: null};
         }
-        return {data: null};
+        const accountId = address
+          ? await resolveHederaAccountId(address)
+          : null;
+        return {data: toTransactionRecord(record, txHash, accountId, address)};
       } catch (e) {
         console.error(`error getting transactions for hedera ${e}`);
         return {data: null};
@@ -554,7 +776,7 @@ export const HederaChain = () => {
     /**
      * `to` may be `0.0.N`, an EVM address (funded or not — an unfunded one is
      * auto-created at the sender's expense) or a long-zero address. Our own
-     * account must exist: a wallet that was never funded has nothing to send.
+     * account must exist and be bound to our key.
      */
     send: async ({to, from, amount, privateKey, memo, transactionFee}) => {
       let client;
@@ -563,6 +785,7 @@ export const HederaChain = () => {
         if (!fromAccountId) {
           throw new Error(HEDERA_UNACTIVATED_MESSAGE);
         }
+        await assertAccountControlledByKey(fromAccountId, privateKey);
         const hbar = toHbar(amount);
         client = getSignerClient(fromAccountId, privateKey);
         const transaction = new TransferTransaction()

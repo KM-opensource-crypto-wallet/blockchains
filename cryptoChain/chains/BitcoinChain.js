@@ -13,11 +13,16 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {
   CHANGE_CHAIN,
+  buildAddressByChain,
+  ensureEccInit,
   ensureStandardAddresses,
   extendByGapLimit,
+  getBitcoinPurpose,
   getLegacyWindowItems,
   getNetworkByChainName,
   getStandardChainItems,
+  hasLegacyScheme,
+  isKnownBitcoinChain,
   parsePathTail,
   removeLegacyWindowItems,
   shouldPruneLegacyWindow,
@@ -37,33 +42,114 @@ import {
   isAddressUsageScanAvailable,
 } from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
 
-// Registered on first SDK use (taproot needs it) so balance/transaction
-// reads — which are plain HTTP — never load bitcoinjs-lib.
-let eccInitDone = false;
-const ensureEccInit = () => {
-  if (!eccInitDone) {
-    bitcoin.initEccLib(ecc);
-    eccInitDone = true;
-  }
-};
-
 const varuint = require('varuint-bitcoin');
 
-// BIP-137 header flag: 39-42 signals a native segwit (bech32) P2WPKH
-// address, 35-38 signals P2SH-P2WPKH (segwit), 31-34 signals compressed
-// P2PKH (legacy — ECPair keys here are always compressed) — must match
-// this wallet's address type.
-const getBip137FlagBase = chain_name => {
-  if (chain_name === 'bitcoin_segwit') {
-    return 35;
-  }
-  if (chain_name === 'bitcoin_legacy') {
-    return 31;
-  }
-  return 39;
+// BIP-137 header flag base (+ recovery id): 39-42 native segwit P2WPKH,
+// 35-38 P2SH-P2WPKH, 31-34 compressed P2PKH (ECPair keys here are always
+// compressed). BIP-137 has no taproot flag; taproot messages use BIP-322.
+const BIP137_FLAG_BASE = {
+  bitcoin: 39,
+  bitcoin_segwit: 35,
+  bitcoin_legacy: 31,
 };
+const getBip137FlagBase = chain_name => BIP137_FLAG_BASE[chain_name] ?? 39;
 
 const firstOf = data => (Array.isArray(data) ? data[0] : data);
+
+const isTaprootChain = chain_name => chain_name === 'bitcoin_taproot';
+
+// eslint-disable-next-line no-undef
+const toXOnlyPubkey = keyPair => toXOnly(Buffer.from(keyPair.publicKey));
+
+// BIP-341 key-path spends sign with the internal key tweaked by
+// taggedHash('TapTweak', xonly(P)); the WIF always stores the untweaked key.
+const getTaprootSigner = keyPair =>
+  keyPair.tweak(bitcoin.crypto.taggedHash('TapTweak', toXOnlyPubkey(keyPair)));
+
+const getSignerForChain = (chain_name, keyPair) =>
+  isTaprootChain(chain_name) ? getTaprootSigner(keyPair) : keyPair;
+
+// Extra PSBT input fields the signer needs per address type: P2SH-P2WPKH
+// must carry its redeemScript, P2TR its x-only internal key.
+const getPsbtInputExtras = (chain_name, keyPair, network) => {
+  if (chain_name === 'bitcoin_segwit') {
+    return {
+      redeemScript: bitcoin.payments.p2sh({
+        redeem: bitcoin.payments.p2wpkh({pubkey: keyPair?.publicKey, network}),
+      }).redeem.output,
+    };
+  }
+  if (isTaprootChain(chain_name)) {
+    return {tapInternalKey: toXOnlyPubkey(keyPair)};
+  }
+  return {};
+};
+
+// bitcoinjs hands taproot inputs to the validator with the 32-byte x-only
+// output key and a Schnorr signature; every other input is ECDSA.
+const makeSignatureValidator = ECPair => (pubkey, msghash, signature) =>
+  pubkey.length === 32
+    ? ecc.verifySchnorr(msghash, pubkey, signature)
+    : ECPair.fromPublicKey(pubkey).verify(msghash, signature);
+
+const encodeWitnessStack = items =>
+  // eslint-disable-next-line no-undef
+  Buffer.concat([
+    varuint.encode(items.length),
+    ...items.flatMap(item => [varuint.encode(item.length), item]),
+  ]);
+
+// BIP-340 tagged hash for tags bitcoinjs-lib does not know:
+// sha256(sha256(tag) || sha256(tag) || data).
+const taggedHash = (tag, data) => {
+  // eslint-disable-next-line no-undef
+  const tagHash = bitcoin.crypto.sha256(Buffer.from(tag, 'utf8'));
+  // eslint-disable-next-line no-undef
+  return bitcoin.crypto.sha256(Buffer.concat([tagHash, tagHash, data]));
+};
+
+/**
+ * BIP-322 "simple" signature for a P2TR address: the serialized witness of
+ * to_sign, which spends the virtual to_spend output that commits to the
+ * message. Returned base64-encoded, as wallets/verifiers exchange it.
+ */
+const signMessageBip322Simple = ({message, keyPair, address, network}) => {
+  const scriptPubKey = bitcoin.address.toOutputScript(address, network);
+  const toSpend = new bitcoin.Transaction();
+  toSpend.version = 0;
+  toSpend.locktime = 0;
+  toSpend.addInput(
+    // eslint-disable-next-line no-undef
+    Buffer.alloc(32, 0),
+    0xffffffff,
+    0,
+    bitcoin.script.compile([
+      bitcoin.opcodes.OP_0,
+      // eslint-disable-next-line no-undef
+      taggedHash('BIP0322-signed-message', Buffer.from(message, 'utf8')),
+    ]),
+  );
+  toSpend.addOutput(scriptPubKey, 0);
+
+  const toSign = new bitcoin.Psbt({network});
+  toSign.setVersion(0);
+  toSign.setLocktime(0);
+  toSign.addInput({
+    hash: toSpend.getId(),
+    index: 0,
+    sequence: 0,
+    witnessUtxo: {script: scriptPubKey, value: 0},
+    tapInternalKey: toXOnlyPubkey(keyPair),
+  });
+  toSign.addOutput({
+    script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN]),
+    value: 0,
+  });
+  toSign.signInput(0, getTaprootSigner(keyPair));
+  toSign.finalizeAllInputs();
+  const [input] = toSign.extractTransaction().ins;
+  return encodeWitnessStack(input.witness).toString('base64');
+};
 
 // Indexes of PSBT inputs spendable by `address`: the input's witnessUtxo
 // script, or the referenced nonWitnessUtxo output's script, equals ours.
@@ -89,24 +175,7 @@ const getKeyPairAndAddress = (privateKey, chain_name) => {
   const ECPair = ECPairFactory(ecc);
   const network = getSimpleNetwork();
   const keyPair = ECPair.fromWIF(privateKey, network);
-  let address;
-  if (chain_name === 'bitcoin_segwit') {
-    const p2wpkh = bitcoin.payments.p2wpkh({
-      pubkey: keyPair.publicKey,
-      network,
-    });
-    address = bitcoin.payments.p2sh({redeem: p2wpkh, network}).address;
-  } else if (chain_name === 'bitcoin_legacy') {
-    address = bitcoin.payments.p2pkh({
-      pubkey: keyPair.publicKey,
-      network,
-    }).address;
-  } else {
-    address = bitcoin.payments.p2wpkh({
-      pubkey: keyPair.publicKey,
-      network,
-    }).address;
-  }
+  const address = buildAddressByChain(chain_name, keyPair.publicKey, network);
   return {keyPair, address, network};
 };
 
@@ -159,7 +228,21 @@ export const BitcoinChain = () => {
       try {
         const data = firstOf(signTypeData);
         const message = data?.message ?? data;
-        const {keyPair, address} = getKeyPairAndAddress(privateKey, chain_name);
+        const {keyPair, address, network} = getKeyPairAndAddress(
+          privateKey,
+          chain_name,
+        );
+        if (isTaprootChain(chain_name)) {
+          return {
+            address,
+            signature: signMessageBip322Simple({
+              message,
+              keyPair,
+              address,
+              network,
+            }),
+          };
+        }
         // eslint-disable-next-line no-undef
         const prefix = Buffer.from('Bitcoin Signed Message:\n', 'utf8');
         // eslint-disable-next-line no-undef
@@ -212,8 +295,19 @@ export const BitcoinChain = () => {
         if (!inputs.length) {
           throw new Error('No PSBT inputs belong to this wallet');
         }
+        const signer = getSignerForChain(chain_name, keyPair);
         inputs.forEach(input => {
-          psbtObj.signInput(input.index, keyPair, input.sighashTypes);
+          // Key-path taproot signing needs the internal key on the input;
+          // some dApps build P2TR inputs without it.
+          if (
+            isTaprootChain(chain_name) &&
+            !psbtObj.data.inputs[input.index]?.tapInternalKey
+          ) {
+            psbtObj.updateInput(input.index, {
+              tapInternalKey: toXOnlyPubkey(keyPair),
+            });
+          }
+          psbtObj.signInput(input.index, signer, input.sighashTypes);
           psbtObj.finalizeInput(input.index);
         });
         if (broadcast) {
@@ -237,9 +331,7 @@ export const BitcoinChain = () => {
       try {
         // BitcoinChain's derive-path/network resolution has no fallback for
         // an unrecognized chain_name, so normalize to a known value up front.
-        const resolvedChainName = ['bitcoin_segwit', 'bitcoin_legacy'].includes(
-          chain_name,
-        )
+        const resolvedChainName = isKnownBitcoinChain(chain_name)
           ? chain_name
           : 'bitcoin';
         const chain = BitcoinChain();
@@ -293,28 +385,12 @@ export const BitcoinChain = () => {
       const customNetwork = getNetworkByChainName(chain_name);
       const ECPair = ECPairFactory(ecc);
       const keyPair = ECPair.fromWIF(privateKey, customNetwork);
-      let data = {};
-      if (chain_name === 'bitcoin_legacy') {
-        data = bitcoin.payments.p2pkh({
-          pubkey: keyPair.publicKey,
-          network: customNetwork,
-        });
-      } else if (chain_name === 'bitcoin_segwit') {
-        const p2wpkh = bitcoin.payments.p2wpkh({
-          pubkey: keyPair.publicKey,
-          network: customNetwork,
-        });
-        data = bitcoin.payments.p2sh({
-          redeem: p2wpkh,
-        });
-      } else if (chain_name === 'bitcoin') {
-        data = bitcoin.payments.p2wpkh({
-          pubkey: keyPair.publicKey,
-          network: customNetwork,
-        });
-      }
       return {
-        address: data.address,
+        address: buildAddressByChain(
+          chain_name,
+          keyPair.publicKey,
+          customNetwork,
+        ),
         privateKey: keyPair.toWIF(),
       };
     },
@@ -334,7 +410,10 @@ export const BitcoinChain = () => {
         Array.isArray(deriveAddresses) &&
         deriveAddresses.length > 1;
       try {
+        // Backend recovery only knows the old-scheme address types; newer
+        // types (taproot) are fully re-derivable from the xpub below.
         if (
+          hasLegacyScheme(chain_name) &&
           (!Array.isArray(deriveAddresses) || deriveAddresses?.length <= 1) &&
           extendedPublicKey
         ) {
@@ -442,83 +521,6 @@ export const BitcoinChain = () => {
       } catch (e) {
         console.error('error in get balance from bitcoin', e);
         return '0';
-      }
-    },
-    createBitcoinLegacyWallet: async ({mnemonic}) => {
-      try {
-        ensureEccInit();
-        const customNetwork = getNetworkByChainName('bitcoin_legacy');
-        const seed = bip39.mnemonicToSeedSync(mnemonic);
-        const bip32 = BIP32Factory(ecc);
-        const root = bip32.fromSeed(seed, customNetwork);
-        const child1 = root.derivePath(
-          getDeriveAddressByChain('bitcoin_legacy'),
-        );
-        const extendedKey = root.derivePath("m/44'/0'/0'");
-        const xPubKey = extendedKey.neutered().toBase58();
-        const xPrvKey = extendedKey.toBase58();
-        const {address} = bitcoin.payments.p2pkh({
-          pubkey: child1.publicKey,
-          network: customNetwork,
-        });
-        return {
-          privateKey: child1.toWIF(),
-          address,
-          extendedPublicKey: xPubKey,
-          extendedPrivateKey: xPrvKey,
-        };
-      } catch (e) {
-        console.error('Error in createBitcoinLegacyWallet', e);
-      }
-    },
-    createBitcoinTaprootWallet: async ({mnemonic}) => {
-      try {
-        ensureEccInit();
-        const seed = bip39.mnemonicToSeedSync(mnemonic);
-        const bip32 = BIP32Factory(ecc);
-        const root = bip32.fromSeed(seed, config.BITCOIN_NETWORK_STRING);
-        const child1 = root.derivePath("m/86'/0'/0'/0/0");
-
-        const {address} = bitcoin.payments.p2tr({
-          internalPubkey: toXOnly(child1.publicKey),
-          network: config.BITCOIN_NETWORK_STRING,
-        });
-        return {
-          privateKey: child1.toWIF(),
-          address,
-        };
-      } catch (e) {
-        console.error('Error in createBitcoinTaprootWallet', e);
-      }
-    },
-    createBitcoinSegwitWallet: async ({mnemonic}) => {
-      try {
-        ensureEccInit();
-        const customNetwork = getNetworkByChainName('bitcoin_segwit');
-        const seed = bip39.mnemonicToSeedSync(mnemonic);
-        const bip32 = BIP32Factory(ecc);
-        const root = bip32.fromSeed(seed, customNetwork);
-        const child1 = root.derivePath(
-          getDeriveAddressByChain('bitcoin_segwit'),
-        );
-        const extendedKey = root.derivePath("m/49'/0'/0'");
-        const yPubKey = extendedKey.neutered().toBase58();
-        const yPrvKey = extendedKey.toBase58();
-        const p2wpkh = bitcoin.payments.p2wpkh({
-          pubkey: child1.publicKey,
-          network: customNetwork,
-        });
-        const {address} = bitcoin.payments.p2sh({
-          redeem: p2wpkh,
-        });
-        return {
-          privateKey: child1.toWIF(),
-          address,
-          extendedPublicKey: yPubKey,
-          extendedPrivateKey: yPrvKey,
-        };
-      } catch (e) {
-        console.error('Error in createBitcoinSegwitWallet', e);
       }
     },
     getEstimateFee: async ({
@@ -744,25 +746,15 @@ export const BitcoinChain = () => {
         const bip32 = BIP32Factory(ecc);
         const root = bip32.fromSeed(seed, customNetwork);
         const child1 = root.derivePath(derivePath);
-        let data = {};
-        if (chain_name === 'bitcoin_legacy') {
-          data = bitcoin.payments.p2pkh({
-            pubkey: child1.publicKey,
-            network: customNetwork,
-          });
-        } else if (chain_name === 'bitcoin_segwit') {
-          const p2wpkh = bitcoin.payments.p2wpkh({
-            pubkey: child1.publicKey,
-            network: customNetwork,
-          });
-          data = bitcoin.payments.p2sh({
-            redeem: p2wpkh,
-          });
-        }
         return {
           account: {
             privateKey: child1.toWIF(),
-            address: data.address,
+            address: buildAddressByChain(
+              chain_name,
+              // eslint-disable-next-line no-undef
+              Buffer.from(child1.publicKey),
+              customNetwork,
+            ),
             derivePath: derivePath,
           },
         };
@@ -945,51 +937,33 @@ const buildUTXO = async ({
       }
     }
 
-    inputData.map(utxo => {
-      if (utxo.scriptpubkey) {
-        const tempInputData = {
-          hash: utxo.txid,
-          index: utxo.vout,
-          sequence: 0xfffffffd,
-          witnessUtxo: {
-            // eslint-disable-next-line no-undef
-            script: Buffer.from(utxo.scriptpubkey, 'hex'),
-            value: utxo.value, // value in satoshi
-          },
-        };
-
-        if (chain_name === 'bitcoin_segwit') {
-          const derivePath = resolveDerivePath(utxo);
-          tempInputData.redeemScript = bitcoin.payments.p2sh({
-            redeem: bitcoin.payments.p2wpkh({
-              pubkey: keyPairs[derivePath]?.publicKey,
-              network: customNetwork,
-            }),
-          }).redeem.output;
-        }
-        // if (chain_name === 'bitcoin_taproot') {
-        //   tempInputData.tapInternalKey = childNodeXOnlyPubkey;
-        // }
-        tx.addInput(tempInputData);
-      } else if (utxo.txhash) {
-        const tempInputData = {
-          hash: utxo.txid,
-          index: utxo.vout,
-          sequence: 0xfffffffd,
-          // eslint-disable-next-line no-undef
-          nonWitnessUtxo: Buffer.from(utxo.txhash, 'hex'),
-        };
-        if (chain_name === 'bitcoin_segwit') {
-          const derivePath = resolveDerivePath(utxo);
-          tempInputData.redeemScript = bitcoin.payments.p2sh({
-            redeem: bitcoin.payments.p2wpkh({
-              pubkey: keyPairs[derivePath]?.publicKey,
-              network: customNetwork,
-            }),
-          }).redeem.output;
-        }
-        tx.addInput(tempInputData);
+    inputData.forEach(utxo => {
+      if (!utxo.scriptpubkey && !utxo.txhash) {
+        return;
       }
+      const prevout = utxo.scriptpubkey
+        ? {
+            witnessUtxo: {
+              // eslint-disable-next-line no-undef
+              script: Buffer.from(utxo.scriptpubkey, 'hex'),
+              value: utxo.value, // value in satoshi
+            },
+          }
+        : {
+            // eslint-disable-next-line no-undef
+            nonWitnessUtxo: Buffer.from(utxo.txhash, 'hex'),
+          };
+      tx.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
+        sequence: 0xfffffffd,
+        ...prevout,
+        ...getPsbtInputExtras(
+          chain_name,
+          keyPairs[resolveDerivePath(utxo)],
+          customNetwork,
+        ),
+      });
     });
 
     const change = sum.minus(amountWithFees);
@@ -1021,11 +995,14 @@ const buildUTXO = async ({
     // Sign inputs
     for (let i = 0; i < inputData.length; i++) {
       const derivePath = resolveDerivePath(inputData[i]);
-      await tx.signInput(i, keyPairs[derivePath]);
+      await tx.signInput(
+        i,
+        getSignerForChain(chain_name, keyPairs[derivePath]),
+      );
     }
-    const validator = (pubkey, msghash, signature) =>
-      ECPair.fromPublicKey(pubkey).verify(msghash, signature);
-    const isvalidate = tx.validateSignaturesOfAllInputs(validator);
+    const isvalidate = tx.validateSignaturesOfAllInputs(
+      makeSignatureValidator(ECPair),
+    );
     if (!isvalidate) {
       throw new Error('Error in validation of bitcoin transaction');
     }
@@ -1064,13 +1041,9 @@ const buildUTXO = async ({
   return createdTx.toHex();
 };
 
-const getDeriveAddressByChain = chain_name => {
-  return chain_name === 'bitcoin'
-    ? "m/84'/0'/0'/0/0"
-    : chain_name === 'bitcoin_segwit'
-    ? "m/49'/0'/0'/0/0"
-    : "m/44'/0'/0'/0/0";
-};
+// First receive address of the mainnet account for this address type.
+const getDeriveAddressByChain = chain_name =>
+  `m/${getBitcoinPurpose(chain_name)}'/0'/0'/0/0`;
 
 // Change goes to the first unused internal-chain address (…/1/i), like
 // BlueWallet/Electrum. Falls back to the sending address for coins without

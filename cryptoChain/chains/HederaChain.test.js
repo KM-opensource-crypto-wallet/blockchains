@@ -7,14 +7,16 @@
  */
 import {
   HederaChain,
-  ACCOUNT_CREATE_USD,
   __resetHederaAccountCache,
   resolveHederaAccountId,
   toMirrorTransactionId,
 } from 'dok-wallet-blockchain-networks/cryptoChain/chains/HederaChain';
 import {HEDERA} from 'dok-wallet-blockchain-networks/service/Hedera';
 import {createWallet} from 'myWallet/wallet.service';
-import {HEDERA_UNACTIVATED_MESSAGE} from 'dok-wallet-blockchain-networks/helper';
+import {
+  HEDERA_KEY_MISMATCH_MESSAGE,
+  HEDERA_UNACTIVATED_MESSAGE,
+} from 'dok-wallet-blockchain-networks/helper';
 
 jest.mock('dok-wallet-blockchain-networks/service/Hedera', () => ({
   HEDERA: {
@@ -28,17 +30,20 @@ jest.mock('dok-wallet-blockchain-networks/service/Hedera', () => ({
 
 jest.mock('myWallet/wallet.service', () => ({createWallet: jest.fn()}));
 
-// helper/index.js drags in react-native through utils/common; only these two
+// helper/index.js drags in react-native through utils/common; only these
 // exports are used here.
 jest.mock('dok-wallet-blockchain-networks/helper', () => ({
   getExplorerTxUrl: jest.fn((chain, hash) => `https://hashscan.test/${hash}`),
   HEDERA_UNACTIVATED_MESSAGE: 'Your Hedera account is not active yet.',
+  HEDERA_KEY_MISMATCH_MESSAGE: 'This Hedera account is bound to another key.',
 }));
 
-// Real AccountId / Hbar / PrivateKey; only the network surface is faked.
+// Real AccountId / Hbar / PrivateKey / AccountCreateTransaction; only the
+// network surface (client, transfer submit, fee estimator) is faked.
 jest.mock('@hiero-ledger/sdk', () => {
   const actual = jest.requireActual('@hiero-ledger/sdk');
   const execute = jest.fn();
+  const estimate = jest.fn();
   const fakeClient = {
     setOperator: jest.fn(function () {
       return this;
@@ -61,8 +66,33 @@ jest.mock('@hiero-ledger/sdk', () => {
       this.maxFee = fee;
       return this;
     }
+    setTransactionId(id) {
+      this.transactionId = id;
+      return this;
+    }
+    setNodeAccountIds(ids) {
+      this.nodeAccountIds = ids;
+      return this;
+    }
+    freeze() {
+      this.frozen = true;
+      return this;
+    }
     execute(client) {
       return execute(this, client);
+    }
+  }
+  class FakeFeeEstimateQuery {
+    setTransaction(transaction) {
+      this.transaction = transaction;
+      return this;
+    }
+    setMode(mode) {
+      this.mode = mode;
+      return this;
+    }
+    execute(client) {
+      return estimate(this.transaction, this.mode, client);
     }
   }
   return {
@@ -72,7 +102,9 @@ jest.mock('@hiero-ledger/sdk', () => {
       forMainnet: jest.fn(() => fakeClient),
     },
     TransferTransaction: FakeTransferTransaction,
+    FeeEstimateQuery: FakeFeeEstimateQuery,
     __execute: execute,
+    __estimate: estimate,
     __fakeClient: fakeClient,
   };
 });
@@ -80,13 +112,29 @@ jest.mock('@hiero-ledger/sdk', () => {
 const sdk = require('@hiero-ledger/sdk');
 
 const PRIVATE_KEY = `0x${'a'.repeat(64)}`;
+const OUR_PUBLIC_KEY =
+  sdk.PrivateKey.fromStringECDSA(PRIVATE_KEY).publicKey.toStringRaw();
+const OTHER_PUBLIC_KEY = sdk.PrivateKey.fromStringECDSA(
+  `0x${'b'.repeat(64)}`,
+).publicKey.toStringRaw();
 const EVM_CHECKSUMMED = '0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B';
 const EVM = EVM_CHECKSUMMED.toLowerCase();
 const ACCOUNT_ID = '0.0.4459557';
 
+const tinycents = value => ({total: {toString: () => String(value)}});
+const TRANSFER_TINYCENTS = 1_000_000; // $0.0001
+const CREATE_TINYCENTS = 500_000_000; // $0.05
+
+const accountWithKey = key => ({status: 200, data: {account: ACCOUNT_ID, key}});
+
 describe('HederaChain', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // mockResolvedValue outlives clearAllMocks; start every test from
+    // "network returns nothing" so a key or estimate mock cannot leak.
+    Object.values(HEDERA).forEach(fn => fn.mockReset());
+    sdk.__execute.mockReset();
+    sdk.__estimate.mockReset();
     __resetHederaAccountCache();
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -100,7 +148,7 @@ describe('HederaChain', () => {
         address: EVM_CHECKSUMMED,
         privateKey: PRIVATE_KEY,
       });
-      const wallet = await HederaChain().getOrCreateHederaWallet({
+      const wallet = await HederaChain().createHederaWallet({
         mnemonic: 'seed',
       });
       expect(wallet).toEqual({address: EVM, privateKey: PRIVATE_KEY});
@@ -145,6 +193,18 @@ describe('HederaChain', () => {
       expect(HEDERA.getAccountByEvmAddress).toHaveBeenCalledTimes(2);
     });
 
+    it('propagates a mirror-node failure without caching it as a miss', async () => {
+      HEDERA.getAccountByEvmAddress.mockRejectedValueOnce(
+        new Error('Network Error'),
+      );
+      await expect(resolveHederaAccountId(EVM)).rejects.toThrow(
+        'Network Error',
+      );
+      HEDERA.getAccountByEvmAddress.mockResolvedValue(ACCOUNT_ID);
+      await expect(resolveHederaAccountId(EVM)).resolves.toBe(ACCOUNT_ID);
+      expect(HEDERA.getAccountByEvmAddress).toHaveBeenCalledTimes(2);
+    });
+
     it('returns null for anything that is neither form', async () => {
       await expect(resolveHederaAccountId('0.0.abc')).resolves.toBeNull();
       await expect(resolveHederaAccountId(undefined)).resolves.toBeNull();
@@ -164,6 +224,12 @@ describe('HederaChain', () => {
 
     it('leaves an unfunded wallet untouched', async () => {
       HEDERA.getAccountByEvmAddress.mockResolvedValue(null);
+      const fresh = {address: EVM, privateKey: PRIVATE_KEY};
+      await expect(HederaChain().attachAccountId(fresh)).resolves.toBe(fresh);
+    });
+
+    it('leaves the wallet untouched when the mirror node is down', async () => {
+      HEDERA.getAccountByEvmAddress.mockRejectedValue(new Error('timeout'));
       const fresh = {address: EVM, privateKey: PRIVATE_KEY};
       await expect(HederaChain().attachAccountId(fresh)).resolves.toBe(fresh);
     });
@@ -233,7 +299,7 @@ describe('HederaChain', () => {
     });
 
     it('reports a missing 0.0.N account and ignores garbage', async () => {
-      HEDERA.getAccountInfo.mockResolvedValue(false);
+      HEDERA.getAccountInfo.mockResolvedValue({status: 404, data: null});
       await expect(
         HederaChain().lookupAddressIdentifiers({address: ACCOUNT_ID}),
       ).resolves.toMatchObject({
@@ -287,6 +353,15 @@ describe('HederaChain', () => {
     });
   });
 
+  describe('getBalance', () => {
+    it('reads zero for an address with no account and does not throw', async () => {
+      HEDERA.getAccountInfo.mockResolvedValue({status: 404, data: null});
+      await expect(HederaChain().getBalance({address: EVM})).resolves.toBe('0');
+      HEDERA.getAccountInfo.mockRejectedValue(new Error('timeout'));
+      await expect(HederaChain().getBalance({address: EVM})).resolves.toBe('0');
+    });
+  });
+
   describe('getTransactions', () => {
     const mirrorTx = (transfers, extra = {}) => ({
       transaction_id: '0.0.4459557-1700000000-000000001',
@@ -329,6 +404,8 @@ describe('HederaChain', () => {
         amount: '100',
         status: 'SUCCESS',
         date: 1700000000000,
+        link: '0.0.4459557-1700000000-000000001',
+        transactionType: 'regular',
       });
       expect(list[1]).toMatchObject({from: '0.0.777', to: EVM, amount: '50'});
     });
@@ -372,7 +449,17 @@ describe('HederaChain', () => {
         from: ACCOUNT_ID,
         to: '0.0.900',
         amount: '100',
+        link: 'x',
+        status: 'SUCCESS',
+        date: 1700000000000,
       });
+    });
+
+    it('reports a transaction the mirror node has not indexed yet as missing', async () => {
+      HEDERA.getTransaction.mockResolvedValue({status: 404, data: null});
+      await expect(
+        HederaChain().getTransaction({txHash: 'x', address: ACCOUNT_ID}),
+      ).resolves.toEqual({data: null});
     });
   });
 
@@ -382,51 +469,96 @@ describe('HederaChain', () => {
       HEDERA.getExchangeFee.mockResolvedValue({
         data: {current_rate: {cent_equivalent: 12, hbar_equivalent: 1}},
       });
-    });
-
-    it('charges only the transfer ceiling for an existing account', async () => {
-      const fee = await HederaChain().getEstimateFee({toAddress: ACCOUNT_ID});
-      expect(Number(fee.fee)).toBeCloseTo(0.0021 / 0.12, 6);
-      expect(fee.transactionFee).toBe(fee.fee);
-      expect(HEDERA.getAccountByEvmAddress).not.toHaveBeenCalled();
-    });
-
-    it('adds the account creation cost for an unfunded EVM recipient', async () => {
-      HEDERA.getAccountByEvmAddress.mockResolvedValue(null);
-      const fee = await HederaChain().getEstimateFee({toAddress: EVM});
-      expect(Number(fee.fee)).toBeCloseTo(
-        (0.0021 + ACCOUNT_CREATE_USD) / 0.12,
-        6,
+      sdk.__estimate.mockImplementation(async transaction =>
+        transaction instanceof sdk.AccountCreateTransaction
+          ? tinycents(CREATE_TINYCENTS)
+          : tinycents(TRANSFER_TINYCENTS),
       );
+    });
+
+    it('prices the transfer with the fee estimator and caps the max fee above it', async () => {
+      const fee = await HederaChain().getEstimateFee({
+        toAddress: ACCOUNT_ID,
+        privateKey: PRIVATE_KEY,
+        memo: 'hi',
+      });
+      // $0.0001 at $0.12/HBAR, rounded up to 8 decimals
+      expect(fee.estimatedFee).toBe('0.00083334');
+      expect(fee.fee).toBe('0.00125001');
+      expect(fee.transactionFee).toBe(fee.fee);
+      expect(sdk.__estimate).toHaveBeenCalledTimes(1);
+      const [transaction, mode] = sdk.__estimate.mock.calls[0];
+      expect(mode).toBe(sdk.FeeEstimateMode.INTRINSIC);
+      expect(transaction.frozen).toBe(true);
+      expect(transaction.transfers[1].accountId).toBe(ACCOUNT_ID);
+      expect(transaction.memo).toBe('hi');
+      expect(HEDERA.getAccountByEvmAddress).not.toHaveBeenCalled();
+      expect(sdk.__fakeClient.close).toHaveBeenCalled();
+    });
+
+    it('adds the estimated account creation cost for an unfunded EVM recipient', async () => {
+      HEDERA.getAccountByEvmAddress.mockResolvedValue(null);
+      const fee = await HederaChain().getEstimateFee({
+        toAddress: EVM_CHECKSUMMED,
+        privateKey: PRIVATE_KEY,
+      });
+      expect(Number(fee.estimatedFee)).toBeCloseTo((0.0001 + 0.05) / 0.12, 7);
+      expect(sdk.__estimate).toHaveBeenCalledTimes(2);
+      const [create] = sdk.__estimate.mock.calls[1];
+      expect(create).toBeInstanceOf(sdk.AccountCreateTransaction);
+      expect(create.alias.toString()).toBe(EVM.slice(2));
+      expect(create.key.toStringRaw()).toBe(OUR_PUBLIC_KEY);
     });
 
     it('does not add it when the EVM recipient already has an account', async () => {
       HEDERA.getAccountByEvmAddress.mockResolvedValue('0.0.900');
       const fee = await HederaChain().getEstimateFee({toAddress: EVM});
-      expect(Number(fee.fee)).toBeCloseTo(0.0021 / 0.12, 6);
+      expect(fee.estimatedFee).toBe('0.00083334');
+      expect(sdk.__estimate).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails instead of guessing when the estimator or the rate is unavailable', async () => {
+      sdk.__estimate.mockRejectedValueOnce(
+        new Error('Failed to estimate fees'),
+      );
+      await expect(
+        HederaChain().getEstimateFee({toAddress: ACCOUNT_ID}),
+      ).rejects.toThrow('Failed to estimate fees');
+      HEDERA.getExchangeFee.mockResolvedValue(undefined);
+      await expect(
+        HederaChain().getEstimateFee({toAddress: ACCOUNT_ID}),
+      ).rejects.toThrow('Invalid HBAR exchange rate');
+      expect(sdk.__fakeClient.close).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('send', () => {
+    const sendFrom = (from = EVM) =>
+      HederaChain().send({
+        to: ACCOUNT_ID,
+        from,
+        amount: '1',
+        privateKey: PRIVATE_KEY,
+      });
+
+    beforeEach(() => {
+      sdk.__execute.mockResolvedValue({
+        transactionId: {toString: () => `${ACCOUNT_ID}@1700000000.5`},
+        transactionHash: new Uint8Array([1, 2, 255]),
+      });
+    });
+
     it('refuses to send from a wallet that has no account yet', async () => {
       HEDERA.getAccountByEvmAddress.mockResolvedValue(null);
-      await expect(
-        HederaChain().send({
-          to: ACCOUNT_ID,
-          from: EVM,
-          amount: '1',
-          privateKey: PRIVATE_KEY,
-        }),
-      ).rejects.toThrow(HEDERA_UNACTIVATED_MESSAGE);
+      await expect(sendFrom()).rejects.toThrow(HEDERA_UNACTIVATED_MESSAGE);
       expect(sdk.__execute).not.toHaveBeenCalled();
     });
 
     it('signs as the resolved account id and returns a mirror-style transaction id', async () => {
       HEDERA.getAccountByEvmAddress.mockResolvedValue(ACCOUNT_ID);
-      sdk.__execute.mockResolvedValue({
-        transactionId: {toString: () => `${ACCOUNT_ID}@1700000000.5`},
-        transactionHash: new Uint8Array([1, 2, 255]),
-      });
+      HEDERA.getAccountInfo.mockResolvedValue(
+        accountWithKey({_type: 'ECDSA_SECP256K1', key: OUR_PUBLIC_KEY}),
+      );
       const result = await HederaChain().send({
         to: EVM,
         from: EVM,
@@ -435,6 +567,7 @@ describe('HederaChain', () => {
         memo: 'hi',
         transactionFee: '0.0175',
       });
+      expect(HEDERA.getAccountInfo).toHaveBeenCalledWith(ACCOUNT_ID);
       expect(sdk.__fakeClient.setOperator).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.anything(),
@@ -451,17 +584,62 @@ describe('HederaChain', () => {
       expect(sdk.__fakeClient.close).toHaveBeenCalled();
     });
 
+    it('refuses to sign for an account bound to another ECDSA key', async () => {
+      HEDERA.getAccountInfo.mockResolvedValue(
+        accountWithKey({_type: 'ECDSA_SECP256K1', key: OTHER_PUBLIC_KEY}),
+      );
+      await expect(sendFrom(ACCOUNT_ID)).rejects.toThrow(
+        HEDERA_KEY_MISMATCH_MESSAGE,
+      );
+      expect(sdk.__fakeClient.setOperator).not.toHaveBeenCalled();
+      expect(sdk.__execute).not.toHaveBeenCalled();
+    });
+
+    it('refuses to sign for an account bound to an ED25519 key', async () => {
+      HEDERA.getAccountInfo.mockResolvedValue(
+        accountWithKey({_type: 'ED25519', key: 'c'.repeat(64)}),
+      );
+      await expect(sendFrom(ACCOUNT_ID)).rejects.toThrow(
+        HEDERA_KEY_MISMATCH_MESSAGE,
+      );
+      expect(sdk.__execute).not.toHaveBeenCalled();
+    });
+
+    it('signs for a hollow account, a threshold key and when the mirror node is down', async () => {
+      HEDERA.getAccountInfo.mockResolvedValueOnce(accountWithKey(null));
+      await expect(sendFrom(ACCOUNT_ID)).resolves.toBeTruthy();
+      HEDERA.getAccountInfo.mockResolvedValueOnce(
+        accountWithKey({_type: 'ProtobufEncoded', key: '2a...'}),
+      );
+      await expect(sendFrom(ACCOUNT_ID)).resolves.toBeTruthy();
+      HEDERA.getAccountInfo.mockRejectedValueOnce(new Error('timeout'));
+      await expect(sendFrom(ACCOUNT_ID)).resolves.toBeTruthy();
+      expect(sdk.__execute).toHaveBeenCalledTimes(3);
+    });
+
     it('propagates SDK failures instead of resolving undefined', async () => {
       sdk.__execute.mockRejectedValue(new Error('INSUFFICIENT_TX_FEE'));
+      await expect(sendFrom(ACCOUNT_ID)).rejects.toThrow('INSUFFICIENT_TX_FEE');
+      expect(sdk.__fakeClient.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('sendRawTransaction', () => {
+    it('refuses to sign a WalletConnect transaction for an account bound to another key', async () => {
+      HEDERA.getAccountInfo.mockResolvedValue(
+        accountWithKey({_type: 'ECDSA_SECP256K1', key: OTHER_PUBLIC_KEY}),
+      );
       await expect(
-        HederaChain().send({
-          to: EVM,
-          from: ACCOUNT_ID,
-          amount: '1',
+        HederaChain().sendRawTransaction({
+          signTypeData: {
+            signerAccountId: `hedera:testnet:${ACCOUNT_ID}`,
+            transactionList: 'AA==',
+          },
           privateKey: PRIVATE_KEY,
         }),
-      ).rejects.toThrow('INSUFFICIENT_TX_FEE');
-      expect(sdk.__fakeClient.close).toHaveBeenCalled();
+      ).rejects.toThrow(HEDERA_KEY_MISMATCH_MESSAGE);
+      expect(HEDERA.getAccountInfo).toHaveBeenCalledWith(ACCOUNT_ID);
+      expect(sdk.__fakeClient.setOperator).not.toHaveBeenCalled();
     });
   });
 

@@ -130,7 +130,12 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     });
     expect(store.dispatch).toHaveBeenCalledTimes(1);
     expect(showToast).not.toHaveBeenCalled();
-    expect(logWalletConnectEvent).not.toHaveBeenCalled();
+    // Only the delivery breadcrumb, no warning.
+    expect(logWalletConnectEvent).not.toHaveBeenCalledWith(
+      'warn',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('still auto-answers the special-cased wallet_getCapabilities', async () => {

@@ -1,9 +1,13 @@
 import {
   buildLegacyWindowPaths,
+  deriveAddressRange,
   ensureStandardAddresses,
+  getAccountBasePath,
   getDeriveAddressLabel,
   getLegacyWindowItems,
+  getNetworkByChainName,
   getVisibleDeriveAddresses,
+  hasLegacyScheme,
   isLegacyWindowPath,
   removeLegacyWindowItems,
   shouldPruneLegacyWindow,
@@ -73,6 +77,14 @@ jest.mock('dok-wallet-blockchain-networks/service/bitcoinDataSource', () => ({
 const ZPUB =
   'zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs';
 const FIRST_RECEIVE_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+
+// BIP86 test vector (same mnemonic), account m/86'/0'/0'.
+const TAPROOT_XPUB =
+  'xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ';
+const TAPROOT_FIRST_RECEIVE_ADDRESS =
+  'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+const TAPROOT_FIRST_CHANGE_ADDRESS =
+  'bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7';
 
 const STANDARD_COUNT = 40; // receive 0..19 + change 0..19
 const LEGACY_COUNT = 18; // …/2/0 … …/19/0
@@ -430,6 +442,86 @@ describe('BitcoinChain.getBalance legacy scan', () => {
     expect(fetchBitcoinAddressUsage.mock.calls[0][0].addresses).toHaveLength(
       LEGACY_COUNT,
     );
+    expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT);
+    expect(result.isLegacyScanDone).toBe(true);
+  });
+});
+
+describe('bitcoin_taproot (BIP-86)', () => {
+  it('uses purpose 86 and plain xpub/xprv version bytes', () => {
+    expect(getAccountBasePath('bitcoin_taproot')).toBe("m/86'/0'/0'");
+    const network = getNetworkByChainName('bitcoin_taproot');
+    expect(network.bip32).toEqual({public: 0x0488b21e, private: 0x0488ade4});
+    expect(network.bech32).toBe('bc');
+  });
+
+  it('derives the BIP-86 reference addresses from the account xpub', () => {
+    const [receive] = deriveAddressRange({
+      chain_name: 'bitcoin_taproot',
+      accountKey: TAPROOT_XPUB,
+      chainIndex: 0,
+      start: 0,
+      count: 1,
+    });
+    const [change] = deriveAddressRange({
+      chain_name: 'bitcoin_taproot',
+      accountKey: TAPROOT_XPUB,
+      chainIndex: 1,
+      start: 0,
+      count: 1,
+    });
+    expect(receive).toEqual({
+      derivePath: "m/86'/0'/0'/0/0",
+      address: TAPROOT_FIRST_RECEIVE_ADDRESS,
+    });
+    expect(change.address).toBe(TAPROOT_FIRST_CHANGE_ADDRESS);
+  });
+
+  it('has no legacy-scheme window', () => {
+    expect(hasLegacyScheme('bitcoin_taproot')).toBe(false);
+    expect(hasLegacyScheme('bitcoin')).toBe(true);
+    expect(buildLegacyWindowPaths('bitcoin_taproot')).toEqual([]);
+    expect(isLegacyWindowPath('bitcoin_taproot', "m/86'/0'/0'/5/0")).toBe(
+      false,
+    );
+  });
+
+  it('ensureStandardAddresses yields exactly the 40 standard entries', () => {
+    const result = ensureStandardAddresses({
+      chain_name: 'bitcoin_taproot',
+      deriveAddresses: [],
+      accountKey: TAPROOT_XPUB,
+      includeLegacyWindow: true,
+    });
+    expect(result).toHaveLength(STANDARD_COUNT);
+    expect(result.every(item => item.address.startsWith('bc1p'))).toBe(true);
+    expect(result[0].address).toBe(TAPROOT_FIRST_RECEIVE_ADDRESS);
+  });
+
+  it('getBalance skips backend recovery and resolves the legacy flag', async () => {
+    jest.clearAllMocks();
+    isAddressUsageScanAvailable.mockReturnValue(true);
+    getBitcoinAddresses.mockRejectedValue(new Error('unsupported chain'));
+    fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
+    fetchBitcoinBalances.mockImplementation(({derive_addresses}) =>
+      Promise.resolve({
+        data: {
+          totalBalance: '0',
+          deriveAddresses: derive_addresses.map(item => ({
+            ...item,
+            balance: '0',
+          })),
+        },
+      }),
+    );
+    const result = await BitcoinChain().getBalance({
+      address: TAPROOT_FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin_taproot',
+      extendedPublicKey: TAPROOT_XPUB,
+      deriveAddresses: [],
+      isLegacyScanDone: false,
+    });
+    expect(getBitcoinAddresses).not.toHaveBeenCalled();
     expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT);
     expect(result.isLegacyScanDone).toBe(true);
   });
