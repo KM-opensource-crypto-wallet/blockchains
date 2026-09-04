@@ -1634,6 +1634,12 @@ export const GAS_ORACLE_CONTRACT_ADDRESS = Object.fromEntries(
     .filter(([, cfg]) => cfg.gas_oracle)
     .map(([chain_name, cfg]) => [chain_name, cfg.gas_oracle]),
 );
+
+export const SPONSOR_TREASURY_ADDRESS = forEnv({
+  sandbox: process.env.SPONSOR_TREASURY_ADDRESS_SANDBOX,
+  production: process.env.SPONSOR_TREASURY_ADDRESS_PRODUCTION,
+});
+
 export const BATCH_TRANSACTION_CONTRACT_ADDRESS = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
     .filter(([, cfg]) => cfg.batch_contract && forEnv(cfg.batch_contract))
@@ -1648,7 +1654,6 @@ export const SPONSORED_GAS_TOKENS = Object.fromEntries(
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.sponsored_gas_tokens)]),
 );
 
-export const SPONSOR_TREASURY_ADDRESS = process.env.SPONSOR_TREASURY_ADDRESS;
 let moralisChain;
 export const config = {
   BLOCK_CYPHER_BASE_URL: 'https://api.blockcypher.com',

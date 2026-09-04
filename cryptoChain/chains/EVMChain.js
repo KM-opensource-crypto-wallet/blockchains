@@ -841,12 +841,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       wallet.connect(evmProvider).populateTransaction(tx),
     );
     const signedRaw = await wallet.signTransaction(populated);
-    return await broadcastSignedTransaction(signedRaw);
-  };
-
-  // Split out of createSendTransaction so the sponsored path, whose bytes are
-  // signed by the worker, reuses the same function and hash reconciliation.
-  const broadcastSignedTransaction = async signedRaw => {
     const canonicalHash = Transaction.from(signedRaw).hash;
 
     const broadcastToAll = async rpcUrls => {
@@ -2283,7 +2277,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     },
     // Signs over the quoted fee amount and hands the batch to the
     // worker, which verifies it and returns sponsor-signed raw bytes for us to
-    // broadcast over the normal RPC fan-out.
     sendSponsoredBatchTransaction: async ({
       calls,
       privateKey,
@@ -2330,12 +2323,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           signature,
           authorization,
         });
-        if (!signed?.rawTransaction) {
+        if (!signed?.transactionHash) {
           throw new Error(
             signed?.error || 'Sponsored gas is unavailable right now',
           );
         }
-        return await broadcastSignedTransaction(signed.rawTransaction);
+        return signed.transactionHash;
       } catch (e) {
         console.error('Error in send sponsored batch transaction', e);
         if (e?.message?.toLowerCase()?.includes('invalid signature')) {
