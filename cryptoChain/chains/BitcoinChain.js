@@ -372,8 +372,10 @@ export const BitcoinChain = () => {
           deriveAddresses,
           balance,
           transactionFee: feeResp?.fee,
-          // extendedPrivateKey,
         });
+        if (!txid) {
+          throw new Error('Bitcoin transaction broadcast failed');
+        }
         return {txid};
       } catch (e) {
         console.error('Error in bitcoin sendRawTransaction', e);
@@ -901,7 +903,12 @@ const buildUTXO = async ({
     const resp = await fetchBitcoinTransactionDetails({
       transaction_data: usedUTXOs,
     });
-    const inputData = filterUTXOsBySelection(resp?.data);
+    // Drop records that carry neither a scriptpubkey nor a raw txhash: they
+    // can't be added as PSBT inputs, and filtering up front keeps the
+    // addInput index aligned with the signInput index below.
+    const inputData = filterUTXOsBySelection(resp?.data).filter(
+      utxo => utxo.scriptpubkey || utxo.txhash,
+    );
     let keyPairs = {};
     const ECPair = ECPairFactory(ecc);
     const bip32 = BIP32Factory(ecc);
@@ -938,9 +945,6 @@ const buildUTXO = async ({
     }
 
     inputData.forEach(utxo => {
-      if (!utxo.scriptpubkey && !utxo.txhash) {
-        return;
-      }
       const prevout = utxo.scriptpubkey
         ? {
             witnessUtxo: {

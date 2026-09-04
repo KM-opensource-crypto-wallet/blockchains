@@ -51,6 +51,29 @@ const getDomainFromUrl = url => {
   return (url || '').replace(/^[a-zA-Z]+:\/\//, '').split(/[/?#]/)[0];
 };
 
+// TON Connect sendTransaction `valid_until` is a unix timestamp in seconds
+// ("reject if older"). It becomes the wallet contract's 32-bit valid_until,
+// so a value that cannot fit that field is treated as milliseconds, which
+// some dApps send. Returns the absolute expiry to use as the transfer
+// timeout, or undefined when the request has none.
+const getTransferTimeout = validUntil => {
+  if (validUntil === undefined || validUntil === null) {
+    return undefined;
+  }
+  let expiry = Number(validUntil);
+  if (!Number.isFinite(expiry) || expiry <= 0) {
+    throw new Error(`Invalid ton_sendMessage valid_until: ${validUntil}`);
+  }
+  if (expiry > 0xffffffff) {
+    expiry = expiry / 1000;
+  }
+  expiry = Math.floor(expiry);
+  if (expiry <= Math.floor(Date.now() / 1000)) {
+    throw new Error('ton_sendMessage request expired: valid_until has passed');
+  }
+  return expiry;
+};
+
 export const TonChain = () => {
   const tonProxyBase = buildRpcProxyUrl('ton');
   const tonEndpoint = tonProxyBase
@@ -107,8 +130,20 @@ export const TonChain = () => {
       const ton_getStateInit = stateInitCell.toBoc().toString('base64');
       return {ton_getPublicKey, ton_getStateInit};
     },
-    sendRawTransaction: async ({payload, privateKey}) => {
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
       try {
+        // ton_sendMessage params follow TON Connect sendTransaction and
+        // arrive as TonSendTransactionParams[]; tolerate a bare object.
+        const request = Array.isArray(signTypeData)
+          ? signTypeData[0]
+          : signTypeData;
+        if (!Array.isArray(request?.messages) || !request.messages.length) {
+          throw new Error(
+            'Invalid ton_sendMessage request: messages are required',
+          );
+        }
+        // Reject expired requests before touching the network or seqno.
+        const timeout = getTransferTimeout(request.valid_until);
         // eslint-disable-next-line no-undef
         const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
         const wallet = WalletContractV4.create({
@@ -117,7 +152,7 @@ export const TonChain = () => {
         });
         const walletContract = tonClient().open(wallet);
         const seqno = await walletContract.getSeqno();
-        const messages = (payload?.messages || []).map(msg => {
+        const messages = request.messages.map(msg => {
           const body = msg.payload ? Cell.fromBase64(msg.payload) : undefined;
           const init = msg.stateInit
             ? loadStateInit(Cell.fromBase64(msg.stateInit).beginParse())
@@ -135,6 +170,8 @@ export const TonChain = () => {
           secretKey: keyPair.secretKey,
           seqno,
           messages,
+          // undefined keeps the SDK default (now + 60s).
+          timeout,
         });
         await walletContract.send(transfer);
         return {boc: transfer.toBoc().toString('base64')};

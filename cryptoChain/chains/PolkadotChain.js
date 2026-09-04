@@ -6,7 +6,7 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {ApiPromise, WsProvider} from '@polkadot/api';
 import {Keyring} from '@polkadot/keyring';
-import {u8aToHex, stringToU8a, u8aConcat} from '@polkadot/util';
+import {u8aToHex, u8aToU8a, u8aWrapBytes} from '@polkadot/util';
 import {decodeAddress, encodeAddress} from '@polkadot/util-crypto';
 import {PolkadotScan} from 'dok-wallet-blockchain-networks/service/PolkadotScan';
 import {
@@ -20,6 +20,56 @@ import {PolkadotHttpProvider} from 'dok-wallet-blockchain-networks/rpcUrls/polka
 const POLKADOT_BUSINESS_ERRORS = ['polkadot_receiver_should_1_dot'];
 const isPolkadotBusinessError = e =>
   POLKADOT_BUSINESS_ERRORS.includes(e?.message);
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// `send` returns the H256 codec from author.submitExtrinsic; callers may also
+// hand back a hex string or an object carrying `hash`. Check toHex before
+// `.hash`: every codec has a `.hash` getter, and it is NOT the tx hash.
+const toTxHash = transaction => {
+  if (!transaction) {
+    return undefined;
+  }
+  if (typeof transaction === 'string') {
+    return transaction;
+  }
+  if (typeof transaction.toHex === 'function') {
+    return transaction.toHex();
+  }
+  return transaction.hash;
+};
+
+// Outcome of the extrinsic at `index` from the block's system events:
+// {success: true}, {success: false, errorInfo} or undefined if neither
+// ExtrinsicSuccess nor ExtrinsicFailed was emitted for it.
+const getExtrinsicOutcome = (api, allRecords, index) => {
+  let outcome;
+  allRecords
+    .filter(
+      ({phase}) => phase.isApplyExtrinsic && phase.asApplyExtrinsic.eq(index),
+    )
+    .forEach(({event}) => {
+      if (outcome) {
+        return;
+      }
+      if (api.events.system.ExtrinsicSuccess.is(event)) {
+        outcome = {success: true};
+      } else if (api.events.system.ExtrinsicFailed.is(event)) {
+        const [dispatchError] = event.data;
+        let errorInfo;
+        if (dispatchError.isModule) {
+          // for module errors, we have the section indexed, lookup
+          const decoded = api.registry.findMetaError(dispatchError.asModule);
+          errorInfo = `${decoded.section}.${decoded.name}`;
+        } else {
+          // Other, CannotLookup, BadOrigin, no extra info
+          errorInfo = dispatchError.toString();
+        }
+        outcome = {success: false, errorInfo};
+      }
+    });
+  return outcome;
+};
 
 // Premium (secure-rpc proxy) first, then the public Asset Hub endpoints.
 const getPolkadotRpcUrls = () =>
@@ -169,12 +219,22 @@ export const PolkadotChain = () => {
           Buffer.from(privateKey, 'hex'),
         );
         const message = signTypeData?.message ?? signTypeData;
-        const wrappedMessage = u8aConcat(
-          stringToU8a('<Bytes>'),
-          stringToU8a(message),
-          stringToU8a('</Bytes>'),
-        );
-        const signature = keypair.sign(wrappedMessage);
+        const type = signTypeData?.type;
+        if (typeof message !== 'string') {
+          throw new Error(
+            'Invalid polkadot_signMessage: data must be a string',
+          );
+        }
+        // WalletConnect polkadot_signMessage (SignerPayloadRaw) sends `data`
+        // hex-encoded. For type 'bytes' (the default) the dApp has already
+        // wrapped the text in <Bytes>…</Bytes> before hex-encoding, so decode
+        // the hex and rely on u8aWrapBytes being a no-op on wrapped input
+        // (same as polkadot-js extension signRaw). A non-hex string is still
+        // UTF-8 encoded, keeping plain-text callers working. type 'payload'
+        // is transaction-like data and must be signed unwrapped.
+        const bytes = u8aToU8a(message);
+        const toSign = type === 'payload' ? bytes : u8aWrapBytes(bytes);
+        const signature = keypair.sign(toSign);
         return {signature: u8aToHex(signature)};
       } catch (e) {
         console.error('Error in polkadot signMessage', e);
@@ -347,7 +407,7 @@ export const PolkadotChain = () => {
             const receiverAmount = new BigNumber(
               resp?.data.free?.toString() || '0',
             );
-            if (receiverAmount.lt(new BigNumber(0))) {
+            if (receiverAmount.lte(new BigNumber(0))) {
               throw new Error('polkadot_receiver_should_1_dot');
             }
           }
@@ -369,64 +429,62 @@ export const PolkadotChain = () => {
         throw e;
       }
     },
-    waitForConfirmation: async () =>
-      retryFunc(async api => {
-        // no blockHash is specified, so we retrieve the latest
-        const signedBlock = await api.rpc.chain.getBlock();
-
-        // get the api and events at a specific block
-        const apiAt = await api.at(signedBlock.block.header.hash);
-        const allRecords = await apiAt.query.system.events();
-
-        let outcome;
-        // map between the extrinsics and events
-        signedBlock.block.extrinsics.forEach(
-          ({method: {method, section}}, index) => {
-            allRecords
-              // filter the specific events based on the phase and then the
-              // index of our extrinsic in the block
-              .filter(
-                ({phase}) =>
-                  phase.isApplyExtrinsic && phase.asApplyExtrinsic.eq(index),
-              )
-              // test the events against the specific types we are looking for
-              .forEach(({event}) => {
-                if (outcome) {
-                  return;
-                }
-                if (api.events.system.ExtrinsicSuccess.is(event)) {
-                  outcome = {success: true};
-                } else if (api.events.system.ExtrinsicFailed.is(event)) {
-                  const [dispatchError] = event.data;
-                  let errorInfo;
-
-                  // decode the error
-                  if (dispatchError.isModule) {
-                    // for module errors, we have the section indexed, lookup
-                    const decoded = api.registry.findMetaError(
-                      dispatchError.asModule,
-                    );
-
-                    errorInfo = `${decoded.section}.${decoded.name}`;
-                  } else {
-                    // Other, CannotLookup, BadOrigin, no extra info
-                    errorInfo = dispatchError.toString();
-                  }
-
-                  console.log(
-                    `${section}.${method}:: ExtrinsicFailed:: ${errorInfo}`,
-                  );
-                  outcome = {success: false, errorInfo};
-                }
-              });
-          },
-        );
-        if (outcome && !outcome.success) {
-          throw new Error(outcome.errorInfo);
+    // Confirms the submitted extrinsic, not "the latest block succeeded":
+    // Polkadot blocks always carry successful inherents (timestamp.set), so
+    // checking any ExtrinsicSuccess in the head block reports every transfer
+    // as confirmed, including ones that failed or were never included.
+    // Scans forward from the head at call time until a block contains our
+    // hash, then reads only that extrinsic's system events. Resolves
+    // {hash, blockHash} on ExtrinsicSuccess, {status: 'failed', err} on
+    // ExtrinsicFailed and 'pending' if not included within retries × interval,
+    // matching the shapes the send flow already handles for other chains.
+    waitForConfirmation: async ({
+      transaction,
+      interval = 6000,
+      retries = 10,
+    } = {}) => {
+      const txHash = toTxHash(transaction);
+      if (!txHash) {
+        console.error('No transaction hash found for polkadot');
+        return null;
+      }
+      // Kept outside retryFunc so an endpoint rotation resumes the scan
+      // instead of restarting from a newer head and skipping blocks.
+      let nextBlockNumber;
+      return retryFunc(async api => {
+        for (let attempt = 0; attempt < retries; attempt++) {
+          const head = (await api.rpc.chain.getHeader()).number.toNumber();
+          if (nextBlockNumber === undefined) {
+            // The extrinsic was broadcast just before this call; one block
+            // back covers an inclusion that happened in between.
+            nextBlockNumber = Math.max(head - 1, 0);
+          }
+          for (; nextBlockNumber <= head; nextBlockNumber++) {
+            const blockHash = await api.rpc.chain.getBlockHash(nextBlockNumber);
+            const signedBlock = await api.rpc.chain.getBlock(blockHash);
+            const index = signedBlock.block.extrinsics.findIndex(ext =>
+              ext.hash.eq(txHash),
+            );
+            if (index === -1) {
+              continue;
+            }
+            const apiAt = await api.at(blockHash);
+            const allRecords = await apiAt.query.system.events();
+            const outcome = getExtrinsicOutcome(api, allRecords, index);
+            if (!outcome?.success) {
+              console.log(
+                `polkadot ${txHash}:: ExtrinsicFailed:: ${outcome?.errorInfo}`,
+              );
+              return {status: 'failed', err: outcome?.errorInfo};
+            }
+            return {hash: txHash, blockHash: blockHash.toHex()};
+          }
+          if (attempt < retries - 1) {
+            await sleep(interval);
+          }
         }
-        // Resolves true when the latest block carries a successful extrinsic;
-        // like before, stays pending-shaped (undefined) when nothing matched.
-        return outcome?.success ? true : undefined;
-      }),
+        return 'pending';
+      });
+    },
   };
 };

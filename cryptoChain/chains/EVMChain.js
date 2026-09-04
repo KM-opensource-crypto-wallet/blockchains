@@ -1895,8 +1895,17 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }),
     signTypedData: async ({privateKey, signTypeData}) => {
       try {
+        // Imported keys may carry a 0x prefix (ethers accepts both), but
+        // Buffer.from(..., 'hex') stops decoding at the 'x' and would yield
+        // an empty buffer, so strip it and require a full 32-byte key.
+        const rawPrivateKey = privateKey?.toLowerCase()?.startsWith('0x')
+          ? privateKey.substring(2)
+          : privateKey;
         // eslint-disable-next-line no-undef
-        const buffer = Buffer.from(privateKey, 'hex');
+        const buffer = Buffer.from(rawPrivateKey, 'hex');
+        if (buffer.length !== 32) {
+          throw new Error('Invalid private key length for sign typed data');
+        }
         const parseData = JSON.parse(signTypeData);
         let version = 'v1';
         if (

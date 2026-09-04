@@ -122,6 +122,83 @@ describe('onSessionRequest: hedera_getNodeAddresses', () => {
     expect(showToast).not.toHaveBeenCalled();
   });
 
+  it('replies with a JSON-RPC error when fetching the node list fails', async () => {
+    mockGetNodeAddresses.mockRejectedValueOnce(new Error('mirror node down'));
+
+    await handlers.session_request(
+      sessionRequest('hedera_getNodeAddresses', undefined, 'hedera:testnet'),
+    );
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    expect(mockWalletKit.respondSessionRequest.mock.calls[0][0]).toEqual({
+      topic: 'topic-1',
+      response: {
+        id: lastId,
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'mirror node down',
+          data: {method: 'hedera_getNodeAddresses', chainId: 'hedera:testnet'},
+        },
+      },
+    });
+    expect(logWalletConnectEvent).toHaveBeenCalledWith(
+      'error',
+      'session_request.handler_error',
+      expect.objectContaining({
+        method: 'hedera_getNodeAddresses',
+        requestId: lastId,
+        message: 'mirror node down',
+      }),
+    );
+    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+  });
+
+  it('swallows a relay failure while sending that error reply, and logs it', async () => {
+    mockGetNodeAddresses.mockRejectedValueOnce(new Error('mirror node down'));
+    mockWalletKit.respondSessionRequest.mockRejectedValueOnce(
+      new Error('relay down'),
+    );
+
+    await expect(
+      handlers.session_request(
+        sessionRequest('hedera_getNodeAddresses', undefined, 'hedera:testnet'),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    expect(logWalletConnectEvent).toHaveBeenCalledWith(
+      'error',
+      'session_request.error_reply_failed',
+      expect.objectContaining({
+        method: 'hedera_getNodeAddresses',
+        requestId: lastId,
+        message: 'relay down',
+      }),
+    );
+  });
+
+  it('does not send an error reply for modal-bound methods that fail before the modal opens', async () => {
+    store.dispatch.mockImplementationOnce(() => {
+      throw new Error('store exploded');
+    });
+
+    await handlers.session_request(
+      sessionRequest(
+        'hedera_signMessage',
+        {signerAccountId: 'hedera:testnet:0.0.5', message: 'hi'},
+        'hedera:testnet',
+      ),
+    );
+
+    expect(mockWalletKit.respondSessionRequest).not.toHaveBeenCalled();
+    expect(logWalletConnectEvent).toHaveBeenCalledWith(
+      'error',
+      'session_request.handler_error',
+      expect.objectContaining({method: 'hedera_signMessage'}),
+    );
+  });
+
   it('still routes signer-bound hedera methods to the transaction modal', async () => {
     await handlers.session_request(
       sessionRequest(
@@ -241,10 +318,10 @@ describe('onSessionRequest: wallet_getCapabilities', () => {
     );
 
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
-    expect(response.result['0x1']).toEqual({atomicBatch: {supported: true}});
+    expect(response.result['0x1']).toEqual({atomic: {status: 'supported'}});
     // 0x127 = 295, Hedera's relay: no batch contract there.
     expect(response.result['0x127']).toEqual({
-      atomicBatch: {supported: false},
+      atomic: {status: 'unsupported'},
     });
   });
 });

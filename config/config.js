@@ -1430,8 +1430,8 @@ export const CHAIN_CONFIG = {
       symbol: 'DOT',
     },
     wallet_connect_key: {
-      sandbox: 'polkadot:91b171bb158e2d3848fa23a9f1c25182',
-      production: 'polkadot:91b171bb158e2d3848fa23a9f1c25182',
+      sandbox: 'polkadot:68d56f15f85d3136970ec16946040bc1',
+      production: 'polkadot:68d56f15f85d3136970ec16946040bc1',
     },
   },
   tezos: {
@@ -1991,14 +1991,6 @@ export const NON_EVM_METHOD_HANDLERS = {
   xrpl_signMessage: params => ({
     signTypeData: params?.message,
   }),
-  cosmos_signDirect: params => ({
-    finaltransactionData: params,
-    signTypeData: params,
-  }),
-  cosmos_signAmino: params => ({
-    finaltransactionData: params,
-    signTypeData: params,
-  }),
   // HIP-820 params carry `signerAccountId` as `hedera:<net>:0.0.N`; the
   // session account for the hedera namespace is `0.0.N`, so compare on that.
   hedera_signTransaction: params => ({
@@ -2051,7 +2043,11 @@ export const NON_EVM_METHOD_HANDLERS = {
     signTypeData: params,
   }),
   polkadot_signMessage: params => ({
-    signTypeData: params?.message,
+    // Spec field is `data` (SignerPayloadRaw); older dApps send `message`.
+    signTypeData: {
+      message: params?.data ?? params?.message,
+      type: params?.type,
+    },
   }),
   signPsbt: params => ({
     finaltransactionData: params,
@@ -2095,7 +2091,6 @@ const NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES = {
   stellar: 'stellar',
   xrpl: 'xrpl',
   polkadot: 'polkadot',
-  cosmos: 'cosmos',
   hedera: 'hedera',
   aptos: 'aptos',
   tezos: 'tezos',

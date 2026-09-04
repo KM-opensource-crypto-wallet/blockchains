@@ -485,12 +485,12 @@ export const SolanaChain = () => {
           const txBuffer = Buffer.from(finalPayload, 'base64');
           const versionedTransaction =
             VersionedTransaction.deserialize(txBuffer);
-          const finalTransaction = new VersionedTransaction(
-            versionedTransaction.message,
-          );
-          finalTransaction.sign([keypair]);
+          // Sign in place: rebuilding from `.message` would zero every
+          // signature slot and drop any co-signer signature the dApp already
+          // applied (partially signed multi-signer transactions).
+          versionedTransaction.sign([keypair]);
           const txHash = await solanaProvider.sendTransaction(
-            finalTransaction,
+            versionedTransaction,
             {
               skipPreflight: true,
               preflightCommitment: 'processed',

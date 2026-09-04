@@ -34,8 +34,8 @@ jest.mock('@polkadot/keyring', () => ({
 
 jest.mock('@polkadot/util', () => ({
   u8aToHex: jest.fn(),
-  stringToU8a: jest.fn(),
-  u8aConcat: jest.fn(),
+  u8aToU8a: jest.fn(),
+  u8aWrapBytes: jest.fn(),
 }));
 
 jest.mock('@polkadot/util-crypto', () => ({

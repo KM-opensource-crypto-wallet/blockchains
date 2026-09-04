@@ -182,6 +182,11 @@ const requireStringParam = (name, value) => {
   return value;
 };
 
+// HIP-820 prepends `len(message)` without defining it. The canonical
+// verifier, `verifyMessageSignature` in @hashgraph/hedera-wallet-connect,
+// uses the JS string length (UTF-16 code units), not the UTF-8 byte length,
+// so `message.length` is deliberate: switching to Buffer.byteLength would
+// break dApp-side verification of any non-ASCII message.
 const prefixMessage = message =>
   // eslint-disable-next-line no-undef
   Buffer.from(

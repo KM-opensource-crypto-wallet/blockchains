@@ -151,8 +151,8 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({
-      '0x1': {atomicBatch: {supported: true}},
-      '0xaa36a7': {atomicBatch: {supported: true}},
+      '0x1': {atomic: {status: 'supported'}},
+      '0xaa36a7': {atomic: {status: 'supported'}},
     });
     expect(showToast).not.toHaveBeenCalled();
   });

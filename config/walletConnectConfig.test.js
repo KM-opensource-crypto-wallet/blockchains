@@ -137,3 +137,31 @@ describe('EVM typed-data signer guard', () => {
     });
   });
 });
+
+describe('Polkadot WalletConnect method routing', () => {
+  it('routes polkadot_signMessage to PolkadotChain.signMessage', () => {
+    expect(WalletConnectMethods.polkadot_signMessage).toBe('signMessage');
+  });
+
+  it('passes the spec `data` field plus `type` through as signTypeData', () => {
+    const params = {
+      address: '15UyNqZ7NB1QQVpY9xv7VGwkxtvXePKihFHx8kH4VgEcS1gU',
+      data: '0x3c42797465733e68656c6c6f20776f726c643c2f42797465733e',
+      type: 'bytes',
+    };
+    expect(NON_EVM_METHOD_HANDLERS.polkadot_signMessage(params)).toEqual({
+      signTypeData: {message: params.data, type: 'bytes'},
+    });
+  });
+
+  it('falls back to the legacy `message` field when `data` is absent', () => {
+    expect(
+      NON_EVM_METHOD_HANDLERS.polkadot_signMessage({
+        address: 'addr',
+        message: '0x68656c6c6f',
+      }),
+    ).toEqual({
+      signTypeData: {message: '0x68656c6c6f', type: undefined},
+    });
+  });
+});

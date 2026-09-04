@@ -101,6 +101,13 @@ const BATCH_CAPABLE_CHAIN_IDS = new Set(
 const supportsAtomicBatch = hexChainId =>
   BATCH_CAPABLE_CHAIN_IDS.has(Number.parseInt(hexChainId, 16));
 
+// Read-only methods the handler answers itself. If one of them throws, nobody
+// else will ever reply, so the dApp would wait for the relay timeout.
+const AUTO_ANSWERED_METHODS = new Set([
+  'wallet_getCapabilities',
+  'hedera_getNodeAddresses',
+]);
+
 export const subscribeWalletConnectEvent = () => {
   let requestIds = {};
   if (!walletConnect) {
@@ -198,8 +205,14 @@ export const subscribeWalletConnectEvent = () => {
 
         const capabilities = {};
         (chainIds || []).forEach(chainId => {
+          // EIP-5792 final: `atomic.status`, not the draft `atomicBatch`.
+          // 'ready' (upgradeable via EIP-7702) never applies here.
           capabilities[chainId] = {
-            atomicBatch: {supported: supportsAtomicBatch(chainId)},
+            atomic: {
+              status: supportsAtomicBatch(chainId)
+                ? 'supported'
+                : 'unsupported',
+            },
           };
         });
 
@@ -243,6 +256,31 @@ export const subscribeWalletConnectEvent = () => {
         requestId: id,
         message: e?.message,
       });
+      if (AUTO_ANSWERED_METHODS.has(request?.method)) {
+        try {
+          await walletConnect.respondSessionRequest({
+            topic,
+            response: {
+              id,
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: e?.message || 'Internal error',
+                data: {method: request?.method, chainId: params?.chainId},
+              },
+            },
+          });
+        } catch (replyError) {
+          // The relay itself is failing; the handler error is already logged.
+          logWalletConnectEvent('error', 'session_request.error_reply_failed', {
+            method: request?.method,
+            chainId: params?.chainId,
+            topic,
+            requestId: id,
+            message: replyError?.message,
+          });
+        }
+      }
     }
   };
 

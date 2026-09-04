@@ -162,6 +162,37 @@ describe('hedera_signMessage → signMessage', () => {
     ).toBe(false);
   });
 
+  it('prefixes non-ASCII messages with the JS string length, matching @hashgraph/hedera-wallet-connect', async () => {
+    // 'é' is 1 char / 2 bytes, '漢' is 1 char / 3 bytes, '😀' is 2 UTF-16
+    // code units / 4 bytes, so string length (5) and byte length (10) differ.
+    const message = 'é漢😀!';
+    expect(message.length).not.toBe(Buffer.byteLength(message, 'utf8'));
+    const {signatureMap} = await HederaChain().signMessage({
+      signTypeData: {signerAccountId: SIGNER, message},
+      privateKey,
+    });
+    const {sigPair} = decodeSignatureMap(signatureMap);
+
+    // Same construction as verifyMessageSignature in the reference library.
+    const referencePrefixed = Buffer.from(
+      `\x19Hedera Signed Message:\n${message.length}${message}`,
+    );
+    expect(
+      key.publicKey.verify(referencePrefixed, sigPair[0].ECDSASecp256k1),
+    ).toBe(true);
+
+    // A byte-length prefix must NOT verify, or dApps would reject us.
+    const byteLengthPrefixed = Buffer.from(
+      `\x19Hedera Signed Message:\n${Buffer.byteLength(
+        message,
+        'utf8',
+      )}${message}`,
+    );
+    expect(
+      key.publicKey.verify(byteLengthPrefixed, sigPair[0].ECDSASecp256k1),
+    ).toBe(false);
+  });
+
   it('rejects a non-string message', async () => {
     await expect(
       HederaChain().signMessage({

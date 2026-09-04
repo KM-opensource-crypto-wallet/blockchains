@@ -16,6 +16,16 @@ import {
 
 // helper/index.js drags in react-native through utils/common.
 jest.mock('dok-wallet-blockchain-networks/helper', () => ({
+  // Mirrors helper/index.js: strings of 23 chars or fewer pass through,
+  // longer ones are shortened to `${first 10}...${last 10}`.
+  getCustomizePublicAddress: str => {
+    if (!str) {
+      return '';
+    }
+    return str.length <= 23
+      ? str
+      : `${str.substring(0, 10)}...${str.substring(str.length - 10)}`;
+  },
   isHederaUnactivated: coin =>
     coin?.chain_name === 'hedera' && !coin?.accountId,
 }));
