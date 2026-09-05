@@ -16,16 +16,6 @@ import {
 
 // helper/index.js drags in react-native through utils/common.
 jest.mock('dok-wallet-blockchain-networks/helper', () => ({
-  // Mirrors helper/index.js: strings of 23 chars or fewer pass through,
-  // longer ones are shortened to `${first 10}...${last 10}`.
-  getCustomizePublicAddress: str => {
-    if (!str) {
-      return '';
-    }
-    return str.length <= 23
-      ? str
-      : `${str.substring(0, 10)}...${str.substring(str.length - 10)}`;
-  },
   isHederaUnactivated: coin =>
     coin?.chain_name === 'hedera' && !coin?.accountId,
 }));
@@ -34,11 +24,18 @@ const HEDERA_KEY = IS_SANDBOX ? 'hedera:testnet' : 'hedera:mainnet';
 const HEDERA_EVM_KEY = `eip155:${CHAIN_ID.hedera}`;
 const ETH_KEY = `eip155:${CHAIN_ID.ethereum}`;
 
+// Real-length addresses: the display shortener in helper/index.js kicks in
+// above 23 chars, and the wire form must never go through it.
+const ETH_ADDRESS = '0x742d35Cc6634C0532925a3b844Bc454e4438f44e';
+const BTC_ADDRESS = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4';
+const BTC_TAPROOT_ADDRESS =
+  'bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7';
+
 const hederaCoin = {
   chain_name: 'hedera',
   symbol: 'HBAR',
   type: 'coin',
-  address: '0xabc',
+  address: ETH_ADDRESS,
   accountId: '0.0.77',
   privateKey: 'pk-hedera',
 };
@@ -46,16 +43,16 @@ const ethCoin = {
   chain_name: 'ethereum',
   symbol: 'ETH',
   type: 'coin',
-  address: '0xabc',
+  address: ETH_ADDRESS,
   privateKey: 'pk-eth',
 };
 const btcCoins = [
-  {chain_name: 'bitcoin', symbol: 'BTC', type: 'coin', address: 'bc1q...'},
+  {chain_name: 'bitcoin', symbol: 'BTC', type: 'coin', address: BTC_ADDRESS},
   {
     chain_name: 'bitcoin_taproot',
     symbol: 'BTC',
     type: 'coin',
-    address: 'bc1p...',
+    address: BTC_TAPROOT_ADDRESS,
   },
 ];
 const allCoins = [hederaCoin, ethCoin, ...btcCoins];
@@ -125,7 +122,7 @@ describe('resolveSessionChainData', () => {
       namespace: 'hedera',
       chain_name: 'hedera',
       chain_display_name: 'Hedera',
-      address: '0xabc',
+      address: ETH_ADDRESS,
       accountId: '0.0.77',
       privateKey: 'pk-hedera',
     });
@@ -134,7 +131,7 @@ describe('resolveSessionChainData', () => {
       namespace: 'eip155',
       chain_name: 'hedera',
       chain_display_name: 'Hedera EVM',
-      address: '0xabc',
+      address: ETH_ADDRESS,
       privateKey: 'pk-hedera',
     });
     expect(eth).toMatchObject({
@@ -181,8 +178,30 @@ describe('toSessionAccountsData', () => {
   it('publishes 0.0.N on the hedera namespace and 0x on eip155 for the same coin', () => {
     const accounts = toSessionAccountsData(chainData());
     expect(accounts.find(i => i.key === HEDERA_KEY).address).toBe('0.0.77');
-    expect(accounts.find(i => i.key === HEDERA_EVM_KEY).address).toBe('0xabc');
-    expect(accounts.find(i => i.key === ETH_KEY).address).toBe('0xabc');
+    expect(accounts.find(i => i.key === HEDERA_EVM_KEY).address).toBe(
+      ETH_ADDRESS,
+    );
+    expect(accounts.find(i => i.key === ETH_KEY).address).toBe(ETH_ADDRESS);
+  });
+
+  it('keeps full-length addresses: the account form is never the display-shortened one', () => {
+    const btcKey = Object.keys(
+      require('dok-wallet-blockchain-networks/config/config').config
+        .WALLET_CONNECT_SUPPORTED_CHAIN,
+    ).find(key => key.startsWith('bip122:'));
+    const accounts = toSessionAccountsData(
+      resolveSessionChainData({
+        requiredChains: [ETH_KEY, btcKey],
+        optionalChains: [],
+        allCoins,
+        bitcoinAddressType: 'bitcoin_taproot',
+      }),
+    );
+    expect(accounts.find(i => i.key === ETH_KEY).address).toBe(ETH_ADDRESS);
+    expect(accounts.find(i => i.key === btcKey).address).toBe(
+      BTC_TAPROOT_ADDRESS,
+    );
+    accounts.forEach(i => expect(i.address).not.toContain('...'));
   });
 
   it('drops only the native Hedera entry when the account is not yet created', () => {
@@ -226,20 +245,48 @@ describe('buildSessionNamespaces', () => {
       },
       eip155: {
         chains: [HEDERA_EVM_KEY, ETH_KEY],
-        accounts: [`${HEDERA_EVM_KEY}:0xabc`, `${ETH_KEY}:0xabc`],
+        accounts: [
+          `${HEDERA_EVM_KEY}:${ETH_ADDRESS}`,
+          `${ETH_KEY}:${ETH_ADDRESS}`,
+        ],
         methods: ['personal_sign', 'eth_sendTransaction'],
         events: ['chainChanged'],
       },
     });
   });
 
+  it('builds CAIP-10 accounts from the full address', () => {
+    const btcKey = Object.keys(
+      require('dok-wallet-blockchain-networks/config/config').config
+        .WALLET_CONNECT_SUPPORTED_CHAIN,
+    ).find(key => key.startsWith('bip122:'));
+    const sessionChainData = toSessionAccountsData(
+      resolveSessionChainData({
+        requiredChains: [ETH_KEY, btcKey],
+        optionalChains: [],
+        allCoins,
+        bitcoinAddressType: 'bitcoin',
+      }),
+    );
+    const {namespaces} = buildSessionNamespaces({
+      requiredNamespaces: {
+        eip155: {chains: [ETH_KEY], methods: ['personal_sign'], events: []},
+        bip122: {chains: [btcKey], methods: ['signMessage'], events: []},
+      },
+      optionalNamespaces: {},
+      sessionChainData,
+    });
+    expect(namespaces.eip155.accounts).toEqual([`${ETH_KEY}:${ETH_ADDRESS}`]);
+    expect(namespaces.bip122.accounts).toEqual([`${btcKey}:${BTC_ADDRESS}`]);
+  });
+
   it('omits an optional namespace that ends up with no accounts', () => {
     const {namespaces} = buildSessionNamespaces({
       ...dualProposal,
-      sessionChainData: [{key: ETH_KEY, address: '0xabc'}],
+      sessionChainData: [{key: ETH_KEY, address: ETH_ADDRESS}],
     });
     expect(namespaces.hedera).toBeUndefined();
-    expect(namespaces.eip155.accounts).toEqual([`${ETH_KEY}:0xabc`]);
+    expect(namespaces.eip155.accounts).toEqual([`${ETH_KEY}:${ETH_ADDRESS}`]);
     expect(namespaces.eip155.chains).toEqual([ETH_KEY]);
   });
 
@@ -276,13 +323,16 @@ describe('buildSessionNamespaces', () => {
         },
       },
       sessionChainData: [
-        {key: ETH_KEY, address: '0xabc'},
-        {key: HEDERA_EVM_KEY, address: '0xabc'},
+        {key: ETH_KEY, address: ETH_ADDRESS},
+        {key: HEDERA_EVM_KEY, address: ETH_ADDRESS},
       ],
     });
     expect(namespaces.eip155).toEqual({
       chains: [ETH_KEY, HEDERA_EVM_KEY],
-      accounts: [`${ETH_KEY}:0xabc`, `${HEDERA_EVM_KEY}:0xabc`],
+      accounts: [
+        `${ETH_KEY}:${ETH_ADDRESS}`,
+        `${HEDERA_EVM_KEY}:${ETH_ADDRESS}`,
+      ],
       methods: ['personal_sign', 'eth_signTypedData_v4'],
       events: ['chainChanged', 'accountsChanged'],
     });

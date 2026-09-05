@@ -151,6 +151,72 @@ const signMessageBip322Simple = ({message, keyPair, address, network}) => {
   return encodeWitnessStack(input.witness).toString('base64');
 };
 
+// dApp PSBT builders (AppKit Lab's createSignPSBTParams among them) attach
+// only a witnessUtxo to every input, whatever the address type. bitcoinjs
+// refuses to sign a P2PKH input without the full previous transaction and a
+// P2SH-P2WPKH input without its redeemScript, and needs the internal key on
+// P2TR inputs, so fill in what our own address type requires before signing.
+// The previous transactions come from the same source the send flow uses;
+// bitcoinjs then verifies each one hashes to the input's prevout.
+const completePsbtInputs = async ({
+  psbtObj,
+  inputs,
+  chain_name,
+  keyPair,
+  network,
+  address,
+}) => {
+  const missingPrevTx = [];
+  inputs.forEach(({index}) => {
+    const input = psbtObj.data.inputs[index];
+    if (!input) {
+      return;
+    }
+    const extras = getPsbtInputExtras(chain_name, keyPair, network);
+    const missing = Object.fromEntries(
+      Object.entries(extras).filter(([field]) => !input[field]),
+    );
+    if (Object.keys(missing).length) {
+      psbtObj.updateInput(index, missing);
+    }
+    if (chain_name === 'bitcoin_legacy' && !input.nonWitnessUtxo) {
+      const txInput = psbtObj.txInputs[index];
+      missingPrevTx.push({
+        index,
+        // eslint-disable-next-line no-undef
+        txid: Buffer.from(txInput.hash).reverse().toString('hex'),
+        vout: txInput.index,
+      });
+    }
+  });
+  if (!missingPrevTx.length) {
+    return;
+  }
+  const resp = await fetchBitcoinTransactionDetails({
+    transaction_data: missingPrevTx.map(({txid, vout}) => ({
+      txid,
+      vout,
+      fromAddress: address,
+    })),
+  });
+  const rows = Array.isArray(resp?.data) ? resp.data : [];
+  missingPrevTx.forEach(({index, txid, vout}) => {
+    const row = rows.find(
+      item =>
+        item?.txid === txid && Number(item?.vout) === vout && item?.txhash,
+    );
+    if (!row) {
+      throw new Error(
+        `PSBT input #${index} spends a legacy (P2PKH) output and needs its previous transaction, which could not be fetched`,
+      );
+    }
+    psbtObj.updateInput(index, {
+      // eslint-disable-next-line no-undef
+      nonWitnessUtxo: Buffer.from(row.txhash, 'hex'),
+    });
+  });
+};
+
 // Indexes of PSBT inputs spendable by `address`: the input's witnessUtxo
 // script, or the referenced nonWitnessUtxo output's script, equals ours.
 const findOwnedInputs = (psbtObj, address, network) => {
@@ -295,18 +361,16 @@ export const BitcoinChain = () => {
         if (!inputs.length) {
           throw new Error('No PSBT inputs belong to this wallet');
         }
+        await completePsbtInputs({
+          psbtObj,
+          inputs,
+          chain_name,
+          keyPair,
+          network,
+          address,
+        });
         const signer = getSignerForChain(chain_name, keyPair);
         inputs.forEach(input => {
-          // Key-path taproot signing needs the internal key on the input;
-          // some dApps build P2TR inputs without it.
-          if (
-            isTaprootChain(chain_name) &&
-            !psbtObj.data.inputs[input.index]?.tapInternalKey
-          ) {
-            psbtObj.updateInput(input.index, {
-              tapInternalKey: toXOnlyPubkey(keyPair),
-            });
-          }
           psbtObj.signInput(input.index, signer, input.sighashTypes);
           psbtObj.finalizeInput(input.index);
         });

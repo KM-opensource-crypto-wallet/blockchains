@@ -1,6 +1,7 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
+import {ensureEccInit} from 'dok-wallet-blockchain-networks/service/bitcoinEcc';
 
 /**
  * Electrum protocol client (the same data source BlueWallet uses).
@@ -332,6 +333,10 @@ export class ElectrumClient {
 
 // Electrum identifies outputs by scripthash: sha256(scriptPubKey), reversed.
 export const addressToScripthash = address => {
+  // Taproot (bech32m) output scripts go through payments.p2tr, which needs
+  // the secp256k1 backend registered; the other script types do not, so a
+  // cold-start balance refresh was the first taproot caller and threw.
+  ensureEccInit();
   const script = bitcoin.address.toOutputScript(
     address,
     config.BITCOIN_NETWORK_STRING,

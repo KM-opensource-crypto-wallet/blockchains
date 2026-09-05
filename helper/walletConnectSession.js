@@ -10,10 +10,7 @@
  */
 import {normalizeNamespaces} from '@walletconnect/utils';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
-import {
-  getCustomizePublicAddress,
-  isHederaUnactivated,
-} from 'dok-wallet-blockchain-networks/helper';
+import {isHederaUnactivated} from 'dok-wallet-blockchain-networks/helper';
 
 // bip122 has one chain id for every Bitcoin address type, so the type is the
 // user's choice in the modal rather than the dApp's.
@@ -97,12 +94,12 @@ export const resolveSessionChainData = ({
 /**
  * The account string a namespace expects: Hedera dApps address accounts as
  * `hedera:<net>:0.0.N`, everything else (including Hedera's eip155 relay) as
- * the coin address.
+ * the coin address. This is the wire form that becomes the CAIP-10 account
+ * and the per-session walletData address, so it is never shortened; callers
+ * that display it apply getCustomizePublicAddress themselves.
  */
 export const getSessionAccountAddress = entry =>
-  entry?.namespace === 'hedera'
-    ? entry?.accountId
-    : getCustomizePublicAddress(entry?.address);
+  entry?.namespace === 'hedera' ? entry?.accountId : entry?.address;
 
 const isUnservable = entry =>
   entry.namespace === 'hedera' && isHederaUnactivated(entry);

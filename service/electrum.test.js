@@ -684,3 +684,35 @@ describe('ELECTRUM_QUERIES registry', () => {
     });
   });
 });
+
+describe('addressToScripthash', () => {
+  // bitcoinjs routes bech32m (v1 / taproot) addresses through payments.p2tr,
+  // which throws unless initEccLib has run. A balance refresh is the first
+  // thing that touches these addresses on a cold start, so the module must
+  // not rely on some other code path having initialised ECC first.
+  it('hashes a taproot address without a prior ECC init', () => {
+    jest.isolateModules(() => {
+      const {
+        addressToScripthash,
+      } = require('dok-wallet-blockchain-networks/service/electrum');
+      // BIP-86 test vector, change #0 (m/86'/0'/0'/1/0).
+      expect(
+        addressToScripthash(
+          'bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7',
+        ),
+      ).toBe(
+        '34bf85ef0d112a3f0b699df256ed691d377cfcb47eb9fbdf0876766862bedbc9',
+      );
+    });
+  });
+
+  it('still hashes a P2WPKH address', () => {
+    const {
+      addressToScripthash,
+    } = require('dok-wallet-blockchain-networks/service/electrum');
+    // BIP-173 example address; sha256(0014 751e76e8199196d454941c45d1b3a323f1433bd6), reversed.
+    expect(
+      addressToScripthash('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'),
+    ).toMatch(/^[0-9a-f]{64}$/);
+  });
+});

@@ -4,6 +4,7 @@ import {BIP32Factory} from 'bip32';
 import {toXOnly} from 'bitcoinjs-lib/src/psbt/bip371';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {mergeUniqueAccounts} from 'dok-wallet-blockchain-networks/helper';
+import {ensureEccInit} from 'dok-wallet-blockchain-networks/service/bitcoinEcc';
 
 /**
  * BIP44/49/84/86 HD address helpers.
@@ -34,15 +35,8 @@ const LEGACY_WINDOW_START = 2;
 
 const bip32 = BIP32Factory(ecc);
 
-// bitcoinjs-lib needs the secp256k1 backend registered before any taproot
-// (p2tr) call; idempotent, so every entry point may call it.
-let eccInitDone = false;
-export const ensureEccInit = () => {
-  if (!eccInitDone) {
-    bitcoin.initEccLib(ecc);
-    eccInitDone = true;
-  }
-};
+// Re-exported so existing callers keep one import site for HD helpers.
+export {ensureEccInit};
 
 /**
  * One row per bitcoin address type (chain_name): BIP purpose, SLIP-132
