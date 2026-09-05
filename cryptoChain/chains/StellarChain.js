@@ -6,6 +6,7 @@ import BigNumber from 'bignumber.js';
 import StellarHDWallet from 'stellar-hd-wallet';
 import axios from 'axios';
 import qs from 'qs';
+import {sha256} from 'js-sha256';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   getExplorerTxUrl,
@@ -44,6 +45,78 @@ export const StellarChain = () => {
         address: wallet.publicKey(),
         privateKey: privateKey,
       };
+    },
+    personalSign: ({signTypeData, privateKey}) => {
+      try {
+        const xdr = signTypeData;
+        if (!xdr || typeof xdr !== 'string') {
+          throw new Error('Invalid or missing Stellar XDR in signing request');
+        }
+        const keypair = StellarSdk.Keypair.fromSecret(privateKey);
+        const transaction = StellarSdk.TransactionBuilder.fromXDR(
+          xdr,
+          config.STELLAR_NETWORK,
+        );
+        transaction.sign(keypair);
+        return {signedXDR: transaction.toEnvelope().toXDR('base64')};
+      } catch (e) {
+        console.error('Error in stellar signXDR', e);
+        throw e;
+      }
+    },
+    // SEP-0053: signature = ed25519_sign(SHA256("Stellar Signed Message:\n" + message))
+    signMessage: ({signTypeData, privateKey}) => {
+      try {
+        const message = signTypeData;
+        if (!message || typeof message !== 'string') {
+          throw new Error(
+            'Invalid or missing message in Stellar signing request',
+          );
+        }
+        const keypair = StellarSdk.Keypair.fromSecret(privateKey);
+        const prefix = 'Stellar Signed Message:\n';
+        // eslint-disable-next-line no-undef
+        const prefixBuffer = Buffer.from(prefix, 'utf8');
+        // eslint-disable-next-line no-undef
+        const messageBuffer = Buffer.from(message, 'utf8');
+        // eslint-disable-next-line no-undef
+        const payload = Buffer.concat([prefixBuffer, messageBuffer]);
+        // eslint-disable-next-line no-undef
+        const hash = Buffer.from(sha256.array(payload));
+        const signature = keypair.sign(hash);
+        return {
+          signature: signature.toString('base64'),
+          signerAddress: keypair.publicKey(),
+        };
+      } catch (e) {
+        console.error('Error in stellar signMessage', e);
+        throw e;
+      }
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        const payload = signTypeData;
+        if (!payload || typeof payload !== 'string') {
+          throw new Error('Invalid or missing Stellar XDR in signing request');
+        }
+        const keypair = StellarSdk.Keypair.fromSecret(privateKey);
+        const transaction = StellarSdk.TransactionBuilder.fromXDR(
+          payload,
+          config.STELLAR_NETWORK,
+        );
+        transaction.sign(keypair);
+        await stellarProvider.submitTransaction(transaction);
+        return {status: 'success'};
+      } catch (e) {
+        const resultCodes = e?.response?.data?.extras?.result_codes;
+        console.error('Error in stellar signAndSubmitXDR', resultCodes ?? e);
+        if (resultCodes) {
+          throw new Error(
+            `Stellar transaction rejected: ${JSON.stringify(resultCodes)}`,
+          );
+        }
+        throw e;
+      }
     },
     getBalance: async ({address}) => {
       try {

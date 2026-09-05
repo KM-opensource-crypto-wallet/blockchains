@@ -70,13 +70,23 @@ import {
   SWAP_QUOTE_EXPIRED_ERROR,
   MORALIS_CHAIN_TO_CHAIN,
   NFT_SUPPORTED_CHAIN,
+  HEDERA_USER_MESSAGES,
 } from 'dok-wallet-blockchain-networks/helper';
 import {derivePrivateKeyForPath} from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
+import {
+  getWalletConnectExecutor,
+  resolveWalletConnectCoin,
+  toWalletConnectError,
+} from 'dok-wallet-blockchain-networks/helper/walletConnectCoin';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  config,
+  WalletConnectMethods,
+} from 'dok-wallet-blockchain-networks/config/config';
+// import {ETH_WALLET_SEND_CALLS} from 'dok-wallet-blockchain-networks/service/walletConnect/etherWalletConnect';
 import BigNumber from 'bignumber.js';
 import {
   addCustomDeriveAddressToWallet,
@@ -96,6 +106,7 @@ import {getIsMaxWalletLimitReached} from 'dok-wallet-blockchain-networks/redux/c
 import {clearTransactionsForSelectedChain} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
+const ETH_WALLET_SEND_CALLS = 'wallet_sendCalls';
 const getUniqueAccounts = (oldAccounts, newAccounts) => {
   if (!Array.isArray(oldAccounts) && Array.isArray(newAccounts)) {
     return newAccounts;
@@ -146,6 +157,7 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
       if (!chainWallets[item.chain_name]) {
         chainWallets[item.chain_name] = {
           address: item?.address,
+          accountId: item?.accountId,
           privateKey: item?.privateKey,
           publicKey: item?.publicKey,
           extendedPublicKey: item?.extendedPublicKey,
@@ -494,6 +506,7 @@ export const addToken = createAsyncThunk(
       ...tokenData,
       isInWallet: true,
       address: nativeCoin.address,
+      accountId: nativeCoin.accountId,
       privateKey: nativeCoin.privateKey,
       publicKey: nativeCoin.publicKey,
       phrase: nativeCoin.phrase,
@@ -565,6 +578,25 @@ export const refreshCoins = createAsyncThunk(
           );
         }),
       );
+      // A Hedera coin saved by an older build as `0.0.N` is migrated to its
+      // EVM address on the next refresh; the backend keys coins by address,
+      // so re-register it.
+      const upgradedCoins = resp.filter(
+        (coin, index) =>
+          coin?.chain_name === 'hedera' &&
+          coin?.address &&
+          filterCoins[index]?.address &&
+          coin.address !== filterCoins[index].address,
+      );
+      if (upgradedCoins.length && currentWallet?.clientId) {
+        const masterClientId = getMasterClientId(currentState);
+        registerUserAPI({
+          coins: upgradedCoins,
+          clientId: currentWallet.clientId,
+          masterClientId,
+          is_imported: currentWallet?.isBackedup,
+        });
+      }
       return {coinData: resp, currentWalletClientId};
     } catch (e) {
       console.error('Error in refreshCoins', e);
@@ -951,6 +983,216 @@ export const handleUnclaimedData = createAsyncThunk(
         type: 'errorToast',
         title: 'Something went wrong',
         message: e?.message || e,
+      });
+      return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
+    }
+  },
+);
+
+export const walletConnect = createAsyncThunk(
+  'wallets/walletConnect',
+  async (payload, thunkAPI) => {
+    const {
+      chain_name,
+      chainId,
+      expectedSignerAddress,
+      id,
+      method,
+      signTypeData,
+      topic,
+      transactionData,
+      walletAddress,
+      domain,
+      privateKey,
+    } = payload;
+    const {
+      getWalletConnect,
+    } = require('dok-wallet-blockchain-networks/service/walletconnect');
+    const connector = getWalletConnect();
+    let toastId;
+    const respondWithError = async error => {
+      await connector?.respondSessionRequest({
+        topic,
+        response: {id, jsonrpc: '2.0', error},
+      });
+    };
+    if (
+      expectedSignerAddress &&
+      walletAddress &&
+      expectedSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
+    ) {
+      const message =
+        'The dApp requested a signature from a different address than the connected wallet.';
+      console.error('Error in walletConnect', message);
+      showToast({
+        type: 'errorToast',
+        title: 'Wrong account',
+        message,
+      });
+      await connector?.respondSessionRequest({
+        topic,
+        response: {
+          id,
+          jsonrpc: '2.0',
+          error: {code: 5000, message},
+        },
+      });
+      return thunkAPI.rejectWithValue(message);
+    }
+
+    try {
+      const currentState = thunkAPI.getState();
+      const currentWallet = selectCurrentWallet(currentState);
+      // The session chain decides the coin. Never fall back to whatever coin
+      // is selected on screen: that would sign for the wrong chain.
+      const currentCoin = chain_name
+        ? resolveWalletConnectCoin({
+            walletCoins: currentWallet?.coins,
+            chain_name,
+            walletAddress,
+          })
+        : selectCurrentCoin(currentState);
+      if (!currentCoin) {
+        throw new Error(`No ${chain_name} coin in this wallet`);
+      }
+      const nativeCoin = await getNativeCoin(
+        currentState,
+        currentCoin,
+        currentWallet,
+      );
+      if (!nativeCoin) {
+        console.error('native coin not found');
+        return null;
+      }
+      // eip155 requests on a chain that also has a native namespace (Hedera)
+      // run on its EVM executor; everything else on the chain itself.
+      const executor = getWalletConnectExecutor(nativeCoin.chain, chainId);
+      const wcMethod = WalletConnectMethods[method];
+      const isSigningOnly = [
+        'signMessage',
+        'signRawTransaction',
+        'personalSign',
+        'signTypedData',
+        'signAllTransactions',
+        'signPsbt',
+        'getAccounts',
+      ].includes(wcMethod);
+
+      toastId = showToast({
+        type: 'progressToast',
+        title: isSigningOnly ? 'Signing request' : 'Sending transaction',
+        message: 'Please wait...',
+        autoHide: false,
+      });
+
+      let tx;
+      let batchConfirmation;
+      if (method === ETH_WALLET_SEND_CALLS) {
+        const calls = (transactionData?.batchCalls || []).map(call => ({
+          to: call.to,
+          value: call.value ? BigInt(call.value) : 0n,
+          data: call.data || '0x',
+        }));
+        if (!calls.length) {
+          throw new Error('No calls supplied');
+        }
+        const {nonce, gasFee, estimateGas, maxPriorityFeePerGas} =
+          await nativeCoin.chain.getEstimateFeeForBatchTransaction({
+            calls,
+            privateKey,
+            isFetchNonce: true,
+          });
+        const res = await nativeCoin.chain.sendBatchTransaction({
+          calls,
+          privateKey,
+          nonce,
+          gasFee,
+          estimateGas,
+          maxPriorityFeePerGas,
+        });
+        tx = getHashString(res, chain_name);
+        // Broadcast success isn't transaction success — the batch is one
+        // atomic on-chain call, so wait for it to mine before telling the
+        // dApp it succeeded, otherwise a revert gets reported as a win.
+        batchConfirmation = await nativeCoin.waitForConfirmation({
+          transaction: res,
+          interval: 5000,
+          retries: 15,
+        });
+        if (batchConfirmation?.status === 'failed') {
+          throw new Error('Your batch transaction failed on the network.');
+        }
+      } else {
+        if (typeof executor?.[wcMethod] !== 'function') {
+          throw new Error(`Unsupported WalletConnect method: ${method}`);
+        }
+        tx = await executor[wcMethod]({
+          payload,
+          chain_name,
+          chainId,
+          domain,
+          signTypeData: signTypeData,
+          privateKey: privateKey,
+        });
+      }
+
+      if (tx) {
+        await connector?.respondSessionRequest({
+          topic,
+          response: {id, result: tx, jsonrpc: '2.0'},
+        });
+        let successTitle = 'Transaction submitted';
+        let successMessage = 'Your transaction was sent successfully';
+        if (batchConfirmation === 'pending') {
+          successTitle = 'Transaction pending';
+          successMessage =
+            'Transaction is taking longer than expected. Please check again later.';
+        } else if (isSigningOnly) {
+          successTitle = 'Signed';
+          successMessage = 'The signature was returned to the dApp';
+        }
+        showToast({
+          type:
+            batchConfirmation === 'pending' ? 'warningToast' : 'successToast',
+          title: successTitle,
+          message: successMessage,
+          toastId,
+        });
+        if (
+          method === ETH_WALLET_SEND_CALLS ||
+          wcMethod === 'sendRawTransaction'
+        ) {
+          // Only an EVM hash string is a usable transaction id for the coin's
+          // own history lookup; other chains return protocol-specific objects.
+          const txHash =
+            typeof tx === 'string' && isEVMChain(chain_name) ? tx : null;
+          refreshCoinData(thunkAPI.dispatch, currentCoin, txHash);
+        }
+      } else {
+        // Otherwise the dApp's request is left unanswered forever — no
+        // result and no error were ever sent back over the session.
+        await respondWithError({
+          code: 5000,
+          message: 'Failed to obtain transaction hash',
+        });
+        showToast({
+          type: 'errorToast',
+          title: 'Transaction failed',
+          message: 'Unable to submit transaction. Please try again.',
+          toastId,
+        });
+      }
+      return tx;
+    } catch (e) {
+      console.error('Error in walletConnect', e);
+      // Chains attach a protocol error (HIP-820 code 9000 + node status) when
+      // the dApp needs more than the generic failure.
+      await respondWithError(toWalletConnectError(e));
+      showToast({
+        type: 'errorToast',
+        title: 'Transaction failed',
+        message: e?.status?.toString?.() || e?.message || 'Transaction error',
+        toastId,
       });
       return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
     }
@@ -1467,6 +1709,17 @@ export const sendFunds = createAsyncThunk(
           type: 'errorToast',
           title: 'Polkadot warning',
           message: 'Receiver address should have minimum 1 DOT',
+        });
+        return;
+      }
+      // Hedera refuses before signing with a message written for the user
+      // (account not active yet, or the ledger account is bound to another
+      // key); show it instead of the generic toast.
+      if (HEDERA_USER_MESSAGES.includes(e?.message)) {
+        showToast({
+          type: 'errorToast',
+          title: 'Hedera',
+          message: e.message,
         });
         return;
       }
@@ -2831,6 +3084,20 @@ export const walletsSlice = createSlice({
           currentWallet.chain_existing_coin,
           coinData,
         );
+        // extractChainExistingCoins never overwrites an entry; mirror the
+        // Hedera legacy-address migration and the later-assigned account id.
+        const hederaCoin = coinData.find(
+          item => item?.chain_name === 'hedera' && item?.type === 'coin',
+        );
+        const hederaExisting = currentWallet.chain_existing_coin?.hedera;
+        if (hederaCoin && hederaExisting) {
+          if (hederaCoin.address) {
+            hederaExisting.address = hederaCoin.address;
+          }
+          if (hederaCoin.accountId) {
+            hederaExisting.accountId = hederaCoin.accountId;
+          }
+        }
       }
     });
     builder.addCase(syncCoinsWithServer.fulfilled, (state, {payload}) => {

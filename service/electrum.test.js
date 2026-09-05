@@ -17,9 +17,9 @@ jest.mock('dok-wallet-blockchain-networks/service/blockChair', () => ({
 
 // Wraps an in-memory socket in a real ElectrumClient. Every query takes its
 // client explicitly, so no module-registry gymnastics are needed to inject one.
-const clientOver = socket =>
+const clientOver = (socket, server = {host: 'fake', port: 1}) =>
   new ElectrumClient({
-    servers: [{host: 'fake', port: 1}],
+    servers: [server],
     socketFactory: (_srv, onConnect) => {
       setImmediate(onConnect);
       return socket;
@@ -31,7 +31,7 @@ const clientOver = socket =>
  * batch written, tracks how many were in flight at once, and answers each
  * request by echoing its first param (or erroring when the param is 'boom').
  */
-const createFakeClient = () => {
+const createFakeClient = serverEntry => {
   const server = {batches: [], inflight: 0, maxInflight: 0};
   const handlers = {};
   const deliver = response => {
@@ -67,7 +67,7 @@ const createFakeClient = () => {
     destroy: () => {},
   };
 
-  return {client: clientOver(socket), server};
+  return {client: clientOver(socket, serverEntry), server};
 };
 
 const makeCalls = (count, boomAt = -1) =>
@@ -126,6 +126,138 @@ describe('ElectrumClient.batchRequestChunked', () => {
     expect(results[150].electrumError).toBeInstanceOf(Error);
     expect(results[149]).toBe('addr-149');
     expect(results[151]).toBe('addr-151');
+  });
+});
+
+describe('ElectrumClient per-server batch cap', () => {
+  it('caps chunk size at the server maxBatch', async () => {
+    // electrs-esplora (Blockstream) closes the socket above 20 per batch.
+    const {client, server} = createFakeClient({
+      host: 'fake',
+      port: 1,
+      maxBatch: 20,
+    });
+    const calls = makeCalls(100);
+    const results = await client.batchRequestChunked(calls, 100);
+    expect(results).toEqual(calls.map(call => call.params[0]));
+    expect(server.batches.map(batch => batch.length)).toEqual([
+      20, 20, 20, 20, 20,
+    ]);
+  });
+
+  it('keeps the requested chunk size when the server has no maxBatch', async () => {
+    const {client, server} = createFakeClient();
+    await client.batchRequestChunked(makeCalls(100), 100);
+    expect(server.batches.map(batch => batch.length)).toEqual([100]);
+  });
+});
+
+/**
+ * Multi-server harness: one fake socket per connect, scripted per server.
+ *   'ok'           handshake + batches answered normally
+ *   'closeOnBatch' handshake ok, then the socket closes when a batch arrives
+ *   'connectError' socket errors before the connect callback fires
+ */
+const createFailoverHarness = behaviours => {
+  const servers = behaviours.map((_b, i) => ({host: `srv${i}`, port: 1}));
+  const factoryCalls = [];
+  const sockets = [];
+  const socketFactory = (server, onConnect) => {
+    factoryCalls.push(server.host);
+    const behaviour = behaviours[servers.indexOf(server)];
+    const handlers = {};
+    const socket = {
+      on: (event, fn) => {
+        (handlers[event] = handlers[event] || []).push(fn);
+      },
+      emit: (event, ...args) =>
+        (handlers[event] || []).forEach(fn => fn(...args)),
+      write: line => {
+        const payload = JSON.parse(line);
+        if (!Array.isArray(payload)) {
+          setImmediate(() =>
+            socket.emit(
+              'data',
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: payload.id,
+                result: ['fake', '1.4'],
+              }) + '\n',
+            ),
+          );
+          return;
+        }
+        if (behaviour === 'closeOnBatch') {
+          setImmediate(() => socket.emit('close'));
+          return;
+        }
+        setImmediate(() =>
+          socket.emit(
+            'data',
+            JSON.stringify(
+              payload.map(item => ({
+                jsonrpc: '2.0',
+                id: item.id,
+                result: item.params?.[0],
+              })),
+            ) + '\n',
+          ),
+        );
+      },
+      destroy: () => {},
+    };
+    sockets.push(socket);
+    if (behaviour === 'connectError') {
+      setImmediate(() => socket.emit('error', new Error('ECONNREFUSED')));
+    } else {
+      setImmediate(onConnect);
+    }
+    return socket;
+  };
+  return {
+    client: new ElectrumClient({servers, socketFactory}),
+    factoryCalls,
+    sockets,
+  };
+};
+
+describe('ElectrumClient failover', () => {
+  it('rotates to the next server when the live socket closes with requests pending', async () => {
+    const {client, factoryCalls} = createFailoverHarness([
+      'closeOnBatch',
+      'ok',
+    ]);
+    await expect(client.batchRequestChunked(makeCalls(3))).rejects.toThrow(
+      'Electrum connection closed',
+    );
+    await expect(client.batchRequestChunked(makeCalls(3))).resolves.toEqual([
+      'addr-0',
+      'addr-1',
+      'addr-2',
+    ]);
+    expect(factoryCalls).toEqual(['srv0', 'srv1']);
+  });
+
+  it('does not rotate on an idle close', async () => {
+    const {client, factoryCalls, sockets} = createFailoverHarness(['ok', 'ok']);
+    await client.batchRequestChunked(makeCalls(2));
+    sockets[0].emit('close');
+    await client.batchRequestChunked(makeCalls(2));
+    expect(factoryCalls).toEqual(['srv0', 'srv0']);
+  });
+
+  it('rotates exactly once per handshake failure', async () => {
+    const {client, factoryCalls} = createFailoverHarness([
+      'connectError',
+      'ok',
+      'ok',
+    ]);
+    await expect(client.batchRequestChunked(makeCalls(2))).resolves.toEqual([
+      'addr-0',
+      'addr-1',
+    ]);
+    // A double increment would skip srv1 and land on srv2.
+    expect(factoryCalls).toEqual(['srv0', 'srv1']);
   });
 });
 
@@ -550,5 +682,37 @@ describe('ELECTRUM_QUERIES registry', () => {
       // (client, payload) — the client is always explicit, never a singleton.
       expect(fn.length).toBeGreaterThanOrEqual(1);
     });
+  });
+});
+
+describe('addressToScripthash', () => {
+  // bitcoinjs routes bech32m (v1 / taproot) addresses through payments.p2tr,
+  // which throws unless initEccLib has run. A balance refresh is the first
+  // thing that touches these addresses on a cold start, so the module must
+  // not rely on some other code path having initialised ECC first.
+  it('hashes a taproot address without a prior ECC init', () => {
+    jest.isolateModules(() => {
+      const {
+        addressToScripthash,
+      } = require('dok-wallet-blockchain-networks/service/electrum');
+      // BIP-86 test vector, change #0 (m/86'/0'/0'/1/0).
+      expect(
+        addressToScripthash(
+          'bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7',
+        ),
+      ).toBe(
+        '34bf85ef0d112a3f0b699df256ed691d377cfcb47eb9fbdf0876766862bedbc9',
+      );
+    });
+  });
+
+  it('still hashes a P2WPKH address', () => {
+    const {
+      addressToScripthash,
+    } = require('dok-wallet-blockchain-networks/service/electrum');
+    // BIP-173 example address; sha256(0014 751e76e8199196d454941c45d1b3a323f1433bd6), reversed.
+    expect(
+      addressToScripthash('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'),
+    ).toMatch(/^[0-9a-f]{64}$/);
   });
 });

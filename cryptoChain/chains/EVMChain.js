@@ -1,4 +1,5 @@
 import {ethers, FetchRequest, JsonRpcProvider, Transaction} from 'ethers';
+import {signTypedData as metamaskSignTypedData} from '@metamask/eth-sig-util';
 import {showToast} from 'utils/toast';
 import {
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
@@ -1833,6 +1834,95 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error(`error getting token transactions for ether ${e}`);
         return [];
+      }
+    },
+    signRawTransaction: async ({payload, privateKey}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const walletSigner = new ethers.Wallet(privateKey).connect(
+            evmProvider,
+          );
+          const transactionData = payload?.transactionData || {};
+          return await walletSigner.signTransaction({
+            from: transactionData.from,
+            to: transactionData.to,
+            data: transactionData.data,
+            nonce: transactionData.nonce,
+            value: transactionData.value,
+            gasLimit: transactionData.gas,
+            gasPrice: transactionData.gasPrice,
+          });
+        } catch (e) {
+          const {reason} = await errorDecoder.decode(e);
+          console.error('Error in sign raw ether transaction', reason);
+          throw e;
+        }
+      }),
+    sendRawTransaction: async ({payload, privateKey}) => {
+      try {
+        const transactionData = payload?.transactionData || {};
+        const tx = {
+          from: transactionData.from,
+          to: transactionData.to,
+          data: transactionData.data,
+          nonce: transactionData.nonce,
+          value: transactionData.value,
+          gasLimit: transactionData.gas,
+          gasPrice: transactionData.gasPrice,
+        };
+        return await createSendTransaction(new ethers.Wallet(privateKey), tx);
+      } catch (e) {
+        const {reason} = await errorDecoder.decode(e);
+        console.error('Error in send raw ether transaction', reason);
+        throw e;
+      }
+    },
+    personalSign: async ({signTypeData, privateKey}) =>
+      retryFunc(async evmProvider => {
+        try {
+          const message = signTypeData;
+          const walletSigner = new ethers.Wallet(privateKey).connect(
+            evmProvider,
+          );
+          return await walletSigner.signMessage(
+            ethers.isHexString(message) ? ethers.getBytes(message) : message,
+          );
+        } catch (e) {
+          const {reason} = await errorDecoder.decode(e);
+          console.error('Error in personal sign ether transaction', reason);
+          return Promise.reject(reason);
+        }
+      }),
+    signTypedData: async ({privateKey, signTypeData}) => {
+      try {
+        // Imported keys may carry a 0x prefix (ethers accepts both), but
+        // Buffer.from(..., 'hex') stops decoding at the 'x' and would yield
+        // an empty buffer, so strip it and require a full 32-byte key.
+        const rawPrivateKey = privateKey?.toLowerCase()?.startsWith('0x')
+          ? privateKey.substring(2)
+          : privateKey;
+        // eslint-disable-next-line no-undef
+        const buffer = Buffer.from(rawPrivateKey, 'hex');
+        if (buffer.length !== 32) {
+          throw new Error('Invalid private key length for sign typed data');
+        }
+        const parseData = JSON.parse(signTypeData);
+        let version = 'v1';
+        if (
+          typeof parseData === 'object' &&
+          (parseData.types || parseData.primaryType || parseData.domain)
+        ) {
+          version = 'v4';
+        }
+        return metamaskSignTypedData({
+          privateKey: buffer,
+          data: parseData,
+          version: version.toUpperCase(),
+        });
+      } catch (e) {
+        const {reason} = await errorDecoder.decode(e);
+        console.error('Error in sign typed data transaction', reason);
+        return Promise.reject(reason);
       }
     },
     send: async ({

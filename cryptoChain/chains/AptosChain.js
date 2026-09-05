@@ -64,6 +64,16 @@ export const AptosChain = () => {
       },
     });
   };
+  const buildTransactionFromPayload = async ({sender, payload}) => {
+    return aptosProvider().transaction.build.simple({
+      sender,
+      data: {
+        function: payload?.function,
+        typeArguments: payload?.type_arguments ?? payload?.typeArguments ?? [],
+        functionArguments: payload?.arguments ?? payload?.functionArguments,
+      },
+    });
+  };
   const calculateFee = async ({transaction, privateKey}) => {
     const account = getAccountFromPrivateKey(privateKey);
     const [userTransactionResponse] =
@@ -110,6 +120,63 @@ export const AptosChain = () => {
         address: account?.accountAddress?.toString(),
         privateKey: privateKey,
       };
+    },
+    signMessage: ({signTypeData, privateKey}) => {
+      try {
+        const message = signTypeData;
+        const account = getAccountFromPrivateKey(privateKey);
+        const signature = account.sign(message);
+        return {
+          signature: signature.toString(),
+          fullMessage: message,
+          address: account.accountAddress.toString(),
+        };
+      } catch (e) {
+        console.error('Error in aptos signMessage', e);
+        throw e;
+      }
+    },
+    signRawTransaction: async ({payload, privateKey}) => {
+      try {
+        const account = getAccountFromPrivateKey(privateKey);
+        const transaction = await buildTransactionFromPayload({
+          sender: account.accountAddress,
+          payload: payload?.transactionData,
+        });
+        const senderAuthenticator =
+          account.signTransactionWithAuthenticator(transaction);
+        const {generateSignedTransaction} = getAptosSdk();
+        const signedTransaction = generateSignedTransaction({
+          transaction,
+          senderAuthenticator,
+        });
+        return {
+          // eslint-disable-next-line no-undef
+          signedTransaction: Buffer.from(signedTransaction).toString('base64'),
+        };
+      } catch (e) {
+        console.error('Error in aptos signRawTransaction', e);
+        throw e;
+      }
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        const txPayload = signTypeData?.transaction ?? signTypeData;
+        const account = getAccountFromPrivateKey(privateKey);
+        const transaction = await buildTransactionFromPayload({
+          sender: account.accountAddress,
+          payload: txPayload,
+        });
+        const committedTransaction =
+          await aptosProvider().signAndSubmitTransaction({
+            signer: account,
+            transaction,
+          });
+        return {hash: committedTransaction?.hash};
+      } catch (e) {
+        console.error('Error in aptos sendRawTransaction', e);
+        throw e;
+      }
     },
     getBalance: async ({address}) => {
       try {

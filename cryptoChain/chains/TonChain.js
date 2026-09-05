@@ -15,8 +15,15 @@ import {
   JettonMaster,
   beginCell,
   toNano,
+  Cell,
+  loadStateInit,
+  storeStateInit,
 } from '@ton/ton';
-import {keyPairFromSeed} from '@ton/crypto';
+import {keyPairFromSeed, sign} from '@ton/crypto';
+import {
+  createCellHash,
+  createTextBinaryHash,
+} from 'dok-wallet-blockchain-networks/helper/tonSignData';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {
   buildRpcProxyUrl,
@@ -38,6 +45,33 @@ const getNormalizedExtMessageHash = (walletAddress, transferBody) => {
     .endCell()
     .hash()
     .toString('hex');
+};
+
+const getDomainFromUrl = url => {
+  return (url || '').replace(/^[a-zA-Z]+:\/\//, '').split(/[/?#]/)[0];
+};
+
+// TON Connect sendTransaction `valid_until` is a unix timestamp in seconds
+// ("reject if older"). It becomes the wallet contract's 32-bit valid_until,
+// so a value that cannot fit that field is treated as milliseconds, which
+// some dApps send. Returns the absolute expiry to use as the transfer
+// timeout, or undefined when the request has none.
+const getTransferTimeout = validUntil => {
+  if (validUntil === undefined || validUntil === null) {
+    return undefined;
+  }
+  let expiry = Number(validUntil);
+  if (!Number.isFinite(expiry) || expiry <= 0) {
+    throw new Error(`Invalid ton_sendMessage valid_until: ${validUntil}`);
+  }
+  if (expiry > 0xffffffff) {
+    expiry = expiry / 1000;
+  }
+  expiry = Math.floor(expiry);
+  if (expiry <= Math.floor(Date.now() / 1000)) {
+    throw new Error('ton_sendMessage request expired: valid_until has passed');
+  }
+  return expiry;
 };
 
 export const TonChain = () => {
@@ -80,6 +114,147 @@ export const TonChain = () => {
         address: wallet?.address?.toString(),
         privateKey: privateKey,
       };
+    },
+    getSessionProperties: ({privateKey}) => {
+      // eslint-disable-next-line no-undef
+      const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
+      const wallet = WalletContractV4.create({
+        publicKey: keyPair.publicKey,
+        workchain: 0,
+      });
+      // eslint-disable-next-line no-undef
+      const ton_getPublicKey = Buffer.from(keyPair.publicKey).toString('hex');
+      const stateInitCell = beginCell()
+        .store(storeStateInit(wallet.init))
+        .endCell();
+      const ton_getStateInit = stateInitCell.toBoc().toString('base64');
+      return {ton_getPublicKey, ton_getStateInit};
+    },
+    sendRawTransaction: async ({signTypeData, privateKey}) => {
+      try {
+        // ton_sendMessage params follow TON Connect sendTransaction and
+        // arrive as TonSendTransactionParams[]; tolerate a bare object.
+        const request = Array.isArray(signTypeData)
+          ? signTypeData[0]
+          : signTypeData;
+        if (!Array.isArray(request?.messages) || !request.messages.length) {
+          throw new Error(
+            'Invalid ton_sendMessage request: messages are required',
+          );
+        }
+        // Reject expired requests before touching the network or seqno.
+        const timeout = getTransferTimeout(request.valid_until);
+        // eslint-disable-next-line no-undef
+        const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
+        const wallet = WalletContractV4.create({
+          publicKey: keyPair.publicKey,
+          workchain: 0,
+        });
+        const walletContract = tonClient().open(wallet);
+        const seqno = await walletContract.getSeqno();
+        const messages = request.messages.map(msg => {
+          const body = msg.payload ? Cell.fromBase64(msg.payload) : undefined;
+          const init = msg.stateInit
+            ? loadStateInit(Cell.fromBase64(msg.stateInit).beginParse())
+            : undefined;
+          return internal({
+            to: msg.address,
+            value: BigInt(msg.amount),
+            body,
+            init,
+            bounce: false,
+          });
+        });
+        const transfer = walletContract.createTransfer({
+          sendMode: SendMode.PAY_GAS_SEPARATELY,
+          secretKey: keyPair.secretKey,
+          seqno,
+          messages,
+          // undefined keeps the SDK default (now + 60s).
+          timeout,
+        });
+        await walletContract.send(transfer);
+        return {boc: transfer.toBoc().toString('base64')};
+      } catch (e) {
+        console.error('Error in ton sendMessage', e);
+        throw e;
+      }
+    },
+    signMessage: async ({signTypeData, privateKey, domain}) => {
+      try {
+        const data = Array.isArray(signTypeData)
+          ? signTypeData[0]
+          : signTypeData;
+        // eslint-disable-next-line no-undef
+        const keyPair = keyPairFromSeed(Buffer.from(privateKey, 'hex'));
+        const wallet = WalletContractV4.create({
+          publicKey: keyPair.publicKey,
+          workchain: 0,
+        });
+        const timestamp = Math.floor(Date.now() / 1000);
+        const parsedDomain = getDomainFromUrl(domain);
+        // Spec: when `from` is set the wallet MUST NOT sign from another
+        // address. Accept raw ("0:...") or friendly forms of our own address.
+        if (data?.from) {
+          let fromAddress;
+          try {
+            fromAddress = Address.parse(data.from);
+          } catch (e) {
+            throw new Error(`Cannot sign from invalid address ${data.from}`);
+          }
+          if (!fromAddress.equals(wallet.address)) {
+            throw new Error(
+              `Cannot sign from ${
+                data.from
+              }: connected TON address is ${wallet.address.toString()}`,
+            );
+          }
+        }
+        let messageHash;
+        if (data?.type === 'text' || data?.type === 'binary') {
+          messageHash = createTextBinaryHash({
+            type: data.type,
+            content: data.type === 'text' ? data.text : data.bytes,
+            workChain: wallet.address.workChain,
+            addressHash: wallet.address.hash,
+            domain: parsedDomain,
+            timestamp,
+          });
+        } else if (data?.type === 'cell') {
+          if (typeof data.schema !== 'string' || !data.schema) {
+            throw new Error(
+              'Invalid ton_signData cell payload: missing schema',
+            );
+          }
+          try {
+            messageHash = createCellHash({
+              schema: data.schema,
+              cell: data.cell,
+              address: wallet.address,
+              domain: parsedDomain,
+              timestamp,
+            });
+          } catch (e) {
+            throw new Error(
+              `Invalid ton_signData cell payload: ${e?.message || 'bad cell'}`,
+            );
+          }
+        } else {
+          throw new Error('Unsupported ton_signData type');
+        }
+        const signature = sign(messageHash, keyPair.secretKey);
+        return {
+          // eslint-disable-next-line no-undef
+          signature: Buffer.from(signature).toString('base64'),
+          address: wallet.address.toString(),
+          timestamp,
+          domain: parsedDomain,
+          payload: data,
+        };
+      } catch (e) {
+        console.error('Error in ton signData', e);
+        throw e;
+      }
     },
     getBalance: async ({address}) => {
       try {

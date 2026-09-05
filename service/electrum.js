@@ -1,6 +1,7 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
+import {ensureEccInit} from 'dok-wallet-blockchain-networks/service/bitcoinEcc';
 
 /**
  * Electrum protocol client (the same data source BlueWallet uses).
@@ -33,6 +34,11 @@ export class ElectrumClient {
     this.socket = null;
     this.connectPromise = null;
     this.serverIndex = 0;
+    // The server the live socket is connected to (null while connecting or
+    // disconnected). Its optional `maxBatch` caps JSON-RPC batch size: some
+    // servers (electrs-esplora, MAX_ARRAY_BATCH = 20) drop the connection above
+    // their limit instead of answering.
+    this.server = null;
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = '';
@@ -66,6 +72,7 @@ export class ElectrumClient {
       try {
         await this._connectTo(server);
         await this._send('server.version', ['dok-wallet', '1.4']);
+        this.server = server;
         return;
       } catch (e) {
         lastError = e;
@@ -124,6 +131,15 @@ export class ElectrumClient {
 
   _teardown(error) {
     const socket = this.socket;
+    // A connected server that dies with requests outstanding failed us: move
+    // on to the next one for the reconnect. An idle close (nothing pending)
+    // is benign and must not rotate away from the preferred server, and a
+    // handshake failure is already advanced by _connectWithFailover (this.server
+    // is still null at that point, so it is not counted twice here).
+    if (this.server && this.pending.size) {
+      this.serverIndex += 1;
+    }
+    this.server = null;
     this.socket = null;
     this.buffer = '';
     if (socket) {
@@ -269,15 +285,20 @@ export class ElectrumClient {
    * Results always come back in the same order as `calls`.
    */
   async batchRequestChunked(calls, chunkSize = BATCH_SIZE, opts) {
+    if (!calls.length) {
+      return [];
+    }
+    // Connect before chunking: the batch cap belongs to whichever server the
+    // failover lands on, and the workers must not race the handshake.
+    await this.connect();
+    const size = Math.min(chunkSize, this.server?.maxBatch || Infinity);
     const chunks = [];
-    for (let i = 0; i < calls.length; i += chunkSize) {
-      chunks.push(calls.slice(i, i + chunkSize));
+    for (let i = 0; i < calls.length; i += size) {
+      chunks.push(calls.slice(i, i + size));
     }
     if (chunks.length <= 1) {
-      return chunks.length ? this.batchRequest(chunks[0], opts) : [];
+      return this.batchRequest(chunks[0], opts);
     }
-    // Connect once up front so the workers don't race the failover handshake.
-    await this.connect();
     const chunkResults = new Array(chunks.length);
     let next = 0;
     let firstError = null;
@@ -312,6 +333,10 @@ export class ElectrumClient {
 
 // Electrum identifies outputs by scripthash: sha256(scriptPubKey), reversed.
 export const addressToScripthash = address => {
+  // Taproot (bech32m) output scripts go through payments.p2tr, which needs
+  // the secp256k1 backend registered; the other script types do not, so a
+  // cold-start balance refresh was the first taproot caller and threw.
+  ensureEccInit();
   const script = bitcoin.address.toOutputScript(
     address,
     config.BITCOIN_NETWORK_STRING,

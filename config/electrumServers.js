@@ -20,8 +20,14 @@ export const ELECTRUM_SERVER = {
 
   foundation: {host: 'mainnet.foundationdevices.com', port: 50002},
   bluewallet: {host: 'electrum1.bluewallet.io', port: 443},
-  blockstream: {host: 'electrum.blockstream.info', port: 50002},
+  // electrs-esplora hard-codes MAX_ARRAY_BATCH = 20 and, as deployed, closes
+  // the connection (no reply at all) on any JSON-RPC batch larger than that.
+  blockstream: {host: 'electrum.blockstream.info', port: 50002, maxBatch: 20},
 
-  testnetBlockstream: {host: 'electrum.blockstream.info', port: 60002},
+  testnetBlockstream: {
+    host: 'electrum.blockstream.info',
+    port: 60002,
+    maxBatch: 20,
+  },
   testnetAranguren: {host: 'testnet.aranguren.org', port: 51002},
 };
