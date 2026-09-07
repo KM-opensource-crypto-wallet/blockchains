@@ -1644,7 +1644,6 @@ const initialState = {
   pendingTransactions: {},
   masterClientId: null,
   failedTransaction: null,
-  scheduledPayments: {},
 };
 
 export const createIfNotExistsMasterClientId = createAsyncThunk(
@@ -2126,7 +2125,6 @@ export const walletsSlice = createSlice({
         throw new Error('wallet not available');
       }
       state.allWallets = allWallets.filter(item => item?.clientId !== clientId);
-      delete state.scheduledPayments[clientId];
     },
     deleteCoin: (state, action) => {
       const coinId = action?.payload;
@@ -2396,79 +2394,6 @@ export const walletsSlice = createSlice({
             !addressSet.has(item?.address) || item?.address === coin?.address,
         );
       });
-    },
-    addScheduledPayment(state, {payload}) {
-      const currentWallet = getCurrentWallet(state);
-      const clientId = currentWallet?.clientId;
-      if (!clientId) {
-        console.warn('No current wallet clientId found');
-        return;
-      }
-      const previousScheduledPayments = Array.isArray(
-        state.scheduledPayments[clientId],
-      )
-        ? state.scheduledPayments[clientId]
-        : [];
-      const now = Date.now();
-      state.scheduledPayments[clientId] = [
-        ...previousScheduledPayments,
-        {
-          id: payload?.id || v4(),
-          chain: payload?.chain,
-          network: payload?.network,
-          asset: payload?.asset,
-          senderAddress: payload?.senderAddress,
-          recipientAddress: payload?.recipientAddress,
-          amount: payload?.amount,
-          scheduledAt: payload?.scheduledAt,
-          status: 'scheduled',
-          recurrence: payload?.recurrence,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ];
-    },
-    updateScheduledPayment(state, {payload}) {
-      if (!payload?.id) {
-        console.warn('id payload is required for update scheduled payment');
-        return;
-      }
-      const currentWallet = getCurrentWallet(state);
-      const clientId = currentWallet?.clientId;
-      if (!clientId) {
-        console.warn('No current wallet clientId found');
-        return;
-      }
-      const previousScheduledPayments = Array.isArray(
-        state.scheduledPayments[clientId],
-      )
-        ? state.scheduledPayments[clientId]
-        : [];
-      state.scheduledPayments[clientId] = previousScheduledPayments.map(item =>
-        item?.id === payload?.id
-          ? {...item, ...payload?.changes, updatedAt: Date.now()}
-          : item,
-      );
-    },
-    removeScheduledPayment(state, {payload}) {
-      if (!payload?.id) {
-        console.warn('id payload is required for remove scheduled payment');
-        return;
-      }
-      const currentWallet = getCurrentWallet(state);
-      const clientId = currentWallet?.clientId;
-      if (!clientId) {
-        console.warn('No current wallet clientId found');
-        return;
-      }
-      const previousScheduledPayments = Array.isArray(
-        state.scheduledPayments[clientId],
-      )
-        ? state.scheduledPayments[clientId]
-        : [];
-      state.scheduledPayments[clientId] = previousScheduledPayments.filter(
-        item => item?.id !== payload?.id,
-      );
     },
     updateIsEVMAddressesAdded: (state, action) => {
       const clientId = action?.payload?.clientId;
@@ -3307,9 +3232,6 @@ export const {
   addCoinsToWallet,
   addLastCoinScanData,
   dismissCoinSyncBanner,
-  addScheduledPayment,
-  updateScheduledPayment,
-  removeScheduledPayment,
 } = walletsSlice.actions;
 // export default walletsSlice.reducer;
 // // Export the action creators
