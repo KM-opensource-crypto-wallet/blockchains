@@ -161,7 +161,11 @@ export const submitScheduledPayment = createAsyncThunk(
 
 export const schedulePaymentSlice = createSlice({
   name: 'schedulePayment',
-  initialState: {isSubmitting: false, scheduledPayments: {}},
+  initialState: {
+    isSubmitting: false,
+    pendingSubmitCount: 0,
+    scheduledPayments: {},
+  },
   reducers: {
     addScheduledPayment(state, {payload}) {
       const clientId = payload?.walletClientId;
@@ -174,6 +178,13 @@ export const schedulePaymentSlice = createSlice({
       )
         ? state.scheduledPayments[clientId]
         : [];
+      if (
+        payload?.id &&
+        previousScheduledPayments.some(item => item?.id === payload.id)
+      ) {
+        console.warn('scheduled payment with this id already exists');
+        return;
+      }
       const now = Date.now();
       state.scheduledPayments[clientId] = [
         ...previousScheduledPayments,
@@ -210,7 +221,7 @@ export const schedulePaymentSlice = createSlice({
         : [];
       state.scheduledPayments[clientId] = previousScheduledPayments.map(item =>
         item?.id === payload?.id
-          ? {...item, ...payload?.changes, updatedAt: Date.now()}
+          ? {...item, ...payload?.changes, id: item.id, updatedAt: Date.now()}
           : item,
       );
     },
@@ -237,13 +248,16 @@ export const schedulePaymentSlice = createSlice({
   extraReducers: builder => {
     builder
       .addCase(submitScheduledPayment.pending, state => {
+        state.pendingSubmitCount += 1;
         state.isSubmitting = true;
       })
       .addCase(submitScheduledPayment.fulfilled, state => {
-        state.isSubmitting = false;
+        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
+        state.isSubmitting = state.pendingSubmitCount > 0;
       })
       .addCase(submitScheduledPayment.rejected, state => {
-        state.isSubmitting = false;
+        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
+        state.isSubmitting = state.pendingSubmitCount > 0;
       })
       .addCase(deleteWallet, (state, action) => {
         delete state.scheduledPayments[action.payload];
