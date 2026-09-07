@@ -1719,26 +1719,51 @@ export const TronChain = () => {
         throw e;
       }
     },
-    signmessageV2: async ({payload, privateKey}) =>
+    signMessage: async ({signTypeData, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
+          const payload = signTypeData;
           const signature = tronWeb.trx.signMessageV2(payload, privateKey);
           return {signature};
         } catch (e) {
           console.error('Error in sign tron message', e);
-          return Promise.reject(e?.message);
+          throw e;
         }
       }),
-    signTransaction: async ({payload, privateKey}) =>
+    signRawTransaction: async ({payload, privateKey}) =>
       retryFunc(async tronWeb => {
         try {
           const transactionData = await tronWeb.trx.sign(
-            {...payload},
+            {...payload?.transactionData},
             privateKey,
           );
           return {result: transactionData};
         } catch (e) {
           console.error('Error in sign tron transaction', e);
+          throw e;
+        }
+      }),
+    sendRawTransaction: async ({payload, privateKey}) =>
+      retryFunc(async tronWeb => {
+        try {
+          const signedTransaction = await tronWeb.trx.sign(
+            {...payload?.transactionData},
+            privateKey,
+          );
+          const broadcast = await tronWeb.trx.sendRawTransaction(
+            signedTransaction,
+          );
+          if (!broadcast?.result && !broadcast?.txid) {
+            throw new Error(
+              broadcast?.code || 'Tron transaction broadcast failed',
+            );
+          }
+          return {
+            result: !!broadcast?.result,
+            txid: broadcast?.txid || signedTransaction?.txID,
+          };
+        } catch (e) {
+          console.error('Error in tron signAndSendTransaction', e);
           return Promise.reject(e?.message);
         }
       }),

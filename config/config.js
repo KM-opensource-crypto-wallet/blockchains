@@ -1145,8 +1145,8 @@ export const CHAIN_CONFIG = {
       symbol: 'SOL',
     },
     wallet_connect_key: {
-      sandbox: 'solana:8E9rvCKLFQia2Y35HXjjpWzj8weVo44K',
-      production: 'solana:4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZ',
+      sandbox: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+      production: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
     },
     stake_wiz_base_url: 'https://api.stakewiz.com',
     rpc_contract_chain_id: {
@@ -1187,6 +1187,14 @@ export const CHAIN_CONFIG = {
     private_key_list: {
       label: 'Bitcoin Native Segwit',
       order: 8,
+    },
+    wallet_connect: {
+      chain_display_name: 'Bitcoin',
+      symbol: 'BTC',
+    },
+    wallet_connect_key: {
+      sandbox: 'bip122:000000000933ea01ad0ee984209779ba',
+      production: 'bip122:000000000019d6689c085ae165831e93',
     },
     api_base_url: {
       sandbox: 'https://mempool.space/testnet/api',
@@ -1233,6 +1241,27 @@ export const CHAIN_CONFIG = {
     private_key_list: {
       label: 'Bitcoin Segwit',
       order: 7,
+    },
+  },
+  bitcoin_taproot: {
+    supported: true,
+    is_bitcoin: true,
+    chain_loader: 'bitcoin',
+    gas_currency: 'sat/B',
+    fees_options: true,
+    derivation_paths: [
+      {
+        label: "Ledger (m/86'/0'/1'/0/0)",
+        value: "m/86'/0'/1'/0/0",
+      },
+    ],
+    custom_derivation: {
+      Ledger: j => `m/86'/0'/${j}'/0/0`,
+    },
+    derive_address: true,
+    private_key_list: {
+      label: 'Bitcoin Taproot',
+      order: 9,
     },
   },
   bitcoin_lightning: {
@@ -1329,11 +1358,11 @@ export const CHAIN_CONFIG = {
     rpc_urls: {
       default: {
         mainnet: 'https://cosmos-rpc.publicnode.com:443',
-        testnet: 'https://cosmos-rpc.publicnode.com:443',
+        testnet: 'https://cosmos-testnet-rpc.itrocket.net',
       },
       rest: {
         mainnet: 'https://cosmos-rest.publicnode.com',
-        testnet: 'https://cosmos-rest.publicnode.com',
+        testnet: 'https://cosmos-testnet-api.polkachu.com',
       },
     },
     scan: {
@@ -1345,11 +1374,23 @@ export const CHAIN_CONFIG = {
       label: 'Cosmos',
       order: 9,
     },
+    wallet_connect: {
+      chain_display_name: 'Cosmos',
+      symbol: 'ATOM',
+    },
+    wallet_connect_key: {
+      sandbox: 'cosmos:provider',
+      production: 'cosmos:cosmoshub-4',
+    },
     memo_support: true,
     rest_base_url: 'https://cosmos-rest.publicnode.com',
     logo: require('assets/chain_logo/cosmos.png'),
   },
   polkadot: {
+    // Premium RPC goes through the secure-rpc proxy (/rpc/polkadot). Subscan
+    // shares that route and is told apart by the x-rpc-type: scan header,
+    // which scan_only makes the axios adapter add; plain fetch never sets it.
+    premium: {mainnet: true, testnet: true},
     scan_only: true,
     supported: true,
     chain_loader: 'polkadot',
@@ -1359,6 +1400,22 @@ export const CHAIN_CONFIG = {
         testnet: 'https://dot-rpc.stakeworld.io/assethub',
       },
     },
+    // Polkadot balances live on Asset Hub; these are public Asset Hub HTTPS
+    // JSON-RPC endpoints used when the proxy is unavailable.
+    free_rpc_urls: {
+      mainnet: [
+        'https://dot-rpc.stakeworld.io/assethub',
+        'https://polkadot-asset-hub-rpc.polkadot.io',
+        'https://statemint.api.onfinality.io/public',
+        'https://asset-hub-polkadot-rpc.n.dwellir.com',
+      ],
+      testnet: [
+        'https://dot-rpc.stakeworld.io/assethub',
+        'https://polkadot-asset-hub-rpc.polkadot.io',
+        'https://statemint.api.onfinality.io/public',
+        'https://asset-hub-polkadot-rpc.n.dwellir.com',
+      ],
+    },
     scan: {
       sandbox: 'https://polkadot.subscan.io',
       production: 'https://polkadot.subscan.io',
@@ -1367,6 +1424,14 @@ export const CHAIN_CONFIG = {
     private_key_list: {
       label: 'Polkadot',
       order: 24,
+    },
+    wallet_connect: {
+      chain_display_name: 'Polkadot',
+      symbol: 'DOT',
+    },
+    wallet_connect_key: {
+      sandbox: 'polkadot:68d56f15f85d3136970ec16946040bc1',
+      production: 'polkadot:68d56f15f85d3136970ec16946040bc1',
     },
   },
   tezos: {
@@ -1387,6 +1452,14 @@ export const CHAIN_CONFIG = {
     private_key_list: {
       label: 'Tezos',
       order: 29,
+    },
+    wallet_connect: {
+      chain_display_name: 'Tezos',
+      symbol: 'XTZ',
+    },
+    wallet_connect_key: {
+      sandbox: 'tezos:testnet',
+      production: 'tezos:mainnet',
     },
     api_base_url: {
       sandbox: 'https://api.shadownet.tzkt.io',
@@ -1422,6 +1495,14 @@ export const CHAIN_CONFIG = {
       label: 'Stellar',
       order: 28,
     },
+    wallet_connect: {
+      chain_display_name: 'Stellar',
+      symbol: 'XLM',
+    },
+    wallet_connect_key: {
+      sandbox: 'stellar:testnet',
+      production: 'stellar:pubnet',
+    },
     memo_support: true,
     logo: require('assets/chain_logo/stellar.png'),
   },
@@ -1446,6 +1527,14 @@ export const CHAIN_CONFIG = {
     tx_hash_path: 'result.hash',
     private_key_not_supported: true,
     memo_support: true,
+    wallet_connect: {
+      chain_display_name: 'Ripple',
+      symbol: 'XRP',
+    },
+    wallet_connect_key: {
+      sandbox: 'xrpl:1',
+      production: 'xrpl:0',
+    },
     logo: require('assets/chain_logo/ripple.png'),
   },
   ton: {
@@ -1467,6 +1556,14 @@ export const CHAIN_CONFIG = {
     private_key_list: {
       label: 'Ton',
       order: 30,
+    },
+    wallet_connect: {
+      chain_display_name: 'TON',
+      symbol: 'TON',
+    },
+    wallet_connect_key: {
+      sandbox: 'ton:-3',
+      production: 'ton:-239',
     },
     memo_support: true,
     logo: require('assets/chain_logo/ton.png'),
@@ -1490,6 +1587,14 @@ export const CHAIN_CONFIG = {
       label: 'Aptos',
       order: 0,
     },
+    wallet_connect: {
+      chain_display_name: 'Aptos',
+      symbol: 'APT',
+    },
+    wallet_connect_key: {
+      sandbox: 'aptos:2',
+      production: 'aptos:1',
+    },
     tx_list_not_supported: true,
     logo: require('assets/chain_logo/aptos.png'),
   },
@@ -1501,13 +1606,37 @@ export const CHAIN_CONFIG = {
       production: 'https://hashscan.io/mainnet',
       txPath: 'transaction',
     },
-    tx_hash_path: 'transactionHash',
+    // HederaChain.send returns the mirror-node style id `0.0.N-sec-nanos`,
+    // the same form the tx history uses for links.
+    tx_hash_path: 'transactionId',
     private_key_list: {
       label: 'Hedera',
       order: 16,
     },
+    wallet_connect: {
+      chain_display_name: 'Hedera',
+      symbol: 'HBAR',
+    },
+    wallet_connect_key: {
+      sandbox: 'hedera:testnet',
+      production: 'hedera:mainnet',
+    },
+    // Hedera's EVM layer (JSON-RPC relay). Only WalletConnect's eip155
+    // namespace uses it, on the same coin and ECDSA key; balances and history
+    // stay on the mirror node. Not `is_evm`: Hedera remains a native chain.
+    chain_id: {
+      sandbox: 296,
+      production: 295,
+    },
+    free_rpc_urls: {
+      mainnet: ['https://mainnet.hashio.io/api'],
+      testnet: ['https://testnet.hashio.io/api'],
+    },
+    fees_by_rpc: true,
+    wallet_connect_evm: {
+      chain_display_name: 'Hedera EVM',
+    },
     memo_support: true,
-    custom_address_not_supported: true,
     api_base_url: {
       sandbox: 'https://testnet.mirrornode.hedera.com',
       production: 'https://mainnet.mirrornode.hedera.com',
@@ -1569,19 +1698,44 @@ export const CHAIN_ID = Object.fromEntries(
     .filter(([, cfg]) => cfg.chain_id)
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.chain_id)]),
 );
+// CAIP-2 chain id → the coin that answers for it. A chain with
+// `wallet_connect_evm` is reachable under two ids (its native namespace and
+// `eip155:<chain_id>`), both served by the same coin and key; `namespace` tells
+// the WalletConnect code which account form and executor to use.
+const walletConnectChainEntry = (key, chain_name, cfg, chain_display_name) => [
+  key,
+  {
+    chain_display_name,
+    chain_name,
+    symbol: cfg.wallet_connect.symbol,
+    namespace: key.split(':')[0],
+  },
+];
 const WALLET_CONNECT_SUPPORTED_CHAIN = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
     .filter(([, cfg]) => cfg.wallet_connect)
-    .map(([chain_name, cfg]) => [
-      cfg.wallet_connect_key
-        ? forEnv(cfg.wallet_connect_key)
-        : `eip155:${forEnv(cfg.chain_id)}`,
-      {
-        chain_display_name: cfg.wallet_connect.chain_display_name,
-        chain_name,
-        symbol: cfg.wallet_connect.symbol,
-      },
-    ]),
+    .flatMap(([chain_name, cfg]) => {
+      const evmKey = () => `eip155:${forEnv(cfg.chain_id)}`;
+      const entries = [
+        walletConnectChainEntry(
+          cfg.wallet_connect_key ? forEnv(cfg.wallet_connect_key) : evmKey(),
+          chain_name,
+          cfg,
+          cfg.wallet_connect.chain_display_name,
+        ),
+      ];
+      if (cfg.wallet_connect_evm) {
+        entries.push(
+          walletConnectChainEntry(
+            evmKey(),
+            chain_name,
+            cfg,
+            cfg.wallet_connect_evm.chain_display_name,
+          ),
+        );
+      }
+      return entries;
+    }),
 );
 export const GAS_ORACLE_CONTRACT_ADDRESS = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)
@@ -1685,3 +1839,265 @@ export const SCAN_URL = Object.fromEntries(
 );
 export const APP_NAME = process?.env?.APP_NAME || '';
 export const isWeb = APP_NAME === 'dokwallet-desktop';
+
+// {dappMethod: ourMethod}
+export const WalletConnectMethods = {
+  eth_sendTransaction: 'sendRawTransaction',
+  eth_signTransaction: 'signRawTransaction',
+  personal_sign: 'personalSign',
+  eth_sign: 'personalSign',
+  eth_signTypedData: 'signTypedData',
+  eth_signTypedData_v3: 'signTypedData',
+  eth_signTypedData_v4: 'signTypedData',
+
+  solana_signAndSendTransaction: 'sendRawTransaction',
+  solana_signTransaction: 'signRawTransaction',
+  solana_signMessage: 'signMessage',
+  solana_signAllTransactions: 'signAllTransactions',
+
+  ton_sendMessage: 'sendRawTransaction',
+  ton_signData: 'signMessage',
+
+  polkadot_signTransaction: 'sendRawTransaction',
+  polkadot_signMessage: 'signMessage',
+
+  // Tron's signMessageV2 export is named with a lowercase "m" on TronChain.
+  tron_sendTransaction: 'sendRawTransaction',
+  tron_signTransaction: 'signRawTransaction',
+  tron_signMessage: 'signMessage',
+
+  stellar_signAndSubmitXDR: 'sendRawTransaction',
+  stellar_signXDR: 'personalSign',
+  stellar_signMessage: 'signMessage',
+
+  xrpl_submitTransaction: 'sendRawTransaction',
+  xrpl_signTransaction: 'signRawTransaction',
+  xrpl_signMessage: 'signMessage',
+  // RippleChain has no submit-only method; this re-signs and submits in one call.
+
+  // HIP-820. hedera_getNodeAddresses is read-only and answered in
+  // service/walletconnect.js without opening the modal.
+  hedera_signAndExecuteTransaction: 'sendRawTransaction',
+  hedera_signTransaction: 'signRawTransaction',
+  hedera_signMessage: 'signMessage',
+  hedera_executeTransaction: 'executeTransaction',
+  hedera_signAndExecuteQuery: 'signAndExecuteQuery',
+
+  aptos_signAndSubmitTransaction: 'sendRawTransaction',
+  aptos_signTransaction: 'signRawTransaction',
+  aptos_signMessage: 'signMessage',
+
+  tezos_send: 'sendRawTransaction',
+  tezos_sign: 'signMessage',
+  tezos_getAccounts: 'getAccounts',
+  // BTC
+  sendTransfer: 'sendRawTransaction',
+  signMessage: 'signMessage',
+  signPsbt: 'signPsbt',
+  getAccountAddresses: 'getAccounts',
+};
+
+// Methods answered outside WalletConnectMethods: wallet_sendCalls is batched in
+// redux/wallets/walletsSlice.js; the others are auto-answered in
+// service/walletconnect.js without user interaction.
+export const WALLET_CONNECT_SPECIAL_METHODS = [
+  'wallet_sendCalls',
+  'wallet_addEthereumChain',
+  'wallet_switchEthereumChain',
+  'wallet_getCapabilities',
+  'hedera_getNodeAddresses',
+];
+
+// Single source of truth for "can this wallet answer this method". Used to
+// reject unsupported session_requests before any UI opens.
+export const SUPPORTED_WALLET_CONNECT_METHODS = new Set([
+  ...Object.keys(WalletConnectMethods),
+  ...WALLET_CONNECT_SPECIAL_METHODS,
+]);
+
+export const isSupportedWalletConnectMethod = method =>
+  typeof method === 'string' && SUPPORTED_WALLET_CONNECT_METHODS.has(method);
+
+const hederaSignerAccountId = params =>
+  params?.signerAccountId?.split(':')?.pop();
+
+// Keyed by the raw WalletConnect method strings defined in WalletConnectMethods
+// (dok-wallet-blockchain-networks/config/config.js) for the chain-specific request shape.
+export const NON_EVM_METHOD_HANDLERS = {
+  tron_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  solana_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  tron_signTransaction: params => ({
+    finaltransactionData: params?.transaction?.transaction,
+    signTypeData: params?.transaction?.transaction,
+  }),
+  tron_sendTransaction: params => ({
+    finaltransactionData: params?.transaction?.transaction,
+    signTypeData: params?.transaction?.transaction,
+  }),
+  solana_signTransaction: params => ({
+    finaltransactionData: params?.transaction,
+    signTypeData: params,
+  }),
+  solana_signAndSendTransaction: params => ({
+    finaltransactionData: params?.transaction,
+    signTypeData: params,
+  }),
+  solana_signAllTransactions: params => ({
+    finaltransactionData: params?.transactions,
+    signTypeData: params,
+  }),
+  ton_sendMessage: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  ton_signData: params => ({
+    signTypeData: params,
+  }),
+  stellar_signXDR: params => {
+    const stellarParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarParams === 'string' ? stellarParams : stellarParams?.xdr,
+    };
+  },
+  stellar_signAndSubmitXDR: params => {
+    const stellarParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarParams === 'string' ? stellarParams : stellarParams?.xdr,
+    };
+  },
+  stellar_signMessage: params => {
+    const stellarMessageParams = Array.isArray(params) ? params[0] : params;
+    return {
+      signTypeData:
+        typeof stellarMessageParams === 'string'
+          ? stellarMessageParams
+          : stellarMessageParams?.message,
+    };
+  },
+  xrpl_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  xrpl_submitTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  xrpl_signMessage: params => ({
+    signTypeData: params?.message,
+  }),
+  // HIP-820 params carry `signerAccountId` as `hedera:<net>:0.0.N`; the
+  // session account for the hedera namespace is `0.0.N`, so compare on that.
+  hedera_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
+  }),
+  hedera_signAndExecuteTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
+  }),
+  hedera_executeTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  hedera_signAndExecuteQuery: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
+  }),
+  hedera_signMessage: params => ({
+    signTypeData: params,
+    expectedSignerAddress: hederaSignerAccountId(params),
+  }),
+  aptos_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  aptos_signAndSubmitTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  aptos_signMessage: params => ({
+    signTypeData: params,
+  }),
+  tezos_sign: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  tezos_send: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  tezos_getAccounts: params => ({
+    signTypeData: params,
+  }),
+  polkadot_signTransaction: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  polkadot_signMessage: params => ({
+    // Spec field is `data` (SignerPayloadRaw); older dApps send `message`.
+    signTypeData: {
+      message: params?.data ?? params?.message,
+      type: params?.type,
+    },
+  }),
+  signPsbt: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  sendTransfer: params => ({
+    finaltransactionData: params,
+    signTypeData: params,
+  }),
+  getAccountAddresses: params => ({
+    signTypeData: params,
+  }),
+  signMessage: params => ({
+    signTypeData: params,
+  }),
+};
+
+const evmTypedDataRequest = params => ({
+  signTypeData: params?.[1],
+  expectedSignerAddress: params?.[0],
+});
+
+export const EVM_SIGN_REQUEST_HANDLERS = {
+  personal_sign: params => ({
+    signTypeData: params?.[0],
+    expectedSignerAddress: params?.[1],
+  }),
+  eth_sign: params => ({
+    signTypeData: params?.[1],
+    expectedSignerAddress: params?.[0],
+  }),
+  eth_signTypedData: evmTypedDataRequest,
+  eth_signTypedData_v3: evmTypedDataRequest,
+  eth_signTypedData_v4: evmTypedDataRequest,
+};
+
+const NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES = {
+  tron: 'tron',
+  solana: 'solana',
+  ton: 'ton',
+  stellar: 'stellar',
+  xrpl: 'xrpl',
+  polkadot: 'polkadot',
+  hedera: 'hedera',
+  aptos: 'aptos',
+  tezos: 'tezos',
+  bip122: 'bip122',
+};
+
+// `chainId` is a CAIP-2 id such as `hedera:mainnet` or `eip155:295`.
+export const isNonEVMChain = chainId =>
+  typeof chainId === 'string' &&
+  Boolean(NON_EVM_WALET_CONNECT_CHAIN_NAMESPACES[chainId.split(':')[0]]);
