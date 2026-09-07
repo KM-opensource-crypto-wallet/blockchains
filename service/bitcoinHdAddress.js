@@ -1,11 +1,13 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
 import {BIP32Factory} from 'bip32';
+import {toXOnly} from 'bitcoinjs-lib/src/psbt/bip371';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {mergeUniqueAccounts} from 'dok-wallet-blockchain-networks/helper';
+import {ensureEccInit} from 'dok-wallet-blockchain-networks/service/bitcoinEcc';
 
 /**
- * BIP44/49/84 HD address helpers.
+ * BIP44/49/84/86 HD address helpers.
  *
  * Standard account layout (what BlueWallet / Electrum / hardware wallets
  * follow): two chains per account — external/receive `…/0/i` and
@@ -33,73 +35,66 @@ const LEGACY_WINDOW_START = 2;
 
 const bip32 = BIP32Factory(ecc);
 
-const mainNetworkKeys = {
+// Re-exported so existing callers keep one import site for HD helpers.
+export {ensureEccInit};
+
+/**
+ * One row per bitcoin address type (chain_name): BIP purpose, SLIP-132
+ * extended-key version bytes (BIP-86 taproot has no dedicated prefix and uses
+ * plain xpub/xprv), and whether the app's old nonstandard `…/i/0` scheme ever
+ * existed for it (it predates taproot support, so taproot has no legacy
+ * window to scan). Native coin classes must stay in step with the purpose.
+ */
+export const BITCOIN_ADDRESS_TYPES = {
   bitcoin: {
-    public: 0x04b24746,
-    private: 0x04b2430c,
+    purpose: 84,
+    mainnet: {public: 0x04b24746, private: 0x04b2430c}, // zpub / zprv
+    testnet: {public: 0x045f1cf6, private: 0x045f18bc}, // vpub / vprv
+    hasLegacyScheme: true,
   },
   bitcoin_segwit: {
-    public: 0x049d7cb2,
-    private: 0x049d7878,
+    purpose: 49,
+    mainnet: {public: 0x049d7cb2, private: 0x049d7878}, // ypub / yprv
+    testnet: {public: 0x044a5262, private: 0x044a4e28}, // upub / uprv
+    hasLegacyScheme: true,
   },
   bitcoin_legacy: {
-    public: 0x0488b21e,
-    private: 0x0488ade4,
+    purpose: 44,
+    mainnet: {public: 0x0488b21e, private: 0x0488ade4}, // xpub / xprv
+    testnet: {public: 0x043587cf, private: 0x04358394}, // tpub / tprv
+    hasLegacyScheme: true,
+  },
+  bitcoin_taproot: {
+    purpose: 86,
+    mainnet: {public: 0x0488b21e, private: 0x0488ade4}, // xpub / xprv
+    testnet: {public: 0x043587cf, private: 0x04358394}, // tpub / tprv
+    hasLegacyScheme: false,
   },
 };
 
-const testnetNetworkKeys = {
-  bitcoin: {
-    public: 0x045f1cf6,
-    private: 0x045f18bc,
-  },
-  bitcoin_segwit: {
-    public: 0x044a5262,
-    private: 0x044a4e28,
-  },
-  bitcoin_legacy: {
-    public: 0x043587cf,
-    private: 0x04358394,
-  },
-};
+export const isKnownBitcoinChain = chain_name =>
+  !!BITCOIN_ADDRESS_TYPES[chain_name];
+
+export const hasLegacyScheme = chain_name =>
+  !!BITCOIN_ADDRESS_TYPES[chain_name]?.hasLegacyScheme;
+
+// Unknown names keep the historical BIP84 default.
+export const getBitcoinPurpose = chain_name =>
+  BITCOIN_ADDRESS_TYPES[chain_name]?.purpose ?? 84;
 
 export const getNetworkByChainName = chain_name => {
-  return chain_name === 'bitcoin' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin,
-      })
-    : chain_name === 'bitcoin_legacy' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_legacy'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_legacy,
-      })
-    : chain_name === 'bitcoin_segwit' && IS_SANDBOX
-    ? Object.assign({}, bitcoin.networks.testnet, {
-        bip32: testnetNetworkKeys.bitcoin_segwit,
-      })
-    : chain_name === 'bitcoin_segwit'
-    ? Object.assign({}, bitcoin.networks.bitcoin, {
-        bip32: mainNetworkKeys.bitcoin_segwit,
-      })
-    : '';
+  const addressType = BITCOIN_ADDRESS_TYPES[chain_name];
+  if (!addressType) {
+    return '';
+  }
+  return IS_SANDBOX
+    ? Object.assign({}, bitcoin.networks.testnet, {bip32: addressType.testnet})
+    : Object.assign({}, bitcoin.networks.bitcoin, {bip32: addressType.mainnet});
 };
 
 export const getAccountBasePath = chain_name => {
-  const purpose =
-    chain_name === 'bitcoin_segwit'
-      ? 49
-      : chain_name === 'bitcoin_legacy'
-      ? 44
-      : 84;
   const coinType = IS_SANDBOX ? 1 : 0;
-  return `m/${purpose}'/${coinType}'/0'`;
+  return `m/${getBitcoinPurpose(chain_name)}'/${coinType}'/0'`;
 };
 
 /**
@@ -120,13 +115,22 @@ export const parsePathTail = derivePath => {
   };
 };
 
-const buildAddress = (chain_name, pubkey, network) => {
+/**
+ * Address for a compressed public key in the chain's script type: P2PKH
+ * (legacy), P2SH-P2WPKH (segwit), P2TR key-path (taproot), else P2WPKH.
+ */
+export const buildAddressByChain = (chain_name, pubkey, network) => {
   if (chain_name === 'bitcoin_legacy') {
     return bitcoin.payments.p2pkh({pubkey, network}).address;
   }
   if (chain_name === 'bitcoin_segwit') {
     const p2wpkh = bitcoin.payments.p2wpkh({pubkey, network});
     return bitcoin.payments.p2sh({redeem: p2wpkh, network}).address;
+  }
+  if (chain_name === 'bitcoin_taproot') {
+    ensureEccInit();
+    return bitcoin.payments.p2tr({internalPubkey: toXOnly(pubkey), network})
+      .address;
   }
   return bitcoin.payments.p2wpkh({pubkey, network}).address;
 };
@@ -147,7 +151,7 @@ const deriveItemsFromNode = ({
     const child = chainNode.derive(i);
     const item = {
       derivePath: `${basePath}/${chainIndex}/${i}`,
-      address: buildAddress(
+      address: buildAddressByChain(
         chain_name,
         // eslint-disable-next-line no-undef
         Buffer.from(child.publicKey),
@@ -229,10 +233,16 @@ export const getStandardChainItems = (chain_name, deriveAddresses) => {
   );
 };
 
-/** The legacy-scheme paths `${basePath}/2/0` … `${basePath}/19/0`. */
+/**
+ * The legacy-scheme paths `${basePath}/2/0` … `${basePath}/19/0`; empty for
+ * address types that never had the old scheme.
+ */
 export const buildLegacyWindowPaths = chain_name => {
-  const basePath = getAccountBasePath(chain_name);
   const paths = [];
+  if (!hasLegacyScheme(chain_name)) {
+    return paths;
+  }
+  const basePath = getAccountBasePath(chain_name);
   for (let i = LEGACY_WINDOW_START; i < LEGACY_SCHEME_WINDOW; i++) {
     paths.push(`${basePath}/${i}/0`);
   }
@@ -241,7 +251,7 @@ export const buildLegacyWindowPaths = chain_name => {
 
 /** True only for the exact legacy-window shape `${basePath}/i/0`, i=2..19. */
 export const isLegacyWindowPath = (chain_name, derivePath) => {
-  if (typeof derivePath !== 'string') {
+  if (typeof derivePath !== 'string' || !hasLegacyScheme(chain_name)) {
     return false;
   }
   const {chainIndex, addressIndex} = parsePathTail(derivePath);
@@ -314,13 +324,14 @@ export const ensureStandardAddresses = ({
   }
   const existingPaths = new Set(existing.map(item => item?.derivePath));
   const basePath = getAccountBasePath(chain_name);
+  const includeLegacy = includeLegacyWindow && hasLegacyScheme(chain_name);
   const requiredPaths = [];
   for (const chainIndex of [RECEIVE_CHAIN, CHANGE_CHAIN]) {
     for (let i = 0; i < GAP_LIMIT; i++) {
       requiredPaths.push(`${basePath}/${chainIndex}/${i}`);
     }
   }
-  if (includeLegacyWindow) {
+  if (includeLegacy) {
     requiredPaths.push(...buildLegacyWindowPaths(chain_name));
   }
   if (requiredPaths.every(path => existingPaths.has(path))) {
@@ -333,7 +344,7 @@ export const ensureStandardAddresses = ({
     const additions = [RECEIVE_CHAIN, CHANGE_CHAIN].flatMap(chainIndex =>
       deriveItemsFromNode({...common, chainIndex, start: 0, count: GAP_LIMIT}),
     );
-    if (includeLegacyWindow) {
+    if (includeLegacy) {
       for (let i = LEGACY_WINDOW_START; i < LEGACY_SCHEME_WINDOW; i++) {
         additions.push(
           ...deriveItemsFromNode({
