@@ -10,8 +10,7 @@ import {
   deleteWallet,
   resetWallet,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
-import {isNameSupportChain} from 'dok-wallet-blockchain-networks/helper';
-import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {resolveRecipientAddress} from 'dok-wallet-blockchain-networks/helper/recipientAddress';
 import {
   getCustomRPCWithData,
   selectAllCustomRpc,
@@ -42,37 +41,29 @@ export const submitScheduledPayment = createAsyncThunk(
       SCHEDULED_DATE_FORMAT,
       true,
     ).valueOf();
-    let recipientAddress = values.toAddress?.trim();
     const chainName = isEditMode
       ? editingPayment.chain
       : currentCoin?.chain_name;
+    const memo = values.memo?.trim() || '';
 
-    // SendFunds blocks an invalid recipient before it ever reaches the
-    // chain layer; a scheduled payment only gets validated here, since it
-    // is built and broadcast later with no user in the loop. An address
-    // that's malformed for this chain (e.g. wrong-length/format) can
-    // otherwise still get SCALE/RLP-encoded into a transaction and blow up
-    // fee estimation with a cryptic decode error when the reminder fires.
-    const customRPC = getCustomRPCWithData(
-      allCustomRPC,
-      chainName,
-      currentWallet?.clientId,
-    );
-    const currentChain = getChain(chainName, currentWallet?.phrase, customRPC);
-    const isValid = await currentChain.isValidAddress({
-      address: recipientAddress,
+    // The screen already validates the recipient for immediate feedback, but
+    // a scheduled payment is built and broadcast later with no user in the
+    // loop, so re-check here as a safety net. An address that's malformed
+    // for this chain (e.g. wrong-length/format) can otherwise still get
+    // SCALE/RLP-encoded into a transaction and blow up fee estimation with a
+    // cryptic decode error when the reminder fires.
+    const {resolvedAddress: recipientAddress} = await resolveRecipientAddress({
+      chain_name: chainName,
+      phrase: currentWallet?.phrase,
+      customRPC: getCustomRPCWithData(
+        allCustomRPC,
+        chainName,
+        currentWallet?.clientId,
+      ),
+      address: values.toAddress,
     });
-    if (!isValid) {
-      let validAddress = null;
-      if (isNameSupportChain(chainName)) {
-        validAddress = await currentChain?.isValidName({
-          name: recipientAddress,
-        });
-      }
-      if (!validAddress) {
-        return rejectWithValue({type: 'invalidAddress'});
-      }
-      recipientAddress = validAddress;
+    if (!recipientAddress) {
+      return rejectWithValue({type: 'invalidAddress'});
     }
 
     const recurrence = buildRecurrence(values);
@@ -128,6 +119,7 @@ export const submitScheduledPayment = createAsyncThunk(
           changes: {
             recipientAddress,
             amount: values.amount,
+            memo,
             scheduledAt,
             recurrence,
             status: 'scheduled',
@@ -149,6 +141,7 @@ export const submitScheduledPayment = createAsyncThunk(
           senderAddress: currentCoin?.address,
           recipientAddress,
           amount: values.amount,
+          memo,
           scheduledAt,
           recurrence,
         }),
@@ -196,6 +189,7 @@ export const schedulePaymentSlice = createSlice({
           senderAddress: payload?.senderAddress,
           recipientAddress: payload?.recipientAddress,
           amount: payload?.amount,
+          memo: payload?.memo || '',
           scheduledAt: payload?.scheduledAt,
           status: 'scheduled',
           recurrence: payload?.recurrence,
