@@ -291,6 +291,8 @@ const FEES_BY_RPC_CHAINS = Object.keys(CHAIN_CONFIG).filter(
 const TIMEOUT = 45000;
 // Confirmation budget when a caller passes no retries/interval.
 const DEFAULT_WAIT_MS = 60000;
+// Poll step when a caller passes a non-positive interval.
+const DEFAULT_WAIT_INTERVAL_MS = 5000;
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const premiumRpcUrl = customRpcUrl ? '' : getPremiumRPCUrl(chain_name);
@@ -2420,18 +2422,21 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       };
       const budgetMs =
         retries > 0 && interval > 0 ? retries * interval : DEFAULT_WAIT_MS;
+      // A non-positive interval (0/null) must not turn the loop into a hot
+      // spin of RPC calls for the whole budget.
+      const stepMs = interval > 0 ? interval : DEFAULT_WAIT_INTERVAL_MS;
       const deadline = Date.now() + budgetMs;
       const remaining = () => deadline - Date.now();
       const pause = async () => {
-        const ms = Math.min(interval, remaining());
+        const ms = Math.min(stepMs, remaining());
         if (ms > 0) {
           await sleep(ms);
         }
       };
+      // ethers also uses code TIMEOUT for a transport request timeout
+      // ("timeout"); only wait()'s own deadline is a verdict, anything else
+      // is transient and goes on to the receipt lookup.
       const isWaitTimeout = async e => {
-        if (e?.code === 'TIMEOUT') {
-          return true;
-        }
         const {reason} = await errorDecoder.decode(e);
         return reason === 'wait for transaction timeout';
       };

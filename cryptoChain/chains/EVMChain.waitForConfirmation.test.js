@@ -71,7 +71,11 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => ({
   isSwapBlockingError: jest.fn(() => false),
   isValidEVMTransactionHash: hash => /^0x[0-9a-fA-F]{64}$/.test(hash || ''),
   parseBalance: jest.fn(),
-  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  // Exposed on global so a test can inspect the instance the isolated
+  // module registry actually used.
+  sleep: (global.__evmSleepMock = jest.fn(
+    ms => new Promise(resolve => setTimeout(resolve, ms)),
+  )),
   SWAP_QUOTE_EXPIRED_ERROR: 'SWAP_QUOTE_EXPIRED',
   validateNumber: jest.fn(),
 }));
@@ -153,6 +157,26 @@ describe('EVMChain.waitForConfirmation', () => {
       expect(tx.wait).toHaveBeenCalledTimes(2);
     });
 
+    it('still sleeps between attempts when interval is not positive', async () => {
+      const tx = {
+        hash: HASH,
+        wait: jest
+          .fn()
+          .mockRejectedValueOnce(serverError())
+          .mockResolvedValue(RECEIPT),
+      };
+      const chain = loadChain();
+      const sleep = global.__evmSleepMock;
+      sleep.mockClear();
+      // Only the requested delay matters here, not the real wait.
+      sleep.mockImplementation(() => Promise.resolve());
+      await expect(
+        chain.waitForConfirmation({transaction: tx, interval: 0, retries: 4}),
+      ).resolves.toBe(RECEIPT);
+      expect(sleep).toHaveBeenCalled();
+      expect(sleep.mock.calls[0][0]).toBeGreaterThan(0);
+    });
+
     it('falls back to a receipt lookup on other RPC urls when wait() keeps failing', async () => {
       setProviders({
         proxy: {
@@ -173,6 +197,19 @@ describe('EVMChain.waitForConfirmation', () => {
       expect(Date.now() - started).toBeGreaterThanOrEqual(BUDGET - 1);
       expect(tx.wait.mock.calls.length).toBeGreaterThan(1);
       expect(warn).toHaveBeenCalled();
+    });
+
+    it('treats a transport TIMEOUT as transient, not as the wait deadline', async () => {
+      const transport = rpcError('timeout', 'TIMEOUT');
+      const tx = {
+        hash: HASH,
+        wait: jest
+          .fn()
+          .mockRejectedValueOnce(transport)
+          .mockResolvedValue(RECEIPT),
+      };
+      await expect(waitFor(loadChain(), tx)).resolves.toBe(RECEIPT);
+      expect(tx.wait).toHaveBeenCalledTimes(2);
     });
 
     it('reports pending on a wait() timeout', async () => {
