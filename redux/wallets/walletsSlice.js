@@ -1575,7 +1575,7 @@ export const sendFunds = createAsyncThunk(
           thunkAPI.dispatch(
             addPendingTransactions({
               key,
-              value: {hash: res.hash, date: new Date().toISOString()},
+              value: {hash: tx_hash, date: new Date().toISOString()},
             }),
           );
         }
@@ -1892,7 +1892,7 @@ export const sendPendingTransactions = createAsyncThunk(
             thunkAPI.dispatch(
               addPendingTransactions({
                 key,
-                value: {hash: res.hash, date: new Date().toISOString()},
+                value: {hash: tx_hash, date: new Date().toISOString()},
               }),
             );
           }
