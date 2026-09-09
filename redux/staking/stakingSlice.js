@@ -1,4 +1,5 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {captureError} from 'services/logger';
 import {getChain} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {countSelectedVotes, getSelectedVotes} from './stakingSelectors';
 import {
@@ -317,7 +318,14 @@ export const executeApprove = createAsyncThunk(
         };
       }
     } catch (error) {
-      console.error('Error in execute Approve', error?.message || error);
+      captureError(error, {
+        tags: {
+          area: 'staking',
+          op: 'approve',
+          chain_name: selectCurrentCoin(thunkAPI.getState())?.chain_name,
+          provider: payload?.stakingProviderName,
+        },
+      });
       return thunkAPI.rejectWithValue(error?.message || 'Something went wrong');
     }
   },
