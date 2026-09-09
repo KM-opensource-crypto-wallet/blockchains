@@ -289,6 +289,10 @@ const FEES_BY_RPC_CHAINS = Object.keys(CHAIN_CONFIG).filter(
   name => CHAIN_CONFIG[name].fees_by_rpc,
 );
 const TIMEOUT = 45000;
+// Confirmation budget when a caller passes no retries/interval.
+const DEFAULT_WAIT_MS = 60000;
+// Poll step when a caller passes a non-positive interval.
+const DEFAULT_WAIT_INTERVAL_MS = 5000;
 
 export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const premiumRpcUrl = customRpcUrl ? '' : getPremiumRPCUrl(chain_name);
@@ -2396,7 +2400,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw e;
         }
       }, 'not_found_latest_nonce'),
-    waitForConfirmation: async ({transaction, retries, interval}) => {
+    // Resolves to the receipt, {status:'failed', hash} for an on-chain revert,
+    // or 'pending' — but 'pending' only once the whole `retries × interval`
+    // budget is spent. A transient RPC failure (proxy 5xx/429, network blip)
+    // while observing the tx is retried within the budget, never reported as
+    // "took too long": the send flow shows that verdict to the user.
+    waitForConfirmation: async ({
+      transaction,
+      retries = 15,
+      interval = 5000,
+    }) => {
       const normalizeResult = result => {
         if (
           result &&
@@ -2407,85 +2420,164 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         }
         return result;
       };
-      return retryFunc(async evmProvider => {
-        if (transaction?.wait) {
-          try {
-            console.log('wait for transaction', transaction?.hash);
-            return normalizeResult(await transaction?.wait(null, 60000));
-          } catch (e) {
-            if (e?.code === 'TRANSACTION_REPLACED') {
-              if (e?.cancelled) {
-                throw new Error('transaction was cancelled');
-              }
-              // Tx was sped up (higher gas) — replacement confirmed successfully
-              return normalizeResult(e?.receipt) || 'pending';
-            }
-            if (e?.code === 'CALL_EXCEPTION' && e?.receipt) {
-              return normalizeResult(e.receipt);
-            }
-            const {reason} = await errorDecoder.decode(e);
-            if (reason === 'wait for transaction timeout') {
-              return 'pending';
-            }
-            throw new Error(reason);
+      const budgetMs =
+        retries > 0 && interval > 0 ? retries * interval : DEFAULT_WAIT_MS;
+      // A non-positive interval (0/null) must not turn the loop into a hot
+      // spin of RPC calls for the whole budget.
+      const stepMs = interval > 0 ? interval : DEFAULT_WAIT_INTERVAL_MS;
+      const deadline = Date.now() + budgetMs;
+      const remaining = () => deadline - Date.now();
+      const pause = async () => {
+        const ms = Math.min(stepMs, remaining());
+        if (ms > 0) {
+          await sleep(ms);
+        }
+      };
+      // ethers also uses code TIMEOUT for a transport request timeout
+      // ("timeout"); only wait()'s own deadline is a verdict, anything else
+      // is transient and goes on to the receipt lookup.
+      const isWaitTimeout = async e => {
+        const {reason} = await errorDecoder.decode(e);
+        return reason === 'wait for transaction timeout';
+      };
+      // A rejection from wait() is either a verdict (returned) or transient
+      // (null): keep observing within the budget.
+      const settleWaitError = async e => {
+        if (e?.code === 'TRANSACTION_REPLACED') {
+          if (e?.cancelled) {
+            throw new Error('transaction was cancelled');
           }
-        } else if (
-          typeof transaction === 'string' &&
-          isValidEVMTransactionHash(transaction)
-        ) {
-          // Hash string — transaction was already confirmed internally (e.g. AAVE staking)
-          // Just fetch the receipt to confirm it exists on-chain
-          console.log('wait for transaction by hash', transaction);
-          const receipt = await evmProvider.getTransactionReceipt(transaction);
-          if (receipt) {
-            return normalizeResult(receipt);
-          }
-          // Receipt not yet indexed, treat as pending
+          // Tx was sped up (higher gas) — replacement confirmed successfully
+          return normalizeResult(e?.receipt) || 'pending';
+        }
+        // Confirmed on-chain revert — return as failure, don't keep polling.
+        if (e?.code === 'CALL_EXCEPTION' && e?.receipt) {
+          return normalizeResult(e.receipt);
+        }
+        if (await isWaitTimeout(e)) {
           return 'pending';
-        } else if (Array.isArray(transaction)) {
-          console.log('wait multiples transaction', transaction);
-          // Handle transactions that were already in the mempool
-          let attempts = 0;
-          while (attempts < retries) {
-            try {
-              // Try to find the transaction by the hash we extracted
-              for (let i = 0; i < transaction.length; i++) {
-                const txHash = transaction[i];
-                if (isValidEVMTransactionHash(txHash)) {
-                  const tx = await evmProvider.getTransaction(txHash);
-                  if (tx) {
-                    return normalizeResult(await tx?.wait(null, 60000));
-                  }
-                }
-              }
-              if (attempts === retries - 1) {
-                return 'pending';
-              }
-            } catch (e) {
-              if (e?.code === 'TRANSACTION_REPLACED') {
-                if (e?.cancelled) {
-                  throw new Error('transaction was cancelled');
-                }
-                return normalizeResult(e?.receipt) || 'pending';
-              }
-              // Confirmed on-chain revert — return as failure, don't keep polling.
-              if (e?.code === 'CALL_EXCEPTION' && e?.receipt) {
-                return normalizeResult(e.receipt);
-              }
-              // Continue waiting
-              if (attempts === retries - 1) {
-                const {reason} = await errorDecoder.decode(e);
-                if (reason === 'wait for transaction timeout') {
-                  return 'pending';
-                }
-                throw new Error(reason);
-              }
+        }
+        return null;
+      };
+      // First non-null receipt across every RPC url (a lagging node answers
+      // null before the others); throws only when every url failed.
+      const lookupReceipt = async hash => {
+        let lastError = null;
+        let answered = false;
+        for (const url of allRpcUrls) {
+          try {
+            const receipt = await createRpcProvider(url).getTransactionReceipt(
+              hash,
+            );
+            answered = true;
+            if (receipt) {
+              return receipt;
             }
-            await sleep(interval);
-            attempts++;
+          } catch (e) {
+            lastError = e;
           }
         }
-      }, 'pending');
+        if (!answered && lastError) {
+          throw lastError;
+        }
+        return null;
+      };
+
+      if (transaction?.wait) {
+        const hash = transaction?.hash;
+        console.log('wait for transaction', hash);
+        while (remaining() > 0) {
+          try {
+            return normalizeResult(await transaction.wait(null, remaining()));
+          } catch (e) {
+            const settled = await settleWaitError(e);
+            if (settled) {
+              return settled;
+            }
+            // wait() is pinned to the provider that broadcast (ethers polls
+            // this.provider); ask the other RPC urls before trying it again.
+            console.warn(
+              'transient error while waiting for transaction',
+              hash,
+              e?.shortMessage || e?.message,
+            );
+            if (isValidEVMTransactionHash(hash)) {
+              try {
+                const receipt = await lookupReceipt(hash);
+                if (receipt) {
+                  return normalizeResult(receipt);
+                }
+              } catch (lookupError) {
+                console.warn(
+                  'receipt lookup failed',
+                  hash,
+                  lookupError?.shortMessage || lookupError?.message,
+                );
+              }
+            }
+          }
+          await pause();
+        }
+        return 'pending';
+      }
+
+      if (
+        typeof transaction === 'string' &&
+        isValidEVMTransactionHash(transaction)
+      ) {
+        // Bare hash: either already confirmed internally (e.g. AAVE staking)
+        // or just broadcast and only known via "already known" (see
+        // createSendTransaction) — so the receipt has to be polled for.
+        console.log('wait for transaction by hash', transaction);
+        while (remaining() > 0) {
+          try {
+            const receipt = await lookupReceipt(transaction);
+            if (receipt) {
+              return normalizeResult(receipt);
+            }
+          } catch (e) {
+            console.warn(
+              'receipt lookup failed',
+              transaction,
+              e?.shortMessage || e?.message,
+            );
+          }
+          await pause();
+        }
+        return 'pending';
+      }
+
+      if (Array.isArray(transaction)) {
+        console.log('wait multiples transaction', transaction);
+        // Handle transactions that were already in the mempool
+        const candidates = transaction.filter(isValidEVMTransactionHash);
+        while (remaining() > 0) {
+          try {
+            // Try to find the transaction by the hash we extracted
+            for (const txHash of candidates) {
+              const tx = await retryFunc(evmProvider =>
+                evmProvider.getTransaction(txHash),
+              );
+              if (tx) {
+                return normalizeResult(await tx.wait(null, remaining()));
+              }
+            }
+          } catch (e) {
+            const settled = await settleWaitError(e);
+            if (settled) {
+              return settled;
+            }
+            console.warn(
+              'transient error while waiting for mempool candidates',
+              e?.shortMessage || e?.message,
+            );
+          }
+          await pause();
+        }
+        return 'pending';
+      }
+
+      return 'pending';
     },
     checkDelegation: ({address}) =>
       retryFunc(
