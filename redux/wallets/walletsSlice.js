@@ -4,6 +4,7 @@ import {
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {captureError, logger} from 'services/logger';
 import {
   clearSelectedUTXOs,
   setCurrentTransferSubmitting,
@@ -298,7 +299,15 @@ export const createWallet = createAsyncThunk(
         }
       }
     } catch (error) {
-      console.error('error in createCoins', error);
+      // Only counts and flags here: walletData carries the phrase/private key.
+      captureError(error, {
+        tags: {
+          area: 'wallet',
+          op: isFromImportWallet ? 'import' : 'create',
+          with_private_key: String(isImportWalletWithPrivateKey),
+        },
+        extra: {selectedCoinsCount: walletData?.selectedCoins?.length ?? null},
+      });
       return thunkAPI.rejectWithValue(error);
       // throw error;
     }
@@ -340,6 +349,12 @@ export const createWallet = createAsyncThunk(
     }
     walletData.newStoreWallet = newStoreWallet;
     const masterClientId = getMasterClientId(currentState);
+    logger.info('wallet.created', {
+      op: isFromImportWallet ? 'import' : 'create',
+      with_private_key: isImportWalletWithPrivateKey,
+      coins: Array.isArray(coins) ? coins.length : 0,
+      total_wallets: allWallets.length + 1,
+    });
     registerUserAPI({
       coins: walletData.newStoreWallet?.coins,
       clientId: newStoreWallet?.clientId,
@@ -1023,7 +1038,7 @@ export const walletConnect = createAsyncThunk(
     ) {
       const message =
         'The dApp requested a signature from a different address than the connected wallet.';
-      console.error('Error in walletConnect', message);
+      logger.warn('walletconnect.wrong_account', {method, chain_name});
       showToast({
         type: 'errorToast',
         title: 'Wrong account',
@@ -1184,7 +1199,15 @@ export const walletConnect = createAsyncThunk(
       }
       return tx;
     } catch (e) {
-      console.error('Error in walletConnect', e);
+      // Never the payload: it carries privateKey, signTypeData, transactionData.
+      captureError(e, {
+        tags: {
+          area: 'walletconnect',
+          method,
+          chain_name,
+          chainId: chainId != null ? String(chainId) : undefined,
+        },
+      });
       // Chains attach a protocol error (HIP-820 code 9000 + node status) when
       // the dApp needs more than the generic failure.
       await respondWithError(toWalletConnectError(e));
@@ -1198,6 +1221,42 @@ export const walletConnect = createAsyncThunk(
     }
   },
 );
+
+// Attributes describing a send for logs/issues. Deliberately excludes
+// addresses and amounts, which together with user.id would be identifying.
+const describeSendForLogs = txData => ({
+  chain: txData?.currentCoin?.chain_name,
+  symbol: txData?.currentCoin?.symbol,
+  is_token: !!(txData?.contractAddress || txData?.currentCoin?.contractAddress),
+  is_exchange: !!txData?.isExchange,
+  is_nft: !!txData?.isNFT,
+  is_staking: !!(txData?.isCreateStaking || txData?.isCreateVote),
+});
+
+const classifySendRejection = message => {
+  if (!message) {
+    return null;
+  }
+  if (isSwapBlockingError(message)) {
+    return 'quote_expired';
+  }
+  if (message.includes('transaction underpriced')) {
+    return 'fee_too_low';
+  }
+  if (message === 'polkadot_receiver_should_1_dot') {
+    return 'polkadot_min_balance';
+  }
+  if (HEDERA_USER_MESSAGES.includes(message)) {
+    return 'hedera_precondition';
+  }
+  if (
+    message === 'could not coalesce error' ||
+    message.includes('nonce too low')
+  ) {
+    return 'already_sent';
+  }
+  return null;
+};
 
 export const sendFunds = createAsyncThunk(
   'wallets/sendFunds',
@@ -1615,15 +1674,19 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
-        return {
+        const status =
+          confirmTransaction === 'pending'
+            ? 2
+            : confirmTransaction?.status === 'failed'
+            ? 1
+            : 3;
+        // Public chain data only: no addresses or amounts next to user.id.
+        logger.info('send.submitted', {
+          ...describeSendForLogs(txData),
+          status,
           tx_hash,
-          status:
-            confirmTransaction === 'pending'
-              ? 2
-              : confirmTransaction?.status === 'failed'
-              ? 1
-              : 3,
-        };
+        });
+        return {tx_hash, status};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -1638,6 +1701,25 @@ export const sendFunds = createAsyncThunk(
     } catch (e) {
       console.error('Error in send fund', e);
       thunkAPI.dispatch(setCurrentTransferSubmitting(false));
+      // Expected refusals (stale quote, chain preconditions) are warnings;
+      // everything else is a defect worth an issue.
+      const rejectedReason = classifySendRejection(e?.message);
+      if (rejectedReason) {
+        logger.warn('send.rejected', {
+          ...describeSendForLogs(txData),
+          reason: rejectedReason,
+        });
+      } else {
+        const sendAttrs = describeSendForLogs(txData);
+        captureError(e, {
+          tags: {
+            area: 'send',
+            chain: sendAttrs.chain,
+            symbol: sendAttrs.symbol,
+          },
+          extra: sendAttrs,
+        });
+      }
       if (isSwapBlockingError(e?.message)) {
         // Expired quote caught before anything was signed/broadcast — same
         // handling on every chain: no failed-transaction record, back to the
@@ -1875,7 +1957,12 @@ export const sendPendingTransactions = createAsyncThunk(
         });
       }
     } catch (e) {
-      console.error('Error in send pending transactions', e);
+      captureError(e, {
+        tags: {
+          area: 'send.pending',
+          op: payload?.isCancelTransaction ? 'cancel' : 'accelerate',
+        },
+      });
       isFromUpdateScreen
         ? thunkAPI.dispatch(setUpdateTransactionSubmitting(false))
         : thunkAPI.dispatch(setPendingTransferSubmitting(false));

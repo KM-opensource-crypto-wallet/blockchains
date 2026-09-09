@@ -122,6 +122,12 @@ export const subscribeWalletConnectEvent = () => {
     const requiredNamespaces = params?.requiredNamespaces;
     const optionalNamespaces = params?.optionalNamespaces;
     const relays = params?.relays;
+    logWalletConnectEvent('info', 'session_proposal', {
+      peerName: proposer?.metadata?.name,
+      peerUrl: proposer?.metadata?.url,
+      requiredNamespaces: Object.keys(requiredNamespaces || {}),
+      optionalNamespaces: Object.keys(optionalNamespaces || {}),
+    });
     store.dispatch(setWalletConnectRequestModal(true));
     store.dispatch(
       setWalletConnectRequestData({
@@ -145,6 +151,13 @@ export const subscribeWalletConnectEvent = () => {
       const requestSessionData =
         walletConnect.engine.signClient.session.get(topic);
       const peerMeta = requestSessionData?.peer?.metadata;
+      logWalletConnectEvent('info', 'session_request.received', {
+        method: request?.method,
+        chainId: params?.chainId,
+        topic,
+        requestId: id,
+        peerName: peerMeta?.name,
+      });
 
       // Reject methods this wallet cannot answer before any UI opens.
       // JSON-RPC -32601 ("Method not found") is what the WalletKit docs use
@@ -287,6 +300,7 @@ export const subscribeWalletConnectEvent = () => {
   const onSessionDelete = proposal => {
     try {
       const {topic} = proposal;
+      logWalletConnectEvent('info', 'session_delete', {topic});
       const state = store.getState();
       const allWallets = state?.wallets?.allWallets || [];
       allWallets.forEach(currentWallet => {
