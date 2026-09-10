@@ -1,5 +1,11 @@
 import {PolkadotScanApi} from 'dok-wallet-blockchain-networks/config/polkadotScan';
 
+// Subscan for Polkadot Asset Hub, reached through the `polkadot` scan proxy
+// (the worker holds the API key and the upstream host). Asset Hub's v2
+// `transfers`, `extrinsic` and `metadata` responses have the same shape as the
+// relay chain's, so PolkadotChain parses them unchanged; only Asset Hub
+// extrinsics exist here (pre-migration relay history is not served).
+
 export const PolkadotScan = {
   getTransactions: async (address, contractaddress = null) => {
     try {

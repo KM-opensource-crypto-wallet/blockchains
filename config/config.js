@@ -1390,6 +1390,11 @@ export const CHAIN_CONFIG = {
     // Premium RPC goes through the secure-rpc proxy (/rpc/polkadot). Subscan
     // shares that route and is told apart by the x-rpc-type: scan header,
     // which scan_only makes the axios adapter add; plain fetch never sets it.
+    // DOT lives on Asset Hub since the relay-chain migration, so the proxy's
+    // scan upstream is assethub-polkadot.api.subscan.io and `scan` below is
+    // the matching explorer: history, tx details and links all read the same
+    // chain the balances and transfers use.
+
     premium: {mainnet: true, testnet: true},
     scan_only: true,
     supported: true,
@@ -1417,8 +1422,8 @@ export const CHAIN_CONFIG = {
       ],
     },
     scan: {
-      sandbox: 'https://polkadot.subscan.io',
-      production: 'https://polkadot.subscan.io',
+      sandbox: 'https://assethub-polkadot.subscan.io',
+      production: 'https://assethub-polkadot.subscan.io',
       txPath: 'extrinsic',
     },
     private_key_list: {
@@ -1754,7 +1759,7 @@ export const config = {
   INK_BLOCK_EXPLORER_BASE_URL: forEnv(CHAIN_CONFIG.ink.scan_api_url),
 
   DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
-  // DOK_WALLET_BASE_URL: 'http://localhost:8787/dashboard',
+  // DOK_WALLET_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app/dashboard',
   ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
   // ATTEST_WORKER_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app',
   BITCOIN_SCAN_URL: scanBase('bitcoin'),
