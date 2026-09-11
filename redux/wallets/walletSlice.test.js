@@ -514,6 +514,40 @@ describe('walletsSlice tesets', () => {
         '0xPolygonAddress',
       ]);
     });
+
+    describe('refreshCoins with a wallet override', () => {
+      const walletCoins = () =>
+        mockCurrencies.slice(0, 2).map(coin => ({...coin, isInWallet: true}));
+      const makeWallet = clientId => ({
+        clientId,
+        walletName: `Wallet ${clientId}`,
+        phrase: `phrase ${clientId}`,
+        coins: walletCoins(),
+      });
+
+      it('writes into the wallet passed as currentWallet, not the current one', async () => {
+        const store = makeStore({
+          ...baseState,
+          wallets: {
+            allWallets: [makeWallet('client1'), makeWallet('client2')],
+            currentWalletClientId: 'client1',
+          },
+        });
+
+        const other = store.getState().wallets.allWallets[1];
+        await store.dispatch(refreshCoins({currentWallet: other})).unwrap();
+
+        const [current, target] = store.getState().wallets.allWallets;
+        expect(
+          current.coins.every(coin => coin.totalAmount === undefined),
+        ).toBe(true);
+        expect(target.coins.map(coin => coin.totalAmount)).toEqual([
+          '10.0',
+          '20.0',
+        ]);
+      });
+    });
+
     describe('wallets slice', () => {
       it('handles createWallet.fulfilled', async () => {
         const store = configureStore({reducer: walletsSlice.reducer});

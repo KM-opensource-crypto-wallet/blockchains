@@ -2,9 +2,8 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {resetWallet} from '../wallets/walletsSlice';
 import {resetCurrentTransferData} from '../currentTransfer/currentTransferSlice';
 import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice';
-import {selectAllScheduledPayments} from '../schedulePayment/schedulePaymentSelectors';
+import {syncScheduledPaymentNotifications} from '../schedulePayment/schedulePaymentSlice';
 import {showToast} from 'utils/toast';
-import {cancelScheduledPaymentNotifications} from 'utils/scheduledPaymentNotifications';
 
 export const handleAttempts = createAsyncThunk(
   'auth/handleAttempts',
@@ -28,12 +27,10 @@ export const handleAttempts = createAsyncThunk(
           message: 'Too many failed login attempts',
         });
         thunkAPI.dispatch(resetAttempts());
-        // Cancel every pending scheduled-payment reminder before resetWallet
-        // wipes the data (recipient/amount/wallet) those notifications point to.
-        await cancelScheduledPaymentNotifications(
-          selectAllScheduledPayments(currentState).map(payment => payment?.id),
-        );
         thunkAPI.dispatch(resetWallet());
+        // resetWallet wiped every scheduled payment; cancel every pending
+        // reminder that pointed at them.
+        await thunkAPI.dispatch(syncScheduledPaymentNotifications());
         thunkAPI.dispatch(resetCurrentTransferData());
         thunkAPI.dispatch(resetBatchTransactions());
         thunkAPI.dispatch(logOutSuccess());

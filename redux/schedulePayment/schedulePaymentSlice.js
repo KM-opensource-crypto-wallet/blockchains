@@ -2,6 +2,8 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import dayjs from 'dayjs';
 import {v4} from 'uuid';
 import {
+  isWalletHiddenAndLocked,
+  selectAllWallets,
   selectCurrentCoin,
   selectCurrentWallet,
   selectCurrentWalletClientId,
@@ -18,12 +20,13 @@ import {
 import {
   requestLocalNotificationPermission,
   createScheduledPaymentNotification,
-  cancelScheduledPaymentNotification,
+  reconcileScheduledPaymentNotifications,
 } from 'utils/scheduledPaymentNotifications';
 import {
   SCHEDULED_DATE_FORMAT,
   buildRecurrence,
   computeOccurrences,
+  isScheduledPaymentExpired,
 } from 'utils/scheduleRecurrence';
 
 export const submitScheduledPayment = createAsyncThunk(
@@ -88,26 +91,33 @@ export const submitScheduledPayment = createAsyncThunk(
     // so it must exist before the schedule itself is persisted (or an
     // existing one replaced) — otherwise a failed/blocked reminder either
     // creates a payment that will never fire, or (on edit) destroys the
-    // still-working previous reminder in exchange for nothing.
-    let notificationScheduled = false;
+    // still-working previous reminder in exchange for nothing. The OS holds
+    // only so many pending notifications; crossing that limit is refused
+    // here, before anything is stored, with the numbers the user needs.
+    let reminder;
     try {
-      ({scheduled: notificationScheduled} =
-        await createScheduledPaymentNotification(
-          {
-            id,
-            asset,
-            recipientAddress,
-            amount: values.amount,
-            scheduledAt,
-            occurrences,
-            walletClientId,
-          },
-          getState,
-        ));
+      reminder = await createScheduledPaymentNotification(
+        {
+          id,
+          asset,
+          recipientAddress,
+          amount: values.amount,
+          scheduledAt,
+          recurrence,
+          walletClientId,
+        },
+        getState,
+      );
     } catch (e) {
       return rejectWithValue({type: 'reminderFailed'});
     }
-    if (!notificationScheduled) {
+    if (reminder?.limitExceeded) {
+      return rejectWithValue({
+        type: 'reminderLimitExceeded',
+        ...reminder.limitExceeded,
+      });
+    }
+    if (!reminder?.scheduled) {
       return rejectWithValue({type: 'reminderFailed'});
     }
 
@@ -122,15 +132,9 @@ export const submitScheduledPayment = createAsyncThunk(
             memo,
             scheduledAt,
             recurrence,
-            status: 'scheduled',
-            failureReason: null,
           },
         }),
       );
-      // The new reminder above was created under the same id, overwriting
-      // any previous trigger at each reused index in place - only the
-      // trailing indices left over from a longer prior series need sweeping.
-      await cancelScheduledPaymentNotification(id, occurrences.length);
     } else {
       dispatch(
         addScheduledPayment({
@@ -148,15 +152,111 @@ export const submitScheduledPayment = createAsyncThunk(
       );
     }
 
-    return {occurrences, notificationScheduled};
+    return {occurrences};
+  },
+);
+
+// Scheduled payments have no persisted status: a payment is "active" for
+// exactly as long as it has an upcoming occurrence. A one-time payment
+// whose time has passed, or a repeating series that has run out, has no
+// live reminder and nothing left to show, so it is deleted outright.
+// Runs across every wallet (hidden ones included — their expired payments
+// are just as dead). The reminder reconcile afterwards cancels their
+// triggers and refills freed slots for other payments. `keepIds` protects a payment whose
+// reminder was just tapped but not yet handled (the tap is processed after
+// unlock): a fired one-time reminder is by definition past due, and its
+// payment must survive until the handler has prefilled the transfer.
+export const pruneExpiredScheduledPayments = createAsyncThunk(
+  'schedulePayment/pruneExpired',
+  async ({keepIds} = {}, {dispatch, getState}) => {
+    const now = Date.now();
+    const keep = new Set((keepIds || []).filter(Boolean));
+    const scheduledPayments =
+      getState().schedulePayment?.scheduledPayments || {};
+    const expired = [];
+    Object.entries(scheduledPayments).forEach(([walletClientId, list]) => {
+      (Array.isArray(list) ? list : []).forEach(item => {
+        if (
+          item?.id &&
+          !keep.has(item.id) &&
+          isScheduledPaymentExpired(item, now)
+        ) {
+          expired.push({id: item.id, walletClientId});
+        }
+      });
+    });
+    if (!expired.length) {
+      return [];
+    }
+    expired.forEach(entry => dispatch(removeScheduledPayment(entry)));
+    await reconcileScheduledPaymentNotifications(getState);
+    return expired.map(entry => entry.id);
+  },
+);
+
+// "Delete schedule notifications" on a hidden wallet means the payments
+// themselves go, not just their reminders: a payment with no reminder would
+// otherwise sit in the list forever without ever firing. Removes every
+// payment of the wallet from redux, then reconciles notifee triggers.
+export const deleteScheduledPaymentsForWallet = createAsyncThunk(
+  'schedulePayment/deleteForWallet',
+  async ({walletClientId}, {dispatch, getState}) => {
+    if (!walletClientId) {
+      return [];
+    }
+    const ids = (
+      getState().schedulePayment?.scheduledPayments?.[walletClientId] || []
+    )
+      .map(item => item?.id)
+      .filter(Boolean);
+    dispatch(removeScheduledPaymentsForWallet({walletClientId}));
+    await reconcileScheduledPaymentNotifications(getState);
+    return ids;
+  },
+);
+
+// Wallets can go from revealed to hidden+locked outside of HideWallet's own
+// Save flow - app relaunch (RELAUNCH relock, forced back on by the
+// persist-rehydrate transform) and backgrounding (BACKGROUND relock). A
+// payment scheduled while the wallet was revealed would survive those, so
+// apply the wallet's "Delete schedule notifications" setting again here.
+export const deleteHiddenWalletsScheduledPayments = createAsyncThunk(
+  'schedulePayment/deleteForHiddenWallets',
+  async (_, {dispatch, getState}) => {
+    const state = getState();
+    const scheduledPayments = state.schedulePayment?.scheduledPayments || {};
+    const walletClientIds = (selectAllWallets(state) || [])
+      .filter(
+        wallet =>
+          isWalletHiddenAndLocked(wallet) &&
+          wallet?.hideSettings?.deleteScheduleNotification &&
+          (scheduledPayments[wallet.clientId] || []).length > 0,
+      )
+      .map(wallet => wallet.clientId);
+    await Promise.all(
+      walletClientIds.map(walletClientId =>
+        dispatch(deleteScheduledPaymentsForWallet({walletClientId})),
+      ),
+    );
+    return walletClientIds;
+  },
+);
+
+// Make notifee's pending triggers match redux (see
+// reconcileScheduledPaymentNotifications). Dispatched from the UI and the
+// notification provider whenever the desired set may have changed.
+export const syncScheduledPaymentNotifications = createAsyncThunk(
+  'schedulePayment/syncNotifications',
+  async (_, {getState}) => {
+    await reconcileScheduledPaymentNotifications(getState);
   },
 );
 
 export const schedulePaymentSlice = createSlice({
   name: 'schedulePayment',
+  // Persisted schedule data only. The in-flight submit flag lives in the
+  // blacklisted schedulePaymentSubmit slice.
   initialState: {
-    isSubmitting: false,
-    pendingSubmitCount: 0,
     scheduledPayments: {},
   },
   reducers: {
@@ -184,14 +284,12 @@ export const schedulePaymentSlice = createSlice({
         {
           id: payload?.id || v4(),
           chain: payload?.chain,
-          network: payload?.network,
           asset: payload?.asset,
           senderAddress: payload?.senderAddress,
           recipientAddress: payload?.recipientAddress,
           amount: payload?.amount,
           memo: payload?.memo || '',
           scheduledAt: payload?.scheduledAt,
-          status: 'scheduled',
           recurrence: payload?.recurrence,
           createdAt: now,
           updatedAt: now,
@@ -219,6 +317,16 @@ export const schedulePaymentSlice = createSlice({
           : item,
       );
     },
+    removeScheduledPaymentsForWallet(state, {payload}) {
+      const clientId = payload?.walletClientId;
+      if (!clientId) {
+        console.warn(
+          'walletClientId is required to remove scheduled payments for wallet',
+        );
+        return;
+      }
+      delete state.scheduledPayments[clientId];
+    },
     removeScheduledPayment(state, {payload}) {
       if (!payload?.id) {
         console.warn('id payload is required for remove scheduled payment');
@@ -241,18 +349,6 @@ export const schedulePaymentSlice = createSlice({
   },
   extraReducers: builder => {
     builder
-      .addCase(submitScheduledPayment.pending, state => {
-        state.pendingSubmitCount += 1;
-        state.isSubmitting = true;
-      })
-      .addCase(submitScheduledPayment.fulfilled, state => {
-        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
-        state.isSubmitting = state.pendingSubmitCount > 0;
-      })
-      .addCase(submitScheduledPayment.rejected, state => {
-        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
-        state.isSubmitting = state.pendingSubmitCount > 0;
-      })
       .addCase(deleteWallet, (state, action) => {
         delete state.scheduledPayments[action.payload];
       })
@@ -266,6 +362,7 @@ export const {
   addScheduledPayment,
   updateScheduledPayment,
   removeScheduledPayment,
+  removeScheduledPaymentsForWallet,
 } = schedulePaymentSlice.actions;
 
 export default schedulePaymentSlice.reducer;

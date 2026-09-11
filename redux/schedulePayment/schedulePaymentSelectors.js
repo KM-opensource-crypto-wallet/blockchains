@@ -1,5 +1,5 @@
-export const selectIsSubmittingSchedulePayment = state =>
-  state.schedulePayment?.isSubmitting || false;
+import {createSelector} from '@reduxjs/toolkit';
+import {isScheduledPaymentExpired} from 'utils/scheduleRecurrence';
 
 const EMPTY_SCHEDULED_PAYMENTS = [];
 
@@ -24,9 +24,11 @@ export const selectScheduledPaymentsByClientId = (state, clientId) => {
   );
 };
 
-// Used to cancel every pending scheduled-payment notification across all
-// wallets before a full wallet reset wipes the redux state they reference.
-export const selectAllScheduledPayments = state => {
-  const scheduledPayments = state.schedulePayment?.scheduledPayments || {};
-  return Object.values(scheduledPayments).flat();
-};
+// Only payments that still have an upcoming occurrence. Expired ones are
+// pruned by pruneExpiredScheduledPayments, but that runs on focus/foreground,
+// so the list itself must never render an item that outlived its schedule.
+export const selectActiveScheduledPaymentsForCurrentWallet = createSelector(
+  [selectScheduledPaymentsForCurrentWallet],
+  scheduledPayments =>
+    scheduledPayments.filter(item => !isScheduledPaymentExpired(item)),
+);

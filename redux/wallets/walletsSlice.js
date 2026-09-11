@@ -32,7 +32,6 @@ import {
   getMasterClientId,
   getSelectedNftData,
   isWalletHiddenAndLocked,
-  selectAllCoins,
   selectAllCoinSymbol,
   selectAllWalletName,
   selectAllWallets,
@@ -571,9 +570,13 @@ export const refreshCoins = createAsyncThunk(
   async (refreshData, thunkAPI) => {
     try {
       const currentState = thunkAPI.getState();
-      const currentWallet = selectCurrentWallet(currentState);
-      const currentWalletClientId = selectCurrentWalletClientId(currentState);
-      const oldCoins = selectAllCoins(currentState);
+      // Optional wallet override (refreshAllWalletsCoins refreshes every
+      // visible wallet in turn). Default keeps every existing caller on the
+      // current wallet.
+      const currentWallet =
+        refreshData?.currentWallet || selectCurrentWallet(currentState);
+      const currentWalletClientId = currentWallet?.clientId;
+      const oldCoins = currentWallet?.coins || [];
       const filterCoins = oldCoins.filter(
         item => !!validateSupportedChain(item?.chain_name),
       );
