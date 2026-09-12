@@ -1,6 +1,9 @@
 import {createSelector} from '@reduxjs/toolkit';
 import {isScheduledPaymentExpired} from 'utils/scheduleRecurrence';
 
+export const selectIsSubmittingSchedulePayment = state =>
+  state.schedulePayment?.isSubmitting || false;
+
 const EMPTY_SCHEDULED_PAYMENTS = [];
 
 export const selectScheduledPaymentsForCurrentWallet = state => {

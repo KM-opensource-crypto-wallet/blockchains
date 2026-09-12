@@ -254,9 +254,9 @@ export const syncScheduledPaymentNotifications = createAsyncThunk(
 
 export const schedulePaymentSlice = createSlice({
   name: 'schedulePayment',
-  // Persisted schedule data only. The in-flight submit flag lives in the
-  // blacklisted schedulePaymentSubmit slice.
   initialState: {
+    isSubmitting: false,
+    pendingSubmitCount: 0,
     scheduledPayments: {},
   },
   reducers: {
@@ -349,6 +349,18 @@ export const schedulePaymentSlice = createSlice({
   },
   extraReducers: builder => {
     builder
+      .addCase(submitScheduledPayment.pending, state => {
+        state.pendingSubmitCount += 1;
+        state.isSubmitting = true;
+      })
+      .addCase(submitScheduledPayment.fulfilled, state => {
+        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
+        state.isSubmitting = state.pendingSubmitCount > 0;
+      })
+      .addCase(submitScheduledPayment.rejected, state => {
+        state.pendingSubmitCount = Math.max(0, state.pendingSubmitCount - 1);
+        state.isSubmitting = state.pendingSubmitCount > 0;
+      })
       .addCase(deleteWallet, (state, action) => {
         delete state.scheduledPayments[action.payload];
       })
