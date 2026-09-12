@@ -121,6 +121,19 @@ export const submitScheduledPayment = createAsyncThunk(
       return rejectWithValue({type: 'reminderFailed'});
     }
 
+    // The awaits above can outlive the wallet: a resetWallet (ModalReset,
+    // login lockout) or deleteWallet in the meantime has already dropped its
+    // schedule, and persisting now would resurrect a payment for a wallet
+    // that no longer exists. The reminder just armed is then an orphan —
+    // reconcile against the fresh state cancels it.
+    const walletStillExists = (selectAllWallets(getState()) || []).some(
+      wallet => wallet?.clientId === walletClientId,
+    );
+    if (!walletStillExists) {
+      await reconcileScheduledPaymentNotifications(getState);
+      return rejectWithValue({type: 'walletGone'});
+    }
+
     if (isEditMode) {
       dispatch(
         updateScheduledPayment({
@@ -366,6 +379,10 @@ export const schedulePaymentSlice = createSlice({
       })
       .addCase(resetWallet, state => {
         state.scheduledPayments = {};
+        // An in-flight submit belongs to the wallet that was just wiped; its
+        // settle handlers floor at 0, so clearing here can't go negative.
+        state.pendingSubmitCount = 0;
+        state.isSubmitting = false;
       });
   },
 });
