@@ -572,11 +572,14 @@ export const refreshCoins = createAsyncThunk(
   async (refreshData, thunkAPI) => {
     try {
       const currentState = thunkAPI.getState();
-      // Optional wallet override (refreshAllWalletsCoins refreshes every
-      // visible wallet in turn). Default keeps every existing caller on the
-      // current wallet.
-      const currentWallet =
-        refreshData?.currentWallet || selectCurrentWallet(currentState);
+      // Optional wallet override by clientId (refreshAllWalletsCoins refreshes
+      // every visible wallet in turn). Default keeps every existing caller on
+      // the current wallet. Only the id travels in the thunk arg: the wallet
+      // object carries phrase/privateKey and would otherwise sit in the
+      // pending/fulfilled/rejected action meta.
+      const currentWallet = refreshData?.walletClientId
+        ? findWalletByClientId(currentState.wallets, refreshData.walletClientId)
+        : selectCurrentWallet(currentState);
       const currentWalletClientId = currentWallet?.clientId;
       const oldCoins = currentWallet?.coins || [];
       const filterCoins = oldCoins.filter(
@@ -1994,6 +1997,11 @@ const initialState = {
   // rehydrate so a quit mid-refresh can't leave the button stuck.
   isRefreshingAllWallets: false,
   refreshingWalletClientId: null,
+  // clientId -> requestId of the latest in-flight refreshCoins for that
+  // wallet. Two refreshes of one wallet can overlap (pull-to-refresh on Home
+  // while refreshAllWalletsCoins is on the same wallet); only the latest may
+  // write its coins. Transient: walletsPersistTransform resets it on rehydrate.
+  refreshCoinsRequestIds: {},
 };
 
 export const refreshAllWalletsCoins = createAsyncThunk(
@@ -2021,7 +2029,7 @@ export const refreshAllWalletsCoins = createAsyncThunk(
         thunkAPI.dispatch(setRefreshingWalletClientId(wallet.clientId));
         try {
           await thunkAPI
-            .dispatch(refreshCoins({currentWallet: wallet}))
+            .dispatch(refreshCoins({walletClientId: wallet.clientId}))
             .unwrap();
         } catch (e) {
           // refreshCoins already logged and breadcrumbed the failure.
@@ -3228,12 +3236,29 @@ export const walletsSlice = createSlice({
     };
     builder.addCase(refreshAllWalletsCoins.fulfilled, endRefreshAll);
     builder.addCase(refreshAllWalletsCoins.rejected, endRefreshAll);
-    builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
+    builder.addCase(refreshCoins.pending, (state, {meta}) => {
+      // Same resolution as the thunk: explicit override, else current wallet.
+      const clientId = meta.arg?.walletClientId || state.currentWalletClientId;
+      if (!clientId) {
+        return;
+      }
+      if (!state.refreshCoinsRequestIds) {
+        state.refreshCoinsRequestIds = {};
+      }
+      state.refreshCoinsRequestIds[clientId] = meta.requestId;
+    });
+    builder.addCase(refreshCoins.fulfilled, (state, {payload, meta}) => {
       const coinData = payload.coinData;
-      const currentWallet = getWalletByClientId(
-        state,
-        payload.currentWalletClientId,
-      );
+      const clientId = payload.currentWalletClientId;
+      const latestRequestId = state.refreshCoinsRequestIds?.[clientId];
+      if (latestRequestId && latestRequestId !== meta.requestId) {
+        // A newer refresh of this wallet started after this one; its result
+        // is (or will be) fresher, so don't overwrite it with stale coins.
+        // The id is kept (not cleared on completion) so an older request
+        // that finishes even later is still recognised as stale.
+        return;
+      }
+      const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
         currentWallet.coins = coinData;
         currentWallet.chain_existing_coin = extractChainExistingCoins(

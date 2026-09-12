@@ -525,7 +525,7 @@ describe('walletsSlice tesets', () => {
         coins: walletCoins(),
       });
 
-      it('writes into the wallet passed as currentWallet, not the current one', async () => {
+      it('writes into the wallet named by walletClientId, not the current one', async () => {
         const store = makeStore({
           ...baseState,
           wallets: {
@@ -534,8 +534,9 @@ describe('walletsSlice tesets', () => {
           },
         });
 
-        const other = store.getState().wallets.allWallets[1];
-        await store.dispatch(refreshCoins({currentWallet: other})).unwrap();
+        await store
+          .dispatch(refreshCoins({walletClientId: 'client2'}))
+          .unwrap();
 
         const [current, target] = store.getState().wallets.allWallets;
         expect(
@@ -545,6 +546,65 @@ describe('walletsSlice tesets', () => {
           '10.0',
           '20.0',
         ]);
+      });
+    });
+
+    describe('refreshCoins overlapping requests', () => {
+      const walletWith = coins => ({
+        clientId: 'client1',
+        walletName: 'Wallet 1',
+        phrase: 'phrase',
+        coins,
+      });
+      const makeSliceStore = () =>
+        configureStore({
+          reducer: walletsSlice.reducer,
+          preloadedState: {
+            ...walletsSlice.getInitialState(),
+            allWallets: [walletWith([{symbol: 'ETH', totalAmount: '0'}])],
+            currentWalletClientId: 'client1',
+          },
+        });
+      const arg = {walletClientId: 'client1'};
+      const result = totalAmount => ({
+        coinData: [{symbol: 'ETH', chain_name: 'ethereum', totalAmount}],
+        currentWalletClientId: 'client1',
+      });
+
+      it('ignores a stale completion once a newer refresh has started', () => {
+        const store = makeSliceStore();
+        store.dispatch(refreshCoins.pending('req1', arg));
+        store.dispatch(refreshCoins.pending('req2', arg));
+
+        store.dispatch(refreshCoins.fulfilled(result('1.0'), 'req1', arg));
+        expect(store.getState().allWallets[0].coins[0].totalAmount).toBe('0');
+
+        store.dispatch(refreshCoins.fulfilled(result('2.0'), 'req2', arg));
+        expect(store.getState().allWallets[0].coins[0].totalAmount).toBe('2.0');
+        expect(store.getState().refreshCoinsRequestIds).toEqual({
+          client1: 'req2',
+        });
+      });
+
+      it('lets a late completion of the latest request write its coins', () => {
+        const store = makeSliceStore();
+        store.dispatch(refreshCoins.pending('req1', arg));
+        store.dispatch(refreshCoins.pending('req2', arg));
+
+        store.dispatch(refreshCoins.fulfilled(result('2.0'), 'req2', arg));
+        // The older one finishing afterwards must not roll the wallet back.
+        store.dispatch(refreshCoins.fulfilled(result('1.0'), 'req1', arg));
+        expect(store.getState().allWallets[0].coins[0].totalAmount).toBe('2.0');
+      });
+
+      it('tracks per wallet so another wallet is not affected', () => {
+        const store = makeSliceStore();
+        const otherArg = {walletClientId: 'client2'};
+        store.dispatch(refreshCoins.pending('req1', arg));
+        store.dispatch(refreshCoins.pending('req2', otherArg));
+
+        store.dispatch(refreshCoins.fulfilled(result('1.0'), 'req1', arg));
+        expect(store.getState().allWallets[0].coins[0].totalAmount).toBe('1.0');
       });
     });
 
