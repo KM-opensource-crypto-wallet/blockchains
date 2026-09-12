@@ -2,6 +2,7 @@ import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
 import {resetWallet} from '../wallets/walletsSlice';
 import {resetCurrentTransferData} from '../currentTransfer/currentTransferSlice';
 import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice';
+import {syncScheduledPaymentNotifications} from '../schedulePayment/schedulePaymentSlice';
 import {showToast} from 'utils/toast';
 
 export const handleAttempts = createAsyncThunk(
@@ -27,6 +28,9 @@ export const handleAttempts = createAsyncThunk(
         });
         thunkAPI.dispatch(resetAttempts());
         thunkAPI.dispatch(resetWallet());
+        // resetWallet wiped every scheduled payment; cancel every pending
+        // reminder that pointed at them.
+        await thunkAPI.dispatch(syncScheduledPaymentNotifications());
         thunkAPI.dispatch(resetCurrentTransferData());
         thunkAPI.dispatch(resetBatchTransactions());
         thunkAPI.dispatch(logOutSuccess());

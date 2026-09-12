@@ -32,7 +32,6 @@ import {
   getMasterClientId,
   getSelectedNftData,
   isWalletHiddenAndLocked,
-  selectAllCoins,
   selectAllCoinSymbol,
   selectAllWalletName,
   selectAllWallets,
@@ -40,7 +39,9 @@ import {
   selectCurrentCoin,
   selectCurrentWallet,
   selectCurrentWalletClientId,
+  selectIsRefreshingAllWallets,
   selectUserCoins,
+  selectVisibleWallets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {
@@ -571,9 +572,16 @@ export const refreshCoins = createAsyncThunk(
   async (refreshData, thunkAPI) => {
     try {
       const currentState = thunkAPI.getState();
-      const currentWallet = selectCurrentWallet(currentState);
-      const currentWalletClientId = selectCurrentWalletClientId(currentState);
-      const oldCoins = selectAllCoins(currentState);
+      // Optional wallet override by clientId (refreshAllWalletsCoins refreshes
+      // every visible wallet in turn). Default keeps every existing caller on
+      // the current wallet. Only the id travels in the thunk arg: the wallet
+      // object carries phrase/privateKey and would otherwise sit in the
+      // pending/fulfilled/rejected action meta.
+      const currentWallet = refreshData?.walletClientId
+        ? findWalletByClientId(currentState.wallets, refreshData.walletClientId)
+        : selectCurrentWallet(currentState);
+      const currentWalletClientId = currentWallet?.clientId;
+      const oldCoins = currentWallet?.coins || [];
       const filterCoins = oldCoins.filter(
         item => !!validateSupportedChain(item?.chain_name),
       );
@@ -1984,7 +1992,62 @@ const initialState = {
   pendingTransactions: {},
   masterClientId: null,
   failedTransaction: null,
+  // In-flight "refresh all wallets" progress (Wallets screen). UI state, not
+  // data: walletsPersistTransform in src/redux/store.js resets both on
+  // rehydrate so a quit mid-refresh can't leave the button stuck.
+  isRefreshingAllWallets: false,
+  refreshingWalletClientId: null,
+  // clientId -> requestId of the latest in-flight refreshCoins for that
+  // wallet. Two refreshes of one wallet can overlap (pull-to-refresh on Home
+  // while refreshAllWalletsCoins is on the same wallet); only the latest may
+  // write its coins. Transient: walletsPersistTransform resets it on rehydrate.
+  refreshCoinsRequestIds: {},
 };
+
+export const refreshAllWalletsCoins = createAsyncThunk(
+  'wallets/refreshAllWalletsCoins',
+  async (_, thunkAPI) => {
+    const clientIds = selectVisibleWallets(thunkAPI.getState()).map(
+      wallet => wallet.clientId,
+    );
+    let failed = 0;
+    try {
+      // Sequential on purpose: each wallet's coins already fan out in
+      // parallel inside refreshCoins, so running wallets back-to-back keeps
+      // the RPC load bounded to one wallet at a time. Each wallet is written
+      // to the store as soon as it finishes (refreshCoins.fulfilled).
+      for (const clientId of clientIds) {
+        // Re-read at its turn: an earlier wallet's refresh takes a while, and
+        // the user may have deleted/hidden this one or toggled its coins in
+        // the meantime. Passing a stale object would write those coins back.
+        const wallet = selectVisibleWallets(thunkAPI.getState()).find(
+          item => item.clientId === clientId,
+        );
+        if (!wallet) {
+          continue;
+        }
+        thunkAPI.dispatch(setRefreshingWalletClientId(wallet.clientId));
+        try {
+          await thunkAPI
+            .dispatch(refreshCoins({walletClientId: wallet.clientId}))
+            .unwrap();
+        } catch (e) {
+          // refreshCoins already logged and breadcrumbed the failure.
+          failed += 1;
+        }
+      }
+    } finally {
+      thunkAPI.dispatch(setRefreshingWalletClientId(null));
+    }
+    // Counts only: wallet names and balances must not reach Sentry.
+    logger.info('wallets.refresh_all', {total: clientIds.length, failed});
+    return {total: clientIds.length, failed};
+  },
+  {
+    // Ignore taps while a run is in flight (double-tap / re-entry guard).
+    condition: (_, {getState}) => !selectIsRefreshingAllWallets(getState()),
+  },
+);
 
 export const createIfNotExistsMasterClientId = createAsyncThunk(
   'wallets/createIfNotExistsMasterClientId',
@@ -2328,6 +2391,9 @@ export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
+    setRefreshingWalletClientId: (state, {payload}) => {
+      state.refreshingWalletClientId = payload ?? null;
+    },
     setWalletChainExistingCoin: (state, action) => {
       const {clientId, chainWallets} = action.payload;
       const wallet = getWalletByClientId(state, clientId);
@@ -2929,6 +2995,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption,
         hideNotification,
+        deleteScheduleNotification,
       } = payload || {};
       if (!secretCodeSalt || !secretCodeHash) {
         throw new Error('setWalletHideSettings: missing secret code hash/salt');
@@ -2940,6 +3007,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
         hideNotification: hideNotification ?? true,
+        deleteScheduleNotification: deleteScheduleNotification ?? true,
       };
       reassignCurrentWalletIfHiddenState(state);
     },
@@ -3159,12 +3227,38 @@ export const walletsSlice = createSlice({
     },
   },
   extraReducers: builder => {
-    builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
+    builder.addCase(refreshAllWalletsCoins.pending, state => {
+      state.isRefreshingAllWallets = true;
+    });
+    const endRefreshAll = state => {
+      state.isRefreshingAllWallets = false;
+      state.refreshingWalletClientId = null;
+    };
+    builder.addCase(refreshAllWalletsCoins.fulfilled, endRefreshAll);
+    builder.addCase(refreshAllWalletsCoins.rejected, endRefreshAll);
+    builder.addCase(refreshCoins.pending, (state, {meta}) => {
+      // Same resolution as the thunk: explicit override, else current wallet.
+      const clientId = meta.arg?.walletClientId || state.currentWalletClientId;
+      if (!clientId) {
+        return;
+      }
+      if (!state.refreshCoinsRequestIds) {
+        state.refreshCoinsRequestIds = {};
+      }
+      state.refreshCoinsRequestIds[clientId] = meta.requestId;
+    });
+    builder.addCase(refreshCoins.fulfilled, (state, {payload, meta}) => {
       const coinData = payload.coinData;
-      const currentWallet = getWalletByClientId(
-        state,
-        payload.currentWalletClientId,
-      );
+      const clientId = payload.currentWalletClientId;
+      const latestRequestId = state.refreshCoinsRequestIds?.[clientId];
+      if (latestRequestId && latestRequestId !== meta.requestId) {
+        // A newer refresh of this wallet started after this one; its result
+        // is (or will be) fresher, so don't overwrite it with stale coins.
+        // The id is kept (not cleared on completion) so an older request
+        // that finishes even later is still recognised as stale.
+        return;
+      }
+      const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
         currentWallet.coins = coinData;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
@@ -3532,6 +3626,7 @@ export const walletsSlice = createSlice({
 });
 
 export const {
+  setRefreshingWalletClientId,
   setCurrentCoin,
   setWalletChainExistingCoin,
   updateWalletName,
