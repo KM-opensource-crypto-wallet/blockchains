@@ -1,6 +1,5 @@
 import {
-  EtherScanAPI1,
-  EtherScanAPI2,
+  EtherScanAPI,
   EtherScanAPIFree,
 } from 'dok-wallet-blockchain-networks/config/etherScan';
 import {
@@ -10,8 +9,8 @@ import {
 } from '../helper';
 import {CHAIN_ID} from '../config/config';
 
-const providers = [EtherScanAPIFree, EtherScanAPI1, EtherScanAPI2];
-const providersName = ['Free EtherScan', 'Etherscan1', 'Etherscan2'];
+const providers = [EtherScanAPIFree, EtherScanAPI];
+const providersName = ['Free EtherScan', 'Etherscan'];
 
 const FREE_NOT_SUPPORTED_CHAINS = [
   'ethereum',

@@ -2,10 +2,11 @@ import {TronChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/TronC
 import {TronWeb} from 'tronweb';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 
-// TronChain builds its provider list from these. Tests that need failover
-// override getPremiumRPCUrl to add a second, earlier provider.
+// TronChain builds its provider list from these. getPremiumRPCUrl returns a
+// URL string ('' when the chain has no proxy); tests that need failover
+// override it to add a second, earlier provider.
 jest.mock('dok-wallet-blockchain-networks/rpcUrls/rpcUrls', () => ({
-  getPremiumRPCUrl: jest.fn(() => []),
+  getPremiumRPCUrl: jest.fn(() => ''),
   getRPCUrl: jest.fn(key =>
     key === 'tron_full_host' ? 'http://tron.test' : null,
   ),
@@ -54,9 +55,15 @@ const fakeTronWeb = (overrides = {}) => ({
     decimals: () => ({call: jest.fn().mockResolvedValue(6)}),
     ...(overrides.contract || {}),
   })),
+  // withRpcSession swaps the axios adapter on both HTTP providers.
   fullNode: {
     request: jest.fn().mockResolvedValue({data: []}),
+    instance: {defaults: {}},
     ...(overrides.fullNode || {}),
+  },
+  solidityNode: {
+    instance: {defaults: {}},
+    ...(overrides.solidityNode || {}),
   },
   setAddress: jest.fn(),
   toSun: jest.fn(amount => amount),
@@ -79,7 +86,7 @@ describe('TronChain', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    getPremiumRPCUrl.mockReturnValue([]);
+    getPremiumRPCUrl.mockReturnValue('');
     tronWeb = fakeTronWeb();
     useTronWeb(tronWeb);
     instance = TronChain();
@@ -89,12 +96,15 @@ describe('TronChain', () => {
     await expect(instance.getIconName()).resolves.toEqual('TRX');
   });
 
-  it('propagates a TronWeb construction failure', () => {
+  // The default instance is created lazily on first offline use, so
+  // TronChain() itself never constructs TronWeb.
+  it('constructs TronWeb lazily and propagates a construction failure', () => {
+    expect(TronWeb).not.toHaveBeenCalled();
     const error = new Error('TronWeb creation error');
     TronWeb.mockImplementationOnce(() => {
       throw error;
     });
-    expect(() => TronChain()).toThrow(error);
+    expect(() => instance.isValidAddress({address: 'address'})).toThrow(error);
   });
 
   describe('getBalance', () => {
@@ -129,16 +139,14 @@ describe('TronChain', () => {
 
     it('falls through to the next provider when the first one fails', async () => {
       // Two providers: a premium one first, then the trongrid fallback.
-      getPremiumRPCUrl.mockReturnValue(['http://premium.test']);
+      getPremiumRPCUrl.mockReturnValue('http://premium.test');
       const dead = fakeTronWeb();
       dead.trx.getAccount.mockRejectedValue(new Error('node down'));
       const healthy = fakeTronWeb();
       healthy.trx.getAccount.mockResolvedValue({balance: 4242});
 
-      TronWeb.mockImplementationOnce(() => dead) // constructed by TronChain()
-        .mockImplementationOnce(() => dead) // provider 0 — fails
+      TronWeb.mockImplementationOnce(() => dead) // provider 0 — fails
         .mockImplementationOnce(() => healthy); // provider 1 — succeeds
-      instance = TronChain();
 
       await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
         '4242',

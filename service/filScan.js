@@ -1,6 +1,19 @@
 import BigNumber from 'bignumber.js';
 import {FilScanApi} from 'dok-wallet-blockchain-networks/config/filScan';
 
+// FilScan reports mempool messages with exit_code 'Pending(-1)' while
+// height/block_time are already set to the current tip, so exit_code is
+// the only reliable execution signal.
+const mapExitCodeToStatus = exitCode => {
+  if (exitCode === 'Ok') {
+    return 'SUCCESS';
+  }
+  if (!exitCode || exitCode.startsWith('Pending')) {
+    return 'PENDING';
+  }
+  return 'FAILED';
+};
+
 export const FilScan = {
   getTransactions: async ({address}) => {
     try {
@@ -19,7 +32,7 @@ export const FilScan = {
             to: item?.to,
             from: item?.from,
             amount: item?.value,
-            status: item?.exit_code === 'Ok',
+            status: mapExitCodeToStatus(item?.exit_code),
             timestamp: item?.block_time * 1000,
             blockNumber: item?.height * 1000,
           };
@@ -41,7 +54,10 @@ export const FilScan = {
       if (res?.data?.result?.MessageDetails) {
         const {block_time, exit_code, from, to, value, height} =
           res.data.result.MessageDetails.message_basic;
-        const blockNumber = height ?? null;
+        const status = mapExitCodeToStatus(exit_code);
+        // While pending, height/block_time only mirror the current tip —
+        // they are not the inclusion epoch, so don't report them.
+        const blockNumber = status === 'PENDING' ? null : height ?? null;
         const tipHeight = tipRes?.data?.result?.final_height ?? null;
         const confirmations =
           tipHeight !== null && blockNumber !== null
@@ -53,7 +69,7 @@ export const FilScan = {
             to: to,
             from: from,
             amount: value,
-            status: exit_code === 'Ok',
+            status,
             timestamp: block_time * 1000,
             blockNumber,
             confirmations,

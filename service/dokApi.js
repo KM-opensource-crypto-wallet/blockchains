@@ -209,16 +209,10 @@ export const fetchRpcUrls = async countryCode => {
     throw e;
   }
 };
-export const fetchFeesInfo = async () => {
-  try {
-    const resp = await DokApi.get('/get-fees-info', {
-      params: {is_sandbox: IS_SANDBOX},
-    });
-    return {status: resp?.status, data: resp?.data?.data};
-  } catch (e) {
-    console.error('Error in fetchFeesInfo', JSON.stringify(e));
-    throw e;
-  }
+
+export const fetchRpcSession = async () => {
+  const resp = await DokApi.post('/rpc/session');
+  return resp?.data;
 };
 
 export const getBuyCryptoQuote = async payload => {
@@ -369,16 +363,6 @@ export const getWhiteLabelInfo = async domain => {
     throw e;
   }
 };
-export const getCurrencyRate = async payload => {
-  try {
-    const resp = await DokApi.post('/get-currency-rate', payload);
-    return {status: resp?.status, data: resp?.data?.data};
-  } catch (e) {
-    console.error('Error in get getCurrencyRate', JSON.stringify(e));
-    throw e;
-  }
-};
-
 export const getExchangeQuote = async payload => {
   try {
     const resp = await DokApi.post('/exchange-quote', payload);

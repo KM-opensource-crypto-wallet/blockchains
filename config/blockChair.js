@@ -1,9 +1,5 @@
-import axios from 'axios';
+import {createProviderClient} from 'dok-wallet-blockchain-networks/config/providerClient';
 
-export const BlockChairAPI = axios.create({
+export const BlockChairAPI = createProviderClient({
   baseURL: 'https://api.blockchair.com/',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000,
 });

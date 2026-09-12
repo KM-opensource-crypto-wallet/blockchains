@@ -17,7 +17,12 @@ import {
 export const BitcoinLightningChain = (_, phrase) => {
   return {
     getBalance: async () => {
-      return await getLightningBalance(phrase);
+      try {
+        return await getLightningBalance(phrase);
+      } catch (e) {
+        console.error('Error getting lightning balance', e);
+        return '0';
+      }
     },
     isValidAddress: async ({address}) => {
       return await isLightningAddressValid(address, phrase);
@@ -29,7 +34,12 @@ export const BitcoinLightningChain = (_, phrase) => {
       return await generateLightningSparkAddress(phrase ?? currentPhrase);
     },
     getTransactions: async () => {
-      return await getLightningTransactions(phrase);
+      try {
+        return await getLightningTransactions(phrase);
+      } catch (e) {
+        console.error('Error getting lightning transactions', e);
+        return [];
+      }
     },
     getTransaction: async ({txHash}) => {
       return await getLightningTransaction(phrase, txHash);

@@ -202,6 +202,7 @@ export const syncAllCoins = createAsyncThunk(
         if (wallet) {
           chainWallets[chainKey] = {
             address: wallet.address,
+            accountId: wallet.accountId,
             privateKey: wallet.privateKey,
             publicKey: wallet.publicKey,
             extendedPublicKey: wallet.extendedPublicKey,

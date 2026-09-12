@@ -1,259 +1,33 @@
 import {fetchRpcUrls} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {isValidObject} from 'dok-wallet-blockchain-networks/helper';
 import {
-  isValidObject,
-  safelyJsonParse,
-} from 'dok-wallet-blockchain-networks/helper';
-import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
+  CHAIN_CONFIG,
+  IS_SANDBOX,
+} from 'dok-wallet-blockchain-networks/config/config';
+import {buildRpcProxyUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import dayjs from 'dayjs';
 
 const allRPCUrl = {
-  solana: {
-    mainnet: 'https://api.mainnet-beta.solana.com',
-    testnet: 'https://api.devnet.solana.com',
-  },
-  solana_wc: {
-    mainnet: `wss://solana-mainnet.g.alchemy.com/v2/${process.env.SOLANA_RPC_KEY}`,
-    testnet: 'ws://api.devnet.solana.com',
-  },
-  tx_solana: {
-    mainnet: 'https://api.mainnet-beta.solana.com',
-    testnet: 'https://api.devnet.solana.com',
-  },
-  ripple: {
-    mainnet: 'wss://xrplcluster.com',
-    testnet: 'wss://s.altnet.rippletest.net:51233',
-  },
-  tezos: {
-    mainnet: 'https://mainnet.tezos.ecadinfra.com',
-    testnet: 'https://ghostnet.ecadinfra.com',
-  },
-  stellar: {
-    mainnet: 'https://horizon.stellar.org',
-    testnet: 'https://horizon-testnet.stellar.org',
-  },
-  tron_solidity_node: {
-    mainnet: 'https://api.trongrid.io',
-    testnet: 'https://nile.trongrid.io',
-  },
-  tron_event_server: {
-    mainnet: 'https://api.trongrid.io',
-    testnet: 'https://nile.trongrid.io',
-  },
-  tron_full_host: {
-    mainnet: 'https://api.trongrid.io',
-    testnet: 'https://nile.trongrid.io',
-  },
-  tron_api_key: {
-    mainnet: process.env.TRON_API_KEY_1,
-    testnet: process.env.TRON_API_KEY_1,
-  },
-  tron_api_key_2: {
-    mainnet: process.env.TRON_API_KEY_2,
-    testnet: process.env.TRON_API_KEY_2,
-  },
-  cosmos: {
-    mainnet: 'https://cosmos-rpc.publicnode.com:443',
-    testnet: 'https://cosmos-rpc.publicnode.com:443',
-  },
-  polkadot: {
-    mainnet: 'https://dot-rpc.stakeworld.io/assethub',
-    testnet: 'https://dot-rpc.stakeworld.io/assethub',
-  },
-  ton: {
-    mainnet: 'https://toncenter.com/api/v2/jsonRPC',
-    testnet: 'https://testnet.toncenter.com/api/v2/jsonRPC',
-  },
-  ton_api_key: {
-    mainnet: process.env.TON_SCAN_API_KEY,
-    testnet: process.env.TON_SCAN_API_KEY,
-  },
-  polygon_blockscout: {
-    mainnet: true,
-    testnet: true,
-  },
+  ...Object.fromEntries(
+    Object.entries(CHAIN_CONFIG).flatMap(([chain_name, chainConfig]) =>
+      Object.entries(chainConfig.rpc_urls ?? {}).map(([name, urls]) => [
+        name === 'default' ? chain_name : `${chain_name}_${name}`,
+        urls,
+      ]),
+    ),
+  ),
+  // Feature flag consumed via getRPCUrl('polygon_blockscout') — not a URL.
+  polygon_blockscout: {mainnet: true, testnet: true},
 };
 
-const allFreeRpcUrl = {
-  ethereum: {
-    mainnet: [
-      'https://eth-mainnet.public.blastapi.io',
-      'https://rpc.mevblocker.io',
-      'https://eth.drpc.org',
-    ],
-    testnet: [
-      'https://1rpc.io/sepolia',
-      'https://ethereum-sepolia-rpc.publicnode.com',
-    ],
-  },
-  arbitrum: {
-    mainnet: [
-      'https://arbitrum-one-rpc.publicnode.com',
-      'https://arbitrum.drpc.org',
-    ],
-    testnet: ['https://sepolia-rollup.arbitrum.io/rpc'],
-  },
-  base: {
-    mainnet: [
-      'https://base-rpc.publicnode.com',
-      'https://base-mainnet.public.blastapi.io',
-      'https://base.llamarpc.com',
-    ],
-    testnet: [
-      'https://base-sepolia-rpc.publicnode.com',
-      'https://sepolia.base.org',
-    ],
-  },
-  optimism: {
-    mainnet: [
-      'https://optimism-rpc.publicnode.com',
-      'https://optimism.drpc.org',
-    ],
-    testnet: ['https://sepolia.optimism.io'],
-  },
-  polygon: {
-    mainnet: [
-      'https://polygon-bor-rpc.publicnode.com',
-      'https://polygon.drpc.org',
-      'https://polygon-public.nodies.app',
-    ],
-    testnet: ['https://polygon-amoy-bor-rpc.publicnode.com'],
-  },
-  binance_smart_chain: {
-    mainnet: [
-      'https://bsc-rpc.publicnode.com',
-      'https://bsc.drpc.org',
-      'https://binance.llamarpc.com',
-      'https://binance-smart-chain-public.nodies.app',
-    ],
-    testnet: ['https://bsc-testnet.publicnode.com'],
-  },
-  optimism_binance_smart_chain: {
-    mainnet: ['https://opbnb-rpc.publicnode.com', 'https://opbnb.drpc.org'],
-    testnet: [
-      'https://opbnb-testnet-rpc.bnbchain.org',
-      'https://opbnb-testnet.nodereal.io/v1/e9a36765eb8a40b9bd12e680a1fd2bc5',
-      'https://opbnb-testnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
-    ],
-  },
-  avalanche: {
-    mainnet: [
-      'https://avalanche-c-chain-rpc.publicnode.com',
-      'https://avalanche.drpc.org',
-    ],
-    testnet: [
-      'https://avalanche-fuji-c-chain-rpc.publicnode.com',
-      'https://endpoints.omniatech.io/v1/avax/fuji/public',
-      'https://api.avax-test.network/ext/bc/C/rpc',
-    ],
-  },
-  fantom: {
-    mainnet: [
-      'https://fantom-rpc.publicnode.com',
-      'https://fantom-rpc.publicnode.com',
-      'https://fantom.drpc.org',
-    ],
-    testnet: ['https://fantom-testnet.drpc.org'],
-  },
-  gnosis: {
-    mainnet: ['https://gnosis-rpc.publicnode.com', 'https://gnosis.drpc.org'],
-    testnet: [
-      'https://1rpc.io/gnosis',
-      'https://gnosis-chiado-rpc.publicnode.com',
-      'https://rpc.chiadochain.net',
-    ],
-  },
-  viction: {
-    mainnet: ['https://viction.drpc.org'],
-    testnet: ['https://rpc-testnet.viction.xyz'],
-  },
-  linea: {
-    mainnet: ['https://linea-rpc.publicnode.com', 'https://linea.drpc.org'],
-    testnet: [
-      'https://rpc.sepolia.linea.build',
-      'https://linea-sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
-    ],
-  },
-  zksync: {
-    mainnet: ['https://zksync.drpc.org', 'https://rpc.ankr.com/zksync_era'],
-    testnet: [
-      'https://zksync-sepolia.drpc.org',
-      'https://endpoints.omniatech.io/v1/zksync-era/sepolia/public',
-    ],
-  },
-  ethereum_classic: {
-    mainnet: ['https://0xrpc.io/etc', 'https://geth-at.etc-network.info'],
-    testnet: [
-      'https://etc.etcdesktop.com',
-      'https://rpc.etcinscribe.com',
-      'https://geth-at.etc-network.info',
-      'https://etc.rivet.link',
-    ],
-  },
-  ethereum_pow: {
-    mainnet: ['https://mainnet.ethereumpow.org'],
-    testnet: ['https://mainnet.ethereumpow.org'],
-  },
-  kava: {
-    mainnet: ['https://kava-evm-rpc.publicnode.com', 'https://kava.drpc.org'],
-    testnet: ['https://kava-testnet.drpc.org', 'https://evm.testnet.kava.io'],
-  },
-  ink: {
-    mainnet: [
-      'https://rpc-qnd.inkonchain.com',
-      'https://rpc-gel.inkonchain.com',
-    ],
-    testnet: ['https://rpc-gel-sepolia.inkonchain.com'],
-  },
-  sei: {
-    mainnet: ['https://sei.drpc.org'],
-    testnet: [
-      'https://evm-rpc-testnet.sei-apis.com',
-      'https://sei-testnet-public.nodies.app',
-    ],
-  },
-  solana: {
-    mainnet: [
-      'https://solana-mainnet.g.alchemy.com/v2/LqXKA4ZLdyCbWyPwtLqri3696CgruA0w',
-      'https://proud-quaint-patina.solana-mainnet.quiknode.pro/7955f2808766bd176ed1fe12d66abd88b33059dd',
-      'https://api.mainnet-beta.solana.com',
-    ],
-    testnet: ['https://api.devnet.solana.com'],
-  },
-  tx_solana: {
-    mainnet: [
-      'https://solana-mainnet.g.alchemy.com/v2/LqXKA4ZLdyCbWyPwtLqri3696CgruA0w',
-      'https://api.mainnet-beta.solana.com',
-      'https://proud-quaint-patina.solana-mainnet.quiknode.pro/7955f2808766bd176ed1fe12d66abd88b33059dd',
-    ],
-    testnet: ['https://api.devnet.solana.com'],
-  },
-  filecoin: {
-    mainnet: [
-      'https://api.node.glif.io/rpc/v0',
-      'https://filecoin.chainup.net/rpc/v1',
-    ],
-    testnet: [
-      'https://api.calibration.node.glif.io/rpc/v0',
-      'https://filecoin-calibration.chainup.net/rpc/v1',
-    ],
-  },
-  hyperliquid: {
-    mainnet: [
-      'https://rpc.hyperliquid.xyz/evm',
-      'https://hyperliquid-json-rpc.stakely.io',
-      'https://hyperliquid.drpc.org',
-      'https://rpc.hypurrscan.io',
-    ],
-    testnet: ['https://rpc.hyperliquid-testnet.xyz/evm'],
-  },
-  robinhood: {
-    mainnet: ['https://rpc.mainnet.chain.robinhood.com'],
-    testnet: [
-      'https://rpc.testnet.chain.robinhood.com',
-      'https://robinhood-testnet.drpc.org',
-    ],
-  },
-};
+const allFreeRpcUrl = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(([, chainConfig]) => chainConfig.free_rpc_urls)
+    .map(([chain_name, chainConfig]) => [
+      chain_name,
+      chainConfig.free_rpc_urls,
+    ]),
+);
 
 let rpcUrls = {
   url: Object.assign(
@@ -314,21 +88,4 @@ export const getFreeRPCUrl = chain_name => {
     : [rpcUrls?.url[chain_name]];
 };
 
-export const getPremiumRPCUrl = chain_name => {
-  try {
-    const raw = process.env.PREMIUM_RPC_URLS;
-    if (!raw) {
-      return [];
-    }
-    const parsed = safelyJsonParse(raw);
-    const chainEntry = parsed?.[chain_name];
-    if (!chainEntry) {
-      return [];
-    }
-    const network = IS_SANDBOX ? 'testnet' : 'mainnet';
-    const urls = chainEntry[network];
-    return Array.isArray(urls) && urls.length > 0 ? urls : [];
-  } catch {
-    return [];
-  }
-};
+export const getPremiumRPCUrl = chain_name => buildRpcProxyUrl(chain_name);

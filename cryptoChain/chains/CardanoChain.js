@@ -4,23 +4,35 @@ import {
   MeshWallet,
   Transaction,
 } from '@meshsdk/core';
-import {config} from 'dok-wallet-blockchain-networks/config/config';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
 import {CardanoChainService} from 'dok-wallet-blockchain-networks/service/cardanoChain';
+import {
+  buildScanProxyUrl,
+  rpcSessionAdapter,
+} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 
-const provider = new BlockfrostProvider(config.BLOCKFROST_API_KEY);
+// Created on first SDK use so balance/transaction reads — which are plain
+// HTTP — never load @meshsdk/core.
+let providerInstance;
+const provider = () => {
+  if (!providerInstance) {
+    providerInstance = new BlockfrostProvider(buildScanProxyUrl('cardano'));
+    providerInstance._axiosInstance.defaults.adapter = rpcSessionAdapter;
+  }
+  return providerInstance;
+};
 
 export const CardanoChain = () => {
   const recall = async key => {
     const wallet = new MeshWallet({
       key,
       networkId: 1,
-      fetcher: provider,
-      submitter: provider,
+      fetcher: provider(),
+      submitter: provider(),
     });
     await wallet.init();
     return wallet;
@@ -148,7 +160,7 @@ export const CardanoChain = () => {
     },
     waitForConfirmation: async ({transaction}) => {
       return new Promise(resolve => {
-        provider.onTxConfirmed(transaction, () => {
+        provider().onTxConfirmed(transaction, () => {
           resolve(true);
         });
         setTimeout(() => {

@@ -1,4 +1,5 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {captureError} from 'services/logger';
 import {getExchange} from 'dok-wallet-blockchain-networks/redux/exchange/exchangeSelectors';
 import {
   calculateEstimateFee,
@@ -12,6 +13,9 @@ import {
   convertToSmallAmount,
   parseBalance,
   validateNumber,
+  isHederaUnactivated,
+  getHederaLedgerAddress,
+  HEDERA_UNACTIVATED_MESSAGE,
 } from 'dok-wallet-blockchain-networks/helper';
 import {applyApproveGasPrice} from 'dok-wallet-blockchain-networks/helper/approveFees';
 import {
@@ -34,6 +38,19 @@ import {ethers} from 'ethers';
 // caps amount at uint160 max, so "unlimited" must use that ceiling on the permit2
 // path instead of ethers.MaxUint256 (uint256 max), which would overflow that call.
 const MAX_UINT160 = 2n ** 160n - 1n;
+
+// A Hedera wallet carries its EVM address until the first deposit creates the
+// account; CEX providers only accept `0.0.N`, so swaps wait for activation.
+const assertHederaActivated = (...assets) => {
+  if (assets.some(isHederaUnactivated)) {
+    showToast({
+      type: 'errorToast',
+      title: 'Hedera account not active',
+      message: HEDERA_UNACTIVATED_MESSAGE,
+    });
+    throw new Error(HEDERA_UNACTIVATED_MESSAGE);
+  }
+};
 
 const initialState = {
   amountFrom: '',
@@ -106,7 +123,8 @@ const buildQuoteBasePayload = (
   // hardcoded per-address map and refuse to quote unmapped tokens.
   fromDecimals: selectedFromAsset?.decimal,
   toDecimals: selectedToAsset?.decimal,
-  fromAddress: selectedFromAsset?.address,
+  // Hedera hands providers its `0.0.N` account id, not the EVM address.
+  fromAddress: getHederaLedgerAddress(selectedFromAsset),
   // BTC only: every funded derive address, so LI.FI can gather UTXOs across
   // the HD wallet's change addresses instead of just the primary address.
   // undefined for every other chain.
@@ -115,7 +133,7 @@ const buildQuoteBasePayload = (
   // destination wallet so cross-VM routes price (and execute) correctly. A
   // custom address is only validated at submit — the backend re-quotes there
   // if the recipient changed.
-  withdrawalAddress: selectedToAsset?.address,
+  withdrawalAddress: getHederaLedgerAddress(selectedToAsset),
   slippage: slippage ? Number(slippage) : undefined,
   // This app version can attach OP_RETURN memos to bitcoin sends — the
   // backend only offers BTC-origin routes that need a memo (LI.FI's shared
@@ -172,6 +190,7 @@ export const fetchExchangeQuotes = createAsyncThunk(
     const {selectedFromAsset, selectedToAsset, slippage} = getExchange(
       thunkAPI.getState(),
     );
+    assertHederaActivated(selectedFromAsset, selectedToAsset);
     const payload = {
       ...buildQuoteBasePayload(selectedFromAsset, selectedToAsset, slippage),
       amount: amount?.toString() || '1',
@@ -278,6 +297,7 @@ export const calculateExchange = createAsyncThunk(
           throw new Error('Invalid Custom Address');
         }
       }
+      assertHederaActivated(selectedFromAsset, selectedToAsset);
       const payload = {
         ...buildQuoteBasePayload(selectedFromAsset, selectedToAsset, slippage),
         // String, not Number: the DEX adapters convert human-decimal strings
@@ -285,9 +305,10 @@ export const calculateExchange = createAsyncThunk(
         amount: amountFrom?.toString(),
         // Base payload quotes for the destination wallet; the create must
         // honour a validated custom address instead.
-        withdrawalAddress: finalCustomAddress || selectedToAsset?.address,
+        withdrawalAddress:
+          finalCustomAddress || getHederaLedgerAddress(selectedToAsset),
         validName,
-        refundAddress: selectedFromAsset?.address,
+        refundAddress: getHederaLedgerAddress(selectedFromAsset),
         extraData,
         providerName: selectedExchangeChain?.providerName,
         // Ties the backend history record to this wallet's swap history.
@@ -359,6 +380,23 @@ export const calculateExchange = createAsyncThunk(
     } catch (e) {
       console.error('errorr in exchange', e);
       dispatch(setExchangeSuccess(false));
+      if (e?.message !== 'Invalid Custom Address') {
+        const {selectedFromAsset, selectedToAsset, selectedExchangeChain} =
+          getExchange(thunkAPI.getState());
+        captureError(e, {
+          tags: {
+            area: 'exchange',
+            op: 'quote',
+            from_chain: selectedFromAsset?.chain_name,
+            to_chain: selectedToAsset?.chain_name,
+            provider: selectedExchangeChain,
+          },
+          extra: {
+            status: e?.response?.status,
+            backend_message: e?.response?.data?.message,
+          },
+        });
+      }
       if (e?.message === 'Invalid Custom Address') {
         showToast({
           type: 'errorToast',
@@ -629,7 +667,7 @@ export const approveSwapAllowance = createAsyncThunk(
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
     } catch (error) {
-      console.error('Error in approveSwapAllowance', error);
+      captureError(error, {tags: {area: 'exchange', op: 'approve_allowance'}});
       dispatch(setExchangeFields({approveLoading: false}));
       showToast({
         type: 'errorToast',
@@ -807,7 +845,7 @@ export const approveExchangePermit2 = createAsyncThunk(
       dispatch(setExchangeFields({permitApproveLoading: false}));
       return result;
     } catch (error) {
-      console.error('Error in approveExchangePermit2', error);
+      captureError(error, {tags: {area: 'exchange', op: 'approve_permit2'}});
       dispatch(setExchangeFields({permitApproveLoading: false}));
       showToast({
         type: 'errorToast',

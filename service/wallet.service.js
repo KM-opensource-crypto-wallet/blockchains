@@ -163,6 +163,8 @@ export const getCoinSnapshot = async (
       appVersion: APP_VERSION,
       privateKey: nativeCoin.privateKey,
       address: nativeCoin.address,
+      // Hedera only: the ledger account id, kept separate from the address.
+      accountId: nativeCoin?.accountId ?? coinDef?.accountId,
       publicKey: nativeCoin?.publicKey,
       extendedPublicKey: nativeCoin?.extendedPublicKey,
       extendedPrivateKey: nativeCoin?.extendedPrivateKey,

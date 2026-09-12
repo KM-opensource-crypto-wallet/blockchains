@@ -15,7 +15,6 @@ export const getSellCryptoAllProviders = state =>
 export const getMessageAllowUrls = state =>
   state?.cryptoProvider?.messageAllowUrls || [];
 
-export const getCmcApiKeys = state => state?.cryptoProvider?.cmc_api_keys || [];
 export const getBitcoinFeeMultiplier = state =>
   state?.cryptoProvider?.bitcoin_fee_multiplier || {};
 
@@ -26,8 +25,8 @@ export const getDogecoinFeeMultiplier = state =>
 export const getBitcoinCashFeeMultiplier = state =>
   state?.cryptoProvider?.bitcoin_cash_fee_multiplier || {};
 
-export const getAdditionalL1Fee = state =>
-  state?.cryptoProvider?.additional_l1_fees || {};
+export const getAdditionalL1FeePercentage = state =>
+  state?.cryptoProvider?.additional_l1_fee_percentages || {};
 
 export const getGoogleAnalyticsKey = state =>
   state?.cryptoProvider?.google_analytics_key;
