@@ -4,6 +4,7 @@ import {
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {captureError, logger} from 'services/logger';
 import {
   clearSelectedUTXOs,
   setCurrentTransferSubmitting,
@@ -31,7 +32,6 @@ import {
   getMasterClientId,
   getSelectedNftData,
   isWalletHiddenAndLocked,
-  selectAllCoins,
   selectAllCoinSymbol,
   selectAllWalletName,
   selectAllWallets,
@@ -39,7 +39,9 @@ import {
   selectCurrentCoin,
   selectCurrentWallet,
   selectCurrentWalletClientId,
+  selectIsRefreshingAllWallets,
   selectUserCoins,
+  selectVisibleWallets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {
@@ -299,7 +301,15 @@ export const createWallet = createAsyncThunk(
         }
       }
     } catch (error) {
-      console.error('error in createCoins', error);
+      // Only counts and flags here: walletData carries the phrase/private key.
+      captureError(error, {
+        tags: {
+          area: 'wallet',
+          op: isFromImportWallet ? 'import' : 'create',
+          with_private_key: String(isImportWalletWithPrivateKey),
+        },
+        extra: {selectedCoinsCount: walletData?.selectedCoins?.length ?? null},
+      });
       return thunkAPI.rejectWithValue(error);
       // throw error;
     }
@@ -341,6 +351,12 @@ export const createWallet = createAsyncThunk(
     }
     walletData.newStoreWallet = newStoreWallet;
     const masterClientId = getMasterClientId(currentState);
+    logger.info('wallet.created', {
+      op: isFromImportWallet ? 'import' : 'create',
+      with_private_key: isImportWalletWithPrivateKey,
+      coins: Array.isArray(coins) ? coins.length : 0,
+      total_wallets: allWallets.length + 1,
+    });
     registerUserAPI({
       coins: walletData.newStoreWallet?.coins,
       clientId: newStoreWallet?.clientId,
@@ -557,9 +573,16 @@ export const refreshCoins = createAsyncThunk(
   async (refreshData, thunkAPI) => {
     try {
       const currentState = thunkAPI.getState();
-      const currentWallet = selectCurrentWallet(currentState);
-      const currentWalletClientId = selectCurrentWalletClientId(currentState);
-      const oldCoins = selectAllCoins(currentState);
+      // Optional wallet override by clientId (refreshAllWalletsCoins refreshes
+      // every visible wallet in turn). Default keeps every existing caller on
+      // the current wallet. Only the id travels in the thunk arg: the wallet
+      // object carries phrase/privateKey and would otherwise sit in the
+      // pending/fulfilled/rejected action meta.
+      const currentWallet = refreshData?.walletClientId
+        ? findWalletByClientId(currentState.wallets, refreshData.walletClientId)
+        : selectCurrentWallet(currentState);
+      const currentWalletClientId = currentWallet?.clientId;
+      const oldCoins = currentWallet?.coins || [];
       const filterCoins = oldCoins.filter(
         item => !!validateSupportedChain(item?.chain_name),
       );
@@ -1025,7 +1048,7 @@ export const walletConnect = createAsyncThunk(
     ) {
       const message =
         'The dApp requested a signature from a different address than the connected wallet.';
-      console.error('Error in walletConnect', message);
+      logger.warn('walletconnect.wrong_account', {method, chain_name});
       showToast({
         type: 'errorToast',
         title: 'Wrong account',
@@ -1186,7 +1209,15 @@ export const walletConnect = createAsyncThunk(
       }
       return tx;
     } catch (e) {
-      console.error('Error in walletConnect', e);
+      // Never the payload: it carries privateKey, signTypeData, transactionData.
+      captureError(e, {
+        tags: {
+          area: 'walletconnect',
+          method,
+          chain_name,
+          chainId: chainId != null ? String(chainId) : undefined,
+        },
+      });
       // Chains attach a protocol error (HIP-820 code 9000 + node status) when
       // the dApp needs more than the generic failure.
       await respondWithError(toWalletConnectError(e));
@@ -1200,6 +1231,42 @@ export const walletConnect = createAsyncThunk(
     }
   },
 );
+
+// Attributes describing a send for logs/issues. Deliberately excludes
+// addresses and amounts, which together with user.id would be identifying.
+const describeSendForLogs = txData => ({
+  chain: txData?.currentCoin?.chain_name,
+  symbol: txData?.currentCoin?.symbol,
+  is_token: !!(txData?.contractAddress || txData?.currentCoin?.contractAddress),
+  is_exchange: !!txData?.isExchange,
+  is_nft: !!txData?.isNFT,
+  is_staking: !!(txData?.isCreateStaking || txData?.isCreateVote),
+});
+
+const classifySendRejection = message => {
+  if (!message) {
+    return null;
+  }
+  if (isSwapBlockingError(message)) {
+    return 'quote_expired';
+  }
+  if (message.includes('transaction underpriced')) {
+    return 'fee_too_low';
+  }
+  if (message === 'polkadot_receiver_should_1_dot') {
+    return 'polkadot_min_balance';
+  }
+  if (HEDERA_USER_MESSAGES.includes(message)) {
+    return 'hedera_precondition';
+  }
+  if (
+    message === 'could not coalesce error' ||
+    message.includes('nonce too low')
+  ) {
+    return 'already_sent';
+  }
+  return null;
+};
 
 export const sendFunds = createAsyncThunk(
   'wallets/sendFunds',
@@ -1542,7 +1609,7 @@ export const sendFunds = createAsyncThunk(
           thunkAPI.dispatch(
             addPendingTransactions({
               key,
-              value: {hash: res.hash, date: new Date().toISOString()},
+              value: {hash: tx_hash, date: new Date().toISOString()},
             }),
           );
         }
@@ -1641,15 +1708,19 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
-        return {
+        const status =
+          confirmTransaction === 'pending'
+            ? 2
+            : confirmTransaction?.status === 'failed'
+            ? 1
+            : 3;
+        // Public chain data only: no addresses or amounts next to user.id.
+        logger.info('send.submitted', {
+          ...describeSendForLogs(txData),
+          status,
           tx_hash,
-          status:
-            confirmTransaction === 'pending'
-              ? 2
-              : confirmTransaction?.status === 'failed'
-              ? 1
-              : 3,
-        };
+        });
+        return {tx_hash, status};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
         console.error('Something went wrong');
@@ -1664,6 +1735,25 @@ export const sendFunds = createAsyncThunk(
     } catch (e) {
       console.error('Error in send fund', e);
       thunkAPI.dispatch(setCurrentTransferSubmitting(false));
+      // Expected refusals (stale quote, chain preconditions) are warnings;
+      // everything else is a defect worth an issue.
+      const rejectedReason = classifySendRejection(e?.message);
+      if (rejectedReason) {
+        logger.warn('send.rejected', {
+          ...describeSendForLogs(txData),
+          reason: rejectedReason,
+        });
+      } else {
+        const sendAttrs = describeSendForLogs(txData);
+        captureError(e, {
+          tags: {
+            area: 'send',
+            chain: sendAttrs.chain,
+            symbol: sendAttrs.symbol,
+          },
+          extra: sendAttrs,
+        });
+      }
       if (
         isSwapBlockingError(e?.message) ||
         isSponsoredRetryError(e?.message)
@@ -1839,7 +1929,7 @@ export const sendPendingTransactions = createAsyncThunk(
             thunkAPI.dispatch(
               addPendingTransactions({
                 key,
-                value: {hash: res.hash, date: new Date().toISOString()},
+                value: {hash: tx_hash, date: new Date().toISOString()},
               }),
             );
           }
@@ -1904,7 +1994,12 @@ export const sendPendingTransactions = createAsyncThunk(
         });
       }
     } catch (e) {
-      console.error('Error in send pending transactions', e);
+      captureError(e, {
+        tags: {
+          area: 'send.pending',
+          op: payload?.isCancelTransaction ? 'cancel' : 'accelerate',
+        },
+      });
       isFromUpdateScreen
         ? thunkAPI.dispatch(setUpdateTransactionSubmitting(false))
         : thunkAPI.dispatch(setPendingTransferSubmitting(false));
@@ -1926,7 +2021,62 @@ const initialState = {
   pendingTransactions: {},
   masterClientId: null,
   failedTransaction: null,
+  // In-flight "refresh all wallets" progress (Wallets screen). UI state, not
+  // data: walletsPersistTransform in src/redux/store.js resets both on
+  // rehydrate so a quit mid-refresh can't leave the button stuck.
+  isRefreshingAllWallets: false,
+  refreshingWalletClientId: null,
+  // clientId -> requestId of the latest in-flight refreshCoins for that
+  // wallet. Two refreshes of one wallet can overlap (pull-to-refresh on Home
+  // while refreshAllWalletsCoins is on the same wallet); only the latest may
+  // write its coins. Transient: walletsPersistTransform resets it on rehydrate.
+  refreshCoinsRequestIds: {},
 };
+
+export const refreshAllWalletsCoins = createAsyncThunk(
+  'wallets/refreshAllWalletsCoins',
+  async (_, thunkAPI) => {
+    const clientIds = selectVisibleWallets(thunkAPI.getState()).map(
+      wallet => wallet.clientId,
+    );
+    let failed = 0;
+    try {
+      // Sequential on purpose: each wallet's coins already fan out in
+      // parallel inside refreshCoins, so running wallets back-to-back keeps
+      // the RPC load bounded to one wallet at a time. Each wallet is written
+      // to the store as soon as it finishes (refreshCoins.fulfilled).
+      for (const clientId of clientIds) {
+        // Re-read at its turn: an earlier wallet's refresh takes a while, and
+        // the user may have deleted/hidden this one or toggled its coins in
+        // the meantime. Passing a stale object would write those coins back.
+        const wallet = selectVisibleWallets(thunkAPI.getState()).find(
+          item => item.clientId === clientId,
+        );
+        if (!wallet) {
+          continue;
+        }
+        thunkAPI.dispatch(setRefreshingWalletClientId(wallet.clientId));
+        try {
+          await thunkAPI
+            .dispatch(refreshCoins({walletClientId: wallet.clientId}))
+            .unwrap();
+        } catch (e) {
+          // refreshCoins already logged and breadcrumbed the failure.
+          failed += 1;
+        }
+      }
+    } finally {
+      thunkAPI.dispatch(setRefreshingWalletClientId(null));
+    }
+    // Counts only: wallet names and balances must not reach Sentry.
+    logger.info('wallets.refresh_all', {total: clientIds.length, failed});
+    return {total: clientIds.length, failed};
+  },
+  {
+    // Ignore taps while a run is in flight (double-tap / re-entry guard).
+    condition: (_, {getState}) => !selectIsRefreshingAllWallets(getState()),
+  },
+);
 
 export const createIfNotExistsMasterClientId = createAsyncThunk(
   'wallets/createIfNotExistsMasterClientId',
@@ -2270,6 +2420,9 @@ export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
+    setRefreshingWalletClientId: (state, {payload}) => {
+      state.refreshingWalletClientId = payload ?? null;
+    },
     setWalletChainExistingCoin: (state, action) => {
       const {clientId, chainWallets} = action.payload;
       const wallet = getWalletByClientId(state, clientId);
@@ -2871,6 +3024,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption,
         hideNotification,
+        deleteScheduleNotification,
       } = payload || {};
       if (!secretCodeSalt || !secretCodeHash) {
         throw new Error('setWalletHideSettings: missing secret code hash/salt');
@@ -2882,6 +3036,7 @@ export const walletsSlice = createSlice({
         secretCodeIterations,
         relockOption: RELOCK_OPTIONS[relockOption] || RELOCK_OPTIONS.RELAUNCH,
         hideNotification: hideNotification ?? true,
+        deleteScheduleNotification: deleteScheduleNotification ?? true,
       };
       reassignCurrentWalletIfHiddenState(state);
     },
@@ -3101,12 +3256,38 @@ export const walletsSlice = createSlice({
     },
   },
   extraReducers: builder => {
-    builder.addCase(refreshCoins.fulfilled, (state, {payload}) => {
+    builder.addCase(refreshAllWalletsCoins.pending, state => {
+      state.isRefreshingAllWallets = true;
+    });
+    const endRefreshAll = state => {
+      state.isRefreshingAllWallets = false;
+      state.refreshingWalletClientId = null;
+    };
+    builder.addCase(refreshAllWalletsCoins.fulfilled, endRefreshAll);
+    builder.addCase(refreshAllWalletsCoins.rejected, endRefreshAll);
+    builder.addCase(refreshCoins.pending, (state, {meta}) => {
+      // Same resolution as the thunk: explicit override, else current wallet.
+      const clientId = meta.arg?.walletClientId || state.currentWalletClientId;
+      if (!clientId) {
+        return;
+      }
+      if (!state.refreshCoinsRequestIds) {
+        state.refreshCoinsRequestIds = {};
+      }
+      state.refreshCoinsRequestIds[clientId] = meta.requestId;
+    });
+    builder.addCase(refreshCoins.fulfilled, (state, {payload, meta}) => {
       const coinData = payload.coinData;
-      const currentWallet = getWalletByClientId(
-        state,
-        payload.currentWalletClientId,
-      );
+      const clientId = payload.currentWalletClientId;
+      const latestRequestId = state.refreshCoinsRequestIds?.[clientId];
+      if (latestRequestId && latestRequestId !== meta.requestId) {
+        // A newer refresh of this wallet started after this one; its result
+        // is (or will be) fresher, so don't overwrite it with stale coins.
+        // The id is kept (not cleared on completion) so an older request
+        // that finishes even later is still recognised as stale.
+        return;
+      }
+      const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
         currentWallet.coins = coinData;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
@@ -3474,6 +3655,7 @@ export const walletsSlice = createSlice({
 });
 
 export const {
+  setRefreshingWalletClientId,
   setCurrentCoin,
   setWalletChainExistingCoin,
   updateWalletName,

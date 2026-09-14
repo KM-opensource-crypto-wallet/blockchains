@@ -396,3 +396,12 @@ export const selectShouldShowCoinSyncBanner = state => {
     !wallet?.lastCoinsScanTimestamp
   );
 };
+
+// refreshAllWalletsCoins progress: whole run in flight, and the wallet whose
+// coins are currently being fetched. In-flight UI state kept in this slice
+// and reset on rehydrate by walletsPersistTransform (src/redux/store.js).
+export const selectIsRefreshingAllWallets = state =>
+  !!state.wallets?.isRefreshingAllWallets;
+
+export const selectRefreshingWalletClientId = state =>
+  state.wallets?.refreshingWalletClientId || null;

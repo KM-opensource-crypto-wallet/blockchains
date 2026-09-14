@@ -1,4 +1,5 @@
 import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {captureError} from 'services/logger';
 import {getExchange} from 'dok-wallet-blockchain-networks/redux/exchange/exchangeSelectors';
 import {
   calculateEstimateFee,
@@ -379,6 +380,23 @@ export const calculateExchange = createAsyncThunk(
     } catch (e) {
       console.error('errorr in exchange', e);
       dispatch(setExchangeSuccess(false));
+      if (e?.message !== 'Invalid Custom Address') {
+        const {selectedFromAsset, selectedToAsset, selectedExchangeChain} =
+          getExchange(thunkAPI.getState());
+        captureError(e, {
+          tags: {
+            area: 'exchange',
+            op: 'quote',
+            from_chain: selectedFromAsset?.chain_name,
+            to_chain: selectedToAsset?.chain_name,
+            provider: selectedExchangeChain,
+          },
+          extra: {
+            status: e?.response?.status,
+            backend_message: e?.response?.data?.message,
+          },
+        });
+      }
       if (e?.message === 'Invalid Custom Address') {
         showToast({
           type: 'errorToast',
@@ -649,7 +667,7 @@ export const approveSwapAllowance = createAsyncThunk(
       dispatch(setExchangeFields({approveLoading: false}));
       return result;
     } catch (error) {
-      console.error('Error in approveSwapAllowance', error);
+      captureError(error, {tags: {area: 'exchange', op: 'approve_allowance'}});
       dispatch(setExchangeFields({approveLoading: false}));
       showToast({
         type: 'errorToast',
@@ -827,7 +845,7 @@ export const approveExchangePermit2 = createAsyncThunk(
       dispatch(setExchangeFields({permitApproveLoading: false}));
       return result;
     } catch (error) {
-      console.error('Error in approveExchangePermit2', error);
+      captureError(error, {tags: {area: 'exchange', op: 'approve_permit2'}});
       dispatch(setExchangeFields({permitApproveLoading: false}));
       showToast({
         type: 'errorToast',
