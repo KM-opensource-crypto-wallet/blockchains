@@ -57,7 +57,22 @@ const errorDecoder = {
 };
 
 const BATCH_EXECUTE_SELECTOR = '0x3f707e6b'; // execute(Call[])
-const SPONSORED_BATCH_EXECUTE_SELECTOR = '0x6171d1c9'; // execute(Call[],bytes)
+const SPONSORED_BATCH_EXECUTE_SELECTOR = '0xc8105142';
+
+const LEGACY_SPONSORED_BATCH_EXECUTE_SELECTORS = [
+  '0x01bf0e52',
+  '0x8f0d0deb',
+  '0x6171d1c9',
+];
+const isSponsoredBatchInput = input =>
+  typeof input === 'string' &&
+  (input.startsWith(SPONSORED_BATCH_EXECUTE_SELECTOR) ||
+    LEGACY_SPONSORED_BATCH_EXECUTE_SELECTORS.some(sel =>
+      input.startsWith(sel),
+    ));
+
+const BATCH_NONCE_SLOT =
+  '0x44746e9606aa6bc254bf5d64dd86d0cd8a64eaa8f5e91abf3f4b185836c9a100';
 
 // Placeholder 65-byte signature used only to size the tx for GasPriceOracle
 // getL1Fee. Arbitrary high-entropy bytes; `s` kept in the low half so ethers
@@ -66,16 +81,41 @@ const L1_FEE_PLACEHOLDER_SIGNATURE_R =
   '0x8a3d1f7e2b9c4056d7e1a2f3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7';
 const L1_FEE_PLACEHOLDER_SIGNATURE_S =
   '0x1b6e9d2c5f8a3b7e4d1c0f9a8b7e6d5c4b3a29181706f5e4d3c2b1a09f8e7d6c';
-// Fee-sized stand-in for the fee transfer while the real amount is unquoted.
-const PLACEHOLDER_FEE_AMOUNT = '1000000';
+const PLACEHOLDER_FEE_AMOUNT = '1000';
+const PLACEHOLDER_TOKEN_PER_ETH = '1';
 
-const buildFeeCall = ({feeTokenAddress, treasury, feeAmount}) => {
-  const erc20Interface = new ethers.Interface(erc20Abi);
-  return [
-    feeTokenAddress,
-    '0',
-    erc20Interface.encodeFunctionData('transfer', [treasury, feeAmount]),
-  ];
+const SPONSORED_EXECUTE_TYPES = {
+  Call: [
+    {name: 'to', type: 'address'},
+    {name: 'value', type: 'uint256'},
+    {name: 'data', type: 'bytes'},
+  ],
+  SponsoredBatch: [
+    {name: 'calls', type: 'Call[]'},
+    {name: 'nonce', type: 'uint256'},
+    {name: 'sponsor', type: 'address'},
+    {name: 'feeToken', type: 'address'},
+    {name: 'tokenPerEth', type: 'uint256'},
+    {name: 'maxFee', type: 'uint256'},
+    {name: 'deadline', type: 'uint256'},
+  ],
+};
+
+const SPONSORED_EXECUTE_FRAGMENT =
+  'executeSponsored(((address,uint256,bytes)[],uint256,address,address,uint256,uint256,uint256),bytes,address,uint256,uint256)';
+
+const delegatedToBatchContract = async (chain_name, customRpcUrl, address) => {
+  const {isDelegated, contractAddress} = await EVMChain(
+    chain_name,
+    undefined,
+    customRpcUrl,
+  ).checkDelegation({address});
+  const expected = BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+  return (
+    isDelegated &&
+    !!expected &&
+    contractAddress?.toLowerCase() === expected.toLowerCase()
+  );
 };
 
 const serializeCalls = calls =>
@@ -187,7 +227,7 @@ async function needsAllowanceReset({
   }
 }
 
-function getEVMTransactionType(item, isBatch, chainName) {
+function getEVMTransactionType(item, isBatch, chainName, isTokenTransfer) {
   if (isBatch) {
     return 'batch';
   }
@@ -221,15 +261,16 @@ function getEVMTransactionType(item, isBatch, chainName) {
 
   // NFT transfer detection — by unambiguous function selectors or safeTransferFrom name
   if (
-    (selector && NFT_TRANSFER_SELECTORS.has(selector)) ||
-    functionName.includes('safetransferfrom') ||
-    functionName.includes('safebatchtransferfrom')
+    !isTokenTransfer &&
+    ((selector && NFT_TRANSFER_SELECTORS.has(selector)) ||
+      functionName.includes('safetransferfrom') ||
+      functionName.includes('safebatchtransferfrom'))
   ) {
     return 'nftTransfer';
   }
 
   // Non-trivial input data that isn't a plain ERC20 call → smart contract interaction
-  if (selector && !ERC20_SELECTORS.has(selector)) {
+  if (!isTokenTransfer && selector && !ERC20_SELECTORS.has(selector)) {
     return 'smartContract';
   }
 
@@ -257,14 +298,22 @@ const batchContractInterface = {
     (batchIface ??= new ethers.Interface(contractABI)).parseTransaction(tx),
 };
 
+function batchCallsFrom(decoded) {
+  const args = decoded?.args;
+  if (!args) {
+    return null;
+  }
+  const candidate =
+    decoded?.fragment?.name === 'executeSponsored' ? args[0]?.[0] : args[0];
+  return Array.isArray(candidate) ? candidate : null;
+}
+
 function decodeBatchTotalAmount(input) {
   try {
     const decoded = batchContractInterface.parseTransaction({data: input});
-    if (decoded?.args?.[0]) {
-      const total = decoded.args[0].reduce(
-        (sum, call) => sum + BigInt(call[1]),
-        0n,
-      );
+    const calls = batchCallsFrom(decoded);
+    if (calls) {
+      const total = calls.reduce((sum, call) => sum + BigInt(call[1]), 0n);
       return total.toString();
     }
   } catch (e) {
@@ -291,8 +340,8 @@ function decodeBatchTokenTransfer(input, contractAddress, counterparty) {
       return null;
     }
     const decoded = batchContractInterface.parseTransaction({data: input});
-    const calls = decoded?.args?.[0];
-    if (!Array.isArray(calls)) {
+    const calls = batchCallsFrom(decoded);
+    if (!calls) {
       return null;
     }
     const target = contractAddress.toLowerCase();
@@ -365,41 +414,74 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   }
 
   const getBatchContractNonce = async address => {
-    const slot = await rpcRequest(
+    const raw = await rpcRequest(
       'eth_getStorageAt',
-      [address, '0x0', 'latest'],
+      [address, BATCH_NONCE_SLOT, 'latest'],
       null,
     );
-    if (slot == null) {
+    if (raw == null) {
       throw new Error('Could not read the batch nonce');
     }
-    return Number(BigInt(slot));
+    return raw === '0x' ? 0 : Number(BigInt(raw));
   };
 
-  // Reproduces BatchCallAndSponsor.execute(calls, signature)'s digest:
-  // keccak256(abi.encodePacked(nonce, encodedCalls))  under EIP-191
-  // where encodedCalls concatenates to(20) || value(32) || data per call.
-  const signBatchForSponsor = async (wallet, calls, batchNonce) => {
+  // verifyingContract is the user's own account: under EIP-7702 the delegate runs
+  // inside it, so address(this) is the EOA. Types come from the quote.
+  const signBatchForSponsor = async (wallet, calls, params) => {
+    const {
+      batchNonce,
+      deadline,
+      sponsor,
+      feeToken,
+      tokenPerEth,
+      maxFee,
+      eip712,
+    } = params ?? {};
     if (batchNonce == null || isNaN(Number(batchNonce))) {
       throw new Error('Cannot sign sponsored batch without a batch nonce');
     }
-    let encodedCalls = '0x';
-    for (const [to, value, data] of calls) {
-      encodedCalls = ethers.concat([
-        encodedCalls,
-        ethers.getAddress(to),
-        ethers.zeroPadValue(ethers.toBeHex(BigInt(value || 0)), 32),
-        data || '0x',
-      ]);
+    if (deadline == null || isNaN(Number(deadline))) {
+      throw new Error('Cannot sign sponsored batch without a deadline');
     }
-    const digest = ethers.keccak256(
-      ethers.concat([
-        ethers.zeroPadValue(ethers.toBeHex(BigInt(batchNonce)), 32),
-        encodedCalls,
-      ]),
-    );
-    return await wallet.signMessage(ethers.getBytes(digest));
+    if (!eip712?.types || !eip712?.name || !eip712?.version) {
+      throw new Error('Sponsored gas quote is missing its EIP-712 definition');
+    }
+    const domain = {
+      name: eip712.name,
+      version: eip712.version,
+      chainId: Number(eip712.chainId ?? chainId),
+      verifyingContract: ethers.getAddress(wallet.address),
+    };
+    const message = {
+      calls: calls.map(([to, value, data]) => ({
+        to: ethers.getAddress(to),
+        value: BigInt(value || 0),
+        data: data || '0x',
+      })),
+      nonce: BigInt(batchNonce),
+      sponsor: ethers.getAddress(sponsor),
+      feeToken: ethers.getAddress(feeToken),
+      tokenPerEth: BigInt(tokenPerEth),
+      maxFee: BigInt(maxFee),
+      deadline: BigInt(deadline),
+    };
+    return await wallet.signTypedData(domain, eip712.types, message);
   };
+
+  const provisionalSponsorTerms = feeTokenAddress => ({
+    batchNonce: null,
+    deadline: Math.floor(Date.now() / 1000) + 300,
+    sponsor: SPONSOR_TREASURY_ADDRESS,
+    feeToken: feeTokenAddress,
+    tokenPerEth: PLACEHOLDER_TOKEN_PER_ETH,
+    maxFee: PLACEHOLDER_FEE_AMOUNT,
+    eip712: {
+      name: 'DokWallet BatchCallAndSponsor',
+      version: '1',
+      chainId,
+      types: SPONSORED_EXECUTE_TYPES,
+    },
+  });
 
   async function revokeAuthorization(walletSigner, evmProvider) {
     try {
@@ -1646,7 +1728,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
                 item?.input?.startsWith(BATCH_EXECUTE_SELECTOR)) ||
               // Sponsored wallet sends it to the delegated EOA.
               (toAddress === normalizedAddress &&
-                item?.input?.startsWith(SPONSORED_BATCH_EXECUTE_SELECTOR));
+                isSponsoredBatchInput(item?.input));
             const amount = isBatch
               ? decodeBatchTotalAmount(item?.input)
               : bnValue.toString();
@@ -1717,9 +1799,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
         const toAddr = tx.to?.toLowerCase();
         const fromAddr = tx.from?.toLowerCase();
-        const isSponsoredBatchTx = !!tx.data?.startsWith(
-          SPONSORED_BATCH_EXECUTE_SELECTOR,
-        );
+        const isSponsoredBatchTx = isSponsoredBatchInput(tx.data);
         const isBatchTx =
           (batchContractAddress &&
             toAddr === batchContractAddress.toLowerCase()) ||
@@ -1910,7 +1990,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               to: item?.to,
               contractAddress: item?.contractAddress,
               totalCourse: '0$',
-              transactionType: getEVMTransactionType(item, isBatch, chain_name),
+              transactionType: getEVMTransactionType(
+                item,
+                isBatch,
+                chain_name,
+                true,
+              ),
               blockNumber: item?.blockNumber ?? null,
               confirmations: item?.confirmations ?? null,
             };
@@ -2280,52 +2365,61 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         if (!SPONSOR_TREASURY_ADDRESS) {
           throw new Error('Sponsored gas is not configured');
         }
-        const provisionalCalls = [
-          buildFeeCall({
-            feeTokenAddress,
-            treasury: SPONSOR_TREASURY_ADDRESS,
-            feeAmount: PLACEHOLDER_FEE_AMOUNT,
-          }),
-          ...calls,
-        ];
+        const provisionalTerms = provisionalSponsorTerms(feeTokenAddress);
         const currentNonce = await EVMChain(
           chain_name,
           undefined,
           customRpcUrl,
         ).getNonce({address: wallet.address});
         const batchNonce = await getBatchContractNonce(wallet.address);
-        const {isDelegated} = await EVMChain(
+        const isDelegated = await delegatedToBatchContract(
           chain_name,
-          undefined,
           customRpcUrl,
-        ).checkDelegation({address: wallet.address});
-        const provisionalSignature = await signBatchForSponsor(
-          wallet,
-          provisionalCalls,
-          batchNonce,
+          wallet.address,
         );
+        const provisionalSignature = await signBatchForSponsor(wallet, calls, {
+          ...provisionalTerms,
+          batchNonce,
+        });
+        let sponsoredCalldataBytes = 0;
         const estimatedGas = await retryFunc(async evmProvider => {
           const walletSigner = wallet.connect(evmProvider);
-          const delegatedContract = new ethers.Contract(
-            walletSigner.address,
+          const data = (batchIface ??= new ethers.Interface(
             contractABI,
-            walletSigner,
-          );
-          const options = isDelegated
-            ? {}
-            : {
-                type: 4,
-                authorizationList: [
-                  await createAuthorization(
-                    walletSigner,
-                    Number(currentNonce) + 1,
-                    BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-                  ),
-                ],
-              };
-          return await delegatedContract[
-            'execute((address,uint256,bytes)[],bytes)'
-          ].estimateGas(provisionalCalls, provisionalSignature, options);
+          )).encodeFunctionData(SPONSORED_EXECUTE_FRAGMENT, [
+            [
+              calls,
+              batchNonce,
+              provisionalTerms.sponsor,
+              provisionalTerms.feeToken,
+              provisionalTerms.tokenPerEth,
+              provisionalTerms.maxFee,
+              provisionalTerms.deadline,
+            ],
+            provisionalSignature,
+            provisionalTerms.sponsor,
+            1n,
+            0n,
+          ]);
+          const {gasPrice: maxFeePerGas, maxPriorityFeePerGas} =
+            await getEtherGasPrice('recommended', evmProvider);
+          sponsoredCalldataBytes = ethers.dataLength(data);
+          return await evmProvider.estimateGas({
+            from: provisionalTerms.sponsor,
+            to: walletSigner.address,
+            data,
+            value: 0n,
+            maxFeePerGas,
+            ...(maxPriorityFeePerGas ? {maxPriorityFeePerGas} : {}),
+            ...(isDelegated
+              ? {}
+              : {
+                  type: 4,
+                  authorizationList: [
+                    await createSponsorAuthorization(wallet, currentNonce),
+                  ],
+                }),
+          });
         }, null);
         // retryFunc resolves null once every RPC has failed, and the worker
         // prices whatever we send, so bail rather than quote off nothing.
@@ -2337,18 +2431,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           is_sandbox: IS_SANDBOX,
           signer: wallet.address,
           estimatedGas: estimatedGas.toString(),
+          calldataBytes: sponsoredCalldataBytes,
           feeTokenAddress,
         });
         if (
           !quote?.quoteToken ||
-          !quote?.feeAmount ||
+          !quote?.maxFee ||
           !quote?.treasury ||
           !Number.isInteger(quote?.feeToken?.decimals)
         ) {
           throw new Error('Sponsored gas is unavailable right now');
         }
         return {
-          fee: parseBalance(quote.feeAmount, quote.feeToken.decimals),
+          fee: parseBalance(quote.maxFee, quote.feeToken.decimals),
+          estimatedFee: quote.minFee
+            ? parseBalance(quote.minFee, quote.feeToken.decimals)
+            : undefined,
           sponsoredQuote: quote,
           nonce: currentNonce,
           batchNonce,
@@ -2361,16 +2459,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error('Error in getSponsoredGasFees', e);
         const {code, error} = e?.response?.data ?? {};
-        if (code && error) {
-          const workerError = new Error(error);
-          workerError.code = code;
-          throw workerError;
+        if (!code || !error) {
+          throw e;
         }
-        throw e;
+        const workerError = new Error(error);
+        workerError.code = code;
+        throw workerError;
       }
     },
-    // Signs over the quoted fee amount and hands the batch to the
-    // worker, which verifies it and returns sponsor-signed raw bytes for us to
+    // Signs over the quoted fee amount and hands the batch to the worker, which
+    // verifies it, broadcasts it, and returns only the transaction hash.
     sendSponsoredBatchTransaction: async ({
       calls,
       privateKey,
@@ -2381,30 +2479,25 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw new Error('Sponsored gas quote is missing');
         }
         const wallet = new ethers.Wallet(privateKey);
-        const finalCalls = [
-          buildFeeCall({
-            feeTokenAddress: sponsoredQuote.feeToken?.address,
-            treasury: sponsoredQuote.treasury,
-            feeAmount: sponsoredQuote.feeAmount,
-          }),
-          ...calls,
-        ];
         const currentNonce = await EVMChain(
           chain_name,
           undefined,
           customRpcUrl,
         ).getNonce({address: wallet.address});
-        const batchNonce = await getBatchContractNonce(wallet.address);
-        const {isDelegated} = await EVMChain(
+        const isDelegated = await delegatedToBatchContract(
           chain_name,
-          undefined,
           customRpcUrl,
-        ).checkDelegation({address: wallet.address});
-        const signature = await signBatchForSponsor(
-          wallet,
-          finalCalls,
-          batchNonce,
+          wallet.address,
         );
+        const signature = await signBatchForSponsor(wallet, calls, {
+          batchNonce: sponsoredQuote.batchNonce,
+          deadline: sponsoredQuote.deadline,
+          sponsor: sponsoredQuote.sponsor,
+          feeToken: sponsoredQuote.feeToken?.address,
+          tokenPerEth: sponsoredQuote.tokenPerEth,
+          maxFee: sponsoredQuote.maxFee,
+          eip712: sponsoredQuote.eip712,
+        });
         const authorization = isDelegated
           ? null
           : serializeAuthorization(
@@ -2412,8 +2505,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             );
         const signed = await signSponsoredBatch({
           quoteToken: sponsoredQuote.quoteToken,
-          calls: serializeCalls(finalCalls),
-          batchNonce,
+          calls: serializeCalls(calls),
           signature,
           authorization,
         });
@@ -2428,7 +2520,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         if (e?.message?.toLowerCase()?.includes('invalid signature')) {
           throw new Error(SPONSORED_BATCH_RETRY_ERROR);
         }
-        throw e;
+        const {code, error} = e?.response?.data ?? {};
+        if (!code || !error) {
+          throw e;
+        }
+        const workerError = new Error(error);
+        workerError.code = code;
+        throw workerError;
       }
     },
     sendToken: async ({
@@ -2842,10 +2940,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             const code = await evmProvider.getCode(address);
             if (
               code &&
-              code.toLowerCase().startsWith('0xef0100') &&
-              code.length === 48
+              ethers.dataLength(code) === 23 &&
+              ethers.dataSlice(code, 0, 3) === '0xef0100'
             ) {
-              return {isDelegated: true, contractAddress: '0x' + code.slice(8)};
+              return {
+                isDelegated: true,
+                contractAddress: ethers.dataSlice(code, 3),
+              };
             }
             return {isDelegated: false, contractAddress: null};
           } catch (e) {

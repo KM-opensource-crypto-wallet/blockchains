@@ -365,6 +365,11 @@ export const isSponsoredRetryError = message =>
 
 export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
 
+const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
+
+// The worker refused the quote before broadcasting, so nothing executed.
+export const isSponsoredQuoteError = code => SPONSOR_QUOTE_CODES.includes(code);
+
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 

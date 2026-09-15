@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -87,7 +87,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
+      sandbox: '0x0d19f7a92BB0cd49958210E16c255e64f6AdF3FB',
       production: '0xDA1333D76a1B9883022513c089a0ca84043cF079',
     },
     sponsored_gas_tokens: {
@@ -269,7 +269,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
+      sandbox: '0x72ABb5A0029930A364AA30c0027A51196f69Fdfb',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -336,9 +336,13 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
+      sandbox: {
+        '0x5fd84259d66cd46123540766be93dfe6d43130d7': 'USDC',
+      },
       production: {
         '0x0b2c639c533813f4aa9d7837caf62653d097ff85': 'USDC',
         '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58': 'USDT',
@@ -398,9 +402,13 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
+      sandbox: {
+        '0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d': 'USDC',
+      },
       production: {
         '0xaf88d065e77c8cc2239327c5edb3a432268e5831': 'USDC',
         '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': 'USDT',
@@ -602,6 +610,9 @@ export const CHAIN_CONFIG = {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
+      sandbox: {
+        '0x664fff73abf60e939b9031d8dc99d62abbccd3bc': 'USDT',
+      },
       production: {
         '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83': 'USDC',
         '0x4ecaba5870353805a9f068101a40e0f32ed605c6': 'USDT',
@@ -929,9 +940,13 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
+      sandbox: {
+        '0xfabab97dce620294d2b0b0e46c68964e326300ac': 'USDC',
+      },
       production: {
         '0x2d270e6886d130d724215a266106e6832161eaed': 'USDC',
       },
@@ -1819,10 +1834,13 @@ export const config = {
   ETHEREUM_SCAN_BASE_URL: 'https://api.etherscan.io/v2',
   INK_BLOCK_EXPLORER_BASE_URL: forEnv(CHAIN_CONFIG.ink.scan_api_url),
 
-  DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
-  // DOK_WALLET_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app/dashboard',
-  ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
-  // ATTEST_WORKER_BASE_URL: 'https://prompt-premium-mullet.ngrok-free.app',
+  DOK_WALLET_BASE_URL: 'http://localhost:8787/dashboard',
+  // DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
+  // DOK_WALLET_BASE_URL: 'http://localhost:3001/dev',
+  // DOK_WALLET_BASE_URL:
+  //   'https://journalistic-superchemically-chelsey.ngrok-free.dev/dashboard',
+  // ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
+  ATTEST_WORKER_BASE_URL: 'http://localhost:8787',
   BITCOIN_SCAN_URL: scanBase('bitcoin'),
   BITCOIN_BASE_URL: forEnv(CHAIN_CONFIG.bitcoin.api_base_url),
   get BITCOIN_NETWORK_STRING() {

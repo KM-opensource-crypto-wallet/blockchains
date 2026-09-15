@@ -68,6 +68,7 @@ import {
   getStakignKey,
   isDexSwap,
   isPlausibleTxHash,
+  isSponsoredQuoteError,
   isSponsoredRetryError,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
@@ -1756,7 +1757,8 @@ export const sendFunds = createAsyncThunk(
       }
       if (
         isSwapBlockingError(e?.message) ||
-        isSponsoredRetryError(e?.message)
+        isSponsoredRetryError(e?.message) ||
+        isSponsoredQuoteError(e?.code)
       ) {
         // Expired quote caught before anything was signed/broadcast — same
         // handling on every chain: no failed-transaction record, back to the
