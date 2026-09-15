@@ -20,13 +20,14 @@ import {
 import {
   requestLocalNotificationPermission,
   createScheduledPaymentNotification,
+  getPaymentIdsWithDisplayedReminders,
   reconcileScheduledPaymentNotifications,
 } from 'utils/scheduledPaymentNotifications';
 import {
   SCHEDULED_DATE_FORMAT,
   buildRecurrence,
   computeOccurrences,
-  isScheduledPaymentExpired,
+  isScheduledPaymentStale,
 } from 'utils/scheduleRecurrence';
 
 export const submitScheduledPayment = createAsyncThunk(
@@ -179,31 +180,46 @@ export const submitScheduledPayment = createAsyncThunk(
 // reminder was just tapped but not yet handled (the tap is processed after
 // unlock): a fired one-time reminder is by definition past due, and its
 // payment must survive until the handler has prefilled the transfer.
+//
+// Deletion is keyed on isScheduledPaymentStale, NOT isScheduledPaymentExpired:
+// a payment is expired from the millisecond its reminder fires, and deleting
+// it then is what left a tapped notification with nothing to prefill. A
+// payment's real end of life is the user acting on it - the reminder tap
+// prefills a transfer and removes it, or the user deletes it from the list -
+// and this thunk is only the backstop that stops ignored ones accumulating
+// forever.
 export const pruneExpiredScheduledPayments = createAsyncThunk(
   'schedulePayment/pruneExpired',
   async ({keepIds} = {}, {dispatch, getState}) => {
     const now = Date.now();
     const keep = new Set((keepIds || []).filter(Boolean));
+    // Belt and braces alongside the staleness rule: a reminder still in the
+    // tray has not been acted on yet.
+    try {
+      (await getPaymentIdsWithDisplayedReminders()).forEach(id => keep.add(id));
+    } catch (e) {
+      console.warn('Scheduled payment prune could not read the tray', e);
+    }
     const scheduledPayments =
       getState().schedulePayment?.scheduledPayments || {};
-    const expired = [];
+    const stale = [];
     Object.entries(scheduledPayments).forEach(([walletClientId, list]) => {
       (Array.isArray(list) ? list : []).forEach(item => {
         if (
           item?.id &&
           !keep.has(item.id) &&
-          isScheduledPaymentExpired(item, now)
+          isScheduledPaymentStale(item, now)
         ) {
-          expired.push({id: item.id, walletClientId});
+          stale.push({id: item.id, walletClientId});
         }
       });
     });
-    if (!expired.length) {
+    if (!stale.length) {
       return [];
     }
-    expired.forEach(entry => dispatch(removeScheduledPayment(entry)));
+    stale.forEach(entry => dispatch(removeScheduledPayment(entry)));
     await reconcileScheduledPaymentNotifications(getState);
-    return expired.map(entry => entry.id);
+    return stale.map(entry => entry.id);
   },
 );
 
