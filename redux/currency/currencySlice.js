@@ -264,13 +264,18 @@ export const searchAndAddCoins = createAsyncThunk(
     try {
       const {currency} = payload;
       const [chainName, symbol] = currency?.split(':') || [];
+      // A coin-slug link ('ethereum-eth') is lower-cased, so every comparison
+      // below has to be case-insensitive - uppercasing the slug would not do,
+      // mixed-case symbols exist (stETH, cbETH).
+      const wantChain = chainName?.toLowerCase();
+      const wantSymbol = symbol?.toLowerCase();
+      const isChain = coin => coin?.chain_name?.toLowerCase() === wantChain;
+      const isSymbol = coin => coin?.symbol?.toLowerCase() === wantSymbol;
 
-      const userCoins = selectUserCoins(state).filter(
-        coin => coin.chain_name === chainName,
-      );
+      const userCoins = selectUserCoins(state).filter(isChain);
 
       const hasExactCoin = userCoins.find(
-        coin => coin.type === 'coin' && coin.symbol === symbol,
+        coin => coin.type === 'coin' && isSymbol(coin),
       );
       if (hasExactCoin) {
         return {coinId: hasExactCoin?._id};
@@ -288,9 +293,7 @@ export const searchAndAddCoins = createAsyncThunk(
           fetchCurrencies({search: chainName.replace(/_/g, ' ')}),
         ).unwrap();
         const found = fetched.find(
-          coin =>
-            coin.chain_name === chainName &&
-            (coin.type === 'coin' || coin.symbol === symbol),
+          coin => isChain(coin) && (coin.type === 'coin' || isSymbol(coin)),
         );
         if (found) {
           coinsList.push(found);
@@ -299,7 +302,7 @@ export const searchAndAddCoins = createAsyncThunk(
       }
 
       const hasToken = userCoins.find(
-        coin => coin.type === 'token' && coin.symbol === symbol,
+        coin => coin.type === 'token' && isSymbol(coin),
       );
       if (hasToken) {
         coinsList.push(hasToken);
@@ -309,10 +312,7 @@ export const searchAndAddCoins = createAsyncThunk(
           fetchCurrencies({search: symbol}),
         ).unwrap();
         const found = fetched.find(
-          coin =>
-            coin.chain_name === chainName &&
-            coin.type === 'token' &&
-            coin.symbol === symbol,
+          coin => isChain(coin) && coin.type === 'token' && isSymbol(coin),
         );
         if (found) {
           coinsList.push(found);

@@ -39,7 +39,13 @@ export const initWalletConnect = async walletConnectData => {
   });
 };
 
+// True once initWalletConnect has resolved; every other export needs it.
+export const isWalletConnectReady = () => Boolean(walletConnect);
+
 export const createWalletConnection = async options => {
+  if (!walletConnect) {
+    throw new Error('WalletConnect is not initialised yet');
+  }
   await walletConnect.core.pairing.pair(options);
   subscribeWalletConnectEvent();
 };
@@ -48,9 +54,16 @@ export const subscribeWalletConnect = async appSessions => {
   if (walletConnectSubscribe) {
     return;
   }
-  walletConnectSubscribe = true;
-
+  // initWalletConnect is still awaiting WalletKit.init on a fresh page load
+  // when the Home screen mounts; the caller retries once it has resolved.
+  if (!walletConnect) {
+    console.warn('No session subscribe because wallet connect null');
+    return;
+  }
   const sessions = walletConnect.getActiveSessions();
+  // Latched only after the call above succeeded, so a failed attempt does not
+  // leave the page without session listeners until reload.
+  walletConnectSubscribe = true;
   const allTopics = Object.values(appSessions).map(item => item.topic);
   const activeTopics = Object.values(sessions).map(item => item.topic);
   allTopics.forEach(topic => {
