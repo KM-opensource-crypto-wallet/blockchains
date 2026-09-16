@@ -4,6 +4,7 @@ import {commonRetryFunc} from '../helper';
 import {BlockDaemon} from './blockDaemon';
 import {BlockChair} from './blockChair';
 import {PremiumBlockChair} from './premiumBlockChair';
+import {Cipherscan} from './cipherscan';
 
 const providerName = {
   ltc: [
@@ -31,12 +32,17 @@ const providerName = {
     'BCHBlockDaemon',
     'BCHMempool',
   ],
+  // Blockchair has no Zcash testnet data at all and its Zcash mainnet support
+  // was never verified; Cipherscan is a Zcash-specific explorer confirmed
+  // working (via a live testnet call) on both networks, no API key.
+  zec: ['ZcashCipherscan'],
 };
 const providers = {
   ltc: [PremiumBlockChair, Mempool, BlockCypher, BlockChair, BlockDaemon],
   btc: [PremiumBlockChair, Mempool, BlockChair, BlockDaemon],
   doge: [PremiumBlockChair, BlockChair, BlockCypher, BlockDaemon],
   bch: [PremiumBlockChair, BlockChair, BlockDaemon],
+  zec: [Cipherscan],
 };
 
 export const BitcoinFork = {
