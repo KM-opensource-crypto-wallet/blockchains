@@ -15,6 +15,15 @@ export const getTransferDataFeeSuccess = state =>
   state.currentTransfer?.transferData?.success;
 export const getTransferDataCustomError = state =>
   state.currentTransfer?.transferData?.customError;
+export const getTransferDataCustomErrorCode = state =>
+  state.currentTransfer?.transferData?.customErrorCode;
+
+export const getTransferDataPayGasWithToken = state =>
+  !!state.currentTransfer?.transferData?.payGasWithToken;
+export const getTransferDataGasTokenSymbol = state =>
+  state.currentTransfer?.transferData?.gasTokenSymbol;
+export const getTransferDataSponsoredQuote = state =>
+  state.currentTransfer?.transferData?.sponsoredQuote;
 
 export const getPendingTransferData = state =>
   state.currentTransfer.pendingTransferData;
