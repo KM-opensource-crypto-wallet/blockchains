@@ -7,6 +7,7 @@ const chainName = {
   bch: 'bitcoin-cash',
   doge: 'dogecoin',
   ltc: 'litecoin',
+  zec: 'zcash',
 };
 
 export const parseBlockchainTransactions = (txs, walletAddresses) => {
@@ -104,18 +105,43 @@ export const BlockChair = {
       Array.isArray(derive_addresses) && derive_addresses?.length > 1
         ? derive_addresses
         : [address];
-    const addressStr = finalAddresses.join(',');
-    const resp = await BlockChairAPI.get(
-      `${chainName[chain]}/dashboards/addresses/${addressStr}`,
-      {
-        params: {
-          limit: '20,0',
+
+    let txIds;
+    if (chain === 'zec') {
+      // Blockchair's free tier returns 402 ("requires an API token") on the
+      // batch dashboards/addresses endpoint for zcash specifically, even for
+      // a single address. The singular dashboards/address endpoint is not
+      // paywalled and already includes that address's transaction ids.
+      const addressResps = await Promise.all(
+        finalAddresses.map(addr =>
+          BlockChairAPI.get(`${chainName[chain]}/dashboards/address/${addr}`, {
+            params: {limit: '20,0'},
+          }),
+        ),
+      );
+      const idSet = new Set();
+      addressResps.forEach((resp, index) => {
+        const ids = resp?.data?.data?.[finalAddresses[index]]?.transactions;
+        if (Array.isArray(ids)) {
+          ids.forEach(id => idSet.add(id));
+        }
+      });
+      txIds = Array.from(idSet);
+    } else {
+      const addressStr = finalAddresses.join(',');
+      const resp = await BlockChairAPI.get(
+        `${chainName[chain]}/dashboards/addresses/${addressStr}`,
+        {
+          params: {
+            limit: '20,0',
+          },
         },
-      },
-    );
-    const txIds = Array.isArray(resp?.data?.data?.transactions)
-      ? resp.data.data.transactions
-      : [];
+      );
+      txIds = Array.isArray(resp?.data?.data?.transactions)
+        ? resp.data.data.transactions
+        : [];
+    }
+
     const chunks = [];
     for (let i = 0; i < txIds.length; i += 10) {
       chunks.push(txIds.slice(i, i + 10).join(','));
