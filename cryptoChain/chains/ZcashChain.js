@@ -112,6 +112,14 @@ const addressToHash160 = address => {
   if (!payload) {
     throw new Error(`Invalid Zcash transparent address: ${address}`);
   }
+  const p2pkhPrefix = IS_SANDBOX
+    ? ZCASH_TESTNET_P2PKH_PREFIX
+    : ZCASH_MAINNET_P2PKH_PREFIX;
+  if (payload[0] !== p2pkhPrefix[0] || payload[1] !== p2pkhPrefix[1]) {
+    throw new Error(
+      `Unsupported Zcash address type (only transparent P2PKH is supported): ${address}`,
+    );
+  }
   // eslint-disable-next-line no-undef
   return Buffer.from(payload.subarray(2));
 };

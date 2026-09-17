@@ -14,6 +14,31 @@ const toParsedTransaction = (tx, walletAddress) => {
   };
 };
 
+// Cipherscan paginates with `page`/`limit` (1-100, no `total`/`hasMore` field
+// per its docs), so a short page is the only exhaustion signal; MAX_PAGES is
+// just a safety cap against the API ever returning full pages forever.
+const MAX_PAGES = 50;
+const PAGE_LIMIT = 100;
+
+const fetchAllTransactions = async address => {
+  const transactions = [];
+  let page = 1;
+  while (page <= MAX_PAGES) {
+    const resp = await CipherscanAPI.get(`/address/${address}`, {
+      params: {limit: PAGE_LIMIT, page},
+    });
+    const pageTransactions = Array.isArray(resp?.data?.transactions)
+      ? resp.data.transactions
+      : [];
+    transactions.push(...pageTransactions);
+    if (pageTransactions.length < PAGE_LIMIT) {
+      break;
+    }
+    page += 1;
+  }
+  return transactions;
+};
+
 export const Cipherscan = {
   getBalance: async ({address}) => {
     const resp = await CipherscanAPI.get(`/address/${address}`);
@@ -35,24 +60,16 @@ export const Cipherscan = {
   },
 
   // Cipherscan has no dedicated UTXO endpoint: per-tx detail (`/tx/:txid`)
-  // returns each output's `spent` flag, so a UTXO set is built by listing the
-  // address's transactions, then checking each one's outputs for an unspent
-  // match. Fine for a handful of transactions; a very active address would
-  // need real pagination through the address endpoint too (only its first
-  // page is fetched here).
+  // returns each output's `spent` flag, so a UTXO set is built by listing
+  // every one of the address's transactions (paginated to exhaustion), then
+  // checking each one's outputs for an unspent match. A failed detail fetch
+  // is left to propagate rather than swallowed, since a UTXO set silently
+  // missing entries would let coin selection under-report spendable funds.
   getUTXO: async ({address}) => {
-    const resp = await CipherscanAPI.get(`/address/${address}`, {
-      params: {limit: 100},
-    });
-    const transactions = Array.isArray(resp?.data?.transactions)
-      ? resp.data.transactions
-      : [];
+    const transactions = await fetchAllTransactions(address);
     const details = await Promise.all(
       transactions.map(tx =>
-        CipherscanAPI.get(`/tx/${tx.txid}`).then(
-          r => r?.data,
-          () => null,
-        ),
+        CipherscanAPI.get(`/tx/${tx.txid}`).then(r => r?.data),
       ),
     );
     const utxos = [];

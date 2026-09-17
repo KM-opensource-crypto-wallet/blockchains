@@ -159,8 +159,12 @@ const assertValidZip243Signature = (rawTxHex, {inputValue, branchIdHex}) => {
   );
   // eslint-disable-next-line no-undef
   const zero32 = Buffer.alloc(32);
+  // Consensus branch IDs are conventionally written as the big-endian hex of
+  // the branch ID number (e.g. Sapling's 0x76b809bb); ZIP-243 personalizes
+  // the sighash with its little-endian encoding, matching ZcashChain.js's
+  // own getConsensusBranchIdLE, so this must reverse the same way.
   // eslint-disable-next-line no-undef
-  const branchIdBuf = Buffer.from(branchIdHex, 'hex');
+  const branchIdBuf = Buffer.from(branchIdHex, 'hex').reverse();
 
   // eslint-disable-next-line no-undef
   const preimage = Buffer.concat([
