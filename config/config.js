@@ -1686,11 +1686,11 @@ export const CHAIN_CONFIG = {
     },
   },
   // `supported` was iOS-only while signing went through a native WalletCore
-  // bridge (see git history / src/myWallet/wallet.service.js's now-unused
-  // signZcashTransaction); ZcashChain.js builds and signs v4 Zcash
-  // transactions itself in pure JS (WalletCore's native Zcash signer was
-  // found to produce cryptographically invalid signatures), so the only
-  // native requirement is address/key derivation, which android/.../coins/
+  // bridge (removed; see git history for the old signZcashTransaction
+  // native method). ZcashChain.js builds and signs v4 Zcash transactions
+  // itself in pure JS (WalletCore's native Zcash signer was found to
+  // produce cryptographically invalid signatures), so the only native
+  // requirement is address/key derivation, which android/.../coins/
   // ZcashCoin.java now provides too (mirrors ios/ZcashCoin.swift).
   zcash: {
     supported: true,
