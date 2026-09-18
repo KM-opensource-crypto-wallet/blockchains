@@ -29,7 +29,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Ethereum',
-      order: 0,
+      order: 5,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
@@ -54,7 +54,7 @@ export const CHAIN_CONFIG = {
     },
     private_key_list: {
       label: 'Ethereum',
-      order: 11,
+      order: 13,
     },
     staking_keys: ['usdt', 'usdc'],
     staking_contracts: {
@@ -107,7 +107,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 0,
+      order: 5,
     },
   },
   binance_smart_chain: {
@@ -134,7 +134,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Binance Smart Chain',
-      order: 1,
+      order: 4,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
@@ -142,7 +142,7 @@ export const CHAIN_CONFIG = {
     eip_1559_not_supported: true,
     private_key_list: {
       label: 'Binance Smart Chain',
-      order: 4,
+      order: 5,
     },
     address_name_support: true,
     tx_list_limit_100: true,
@@ -162,7 +162,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'BEP20',
       isEVM: true,
-      order: 3,
+      order: 4,
     },
   },
   polygon: {
@@ -193,13 +193,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Polygon',
-      order: 2,
+      order: 16,
     },
     scan_service: 'polygon',
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'Polygon',
-      order: 25,
+      order: 28,
     },
     tx_list_limit_100: true,
     moralis: {
@@ -218,7 +218,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 1,
+      order: 16,
     },
   },
   base: {
@@ -256,7 +256,7 @@ export const CHAIN_CONFIG = {
     gas_oracle: '0x420000000000000000000000000000000000000F',
     private_key_list: {
       label: 'Base',
-      order: 3,
+      order: 4,
     },
     tx_list_limit_100: true,
     moralis: {
@@ -289,7 +289,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 2,
+      order: 3,
     },
   },
   optimism: {
@@ -315,7 +315,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Optimism',
-      order: 5,
+      order: 14,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
@@ -323,7 +323,7 @@ export const CHAIN_CONFIG = {
     gas_oracle: '0x420000000000000000000000000000000000000F',
     private_key_list: {
       label: 'Optimism',
-      order: 22,
+      order: 25,
     },
     tx_list_limit_100: true,
     moralis: {
@@ -356,7 +356,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 7,
+      order: 14,
     },
   },
   arbitrum: {
@@ -382,7 +382,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Arbitrum',
-      order: 4,
+      order: 0,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
@@ -422,7 +422,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 6,
+      order: 0,
     },
   },
   optimism_binance_smart_chain: {
@@ -448,14 +448,14 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Optimism Binance Smart Chain',
-      order: 6,
+      order: 15,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     gas_oracle: '0x420000000000000000000000000000000000000F',
     private_key_list: {
       label: 'Optimism Binance Smart Chain',
-      order: 23,
+      order: 26,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -469,7 +469,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'BEP20',
       isEVM: true,
-      order: 8,
+      order: 15,
     },
   },
   avalanche: {
@@ -498,14 +498,14 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Avalanche',
-      order: 7,
+      order: 2,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     gas_fee_options: true,
     private_key_list: {
       label: 'Avalanche',
-      order: 2,
+      order: 3,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -519,7 +519,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 9,
+      order: 2,
     },
   },
   fantom: {
@@ -551,7 +551,7 @@ export const CHAIN_CONFIG = {
     gas_fee_options: true,
     private_key_list: {
       label: 'Fantom',
-      order: 14,
+      order: 16,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -565,7 +565,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 10,
+      order: 8,
     },
   },
   gnosis: {
@@ -599,7 +599,7 @@ export const CHAIN_CONFIG = {
     eip_7702: true,
     private_key_list: {
       label: 'Gnosis',
-      order: 15,
+      order: 18,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -626,7 +626,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 11,
+      order: 9,
     },
   },
   viction: {
@@ -652,13 +652,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Viction',
-      order: 10,
+      order: 19,
     },
     scan_service: 'vicscan',
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'Viction',
-      order: 32,
+      order: 35,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -672,7 +672,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 15,
+      order: 21,
     },
   },
   zksync: {
@@ -696,13 +696,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'zkSync Era',
-      order: 12,
+      order: 20,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'zkSync Era',
-      order: 33,
+      order: 36,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -716,7 +716,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 14,
+      order: 22,
     },
   },
   linea: {
@@ -741,14 +741,14 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Linea',
-      order: 11,
+      order: 13,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     gas_fee_options: true,
     private_key_list: {
       label: 'Linea',
-      order: 20,
+      order: 23,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -789,14 +789,14 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Ethereum Classic',
-      order: 13,
+      order: 6,
     },
     scan_service: 'ethereum_classic',
     tx_hash_path: 'hash',
     eip_1559_not_supported: true,
     private_key_list: {
       label: 'Ethereum Classic',
-      order: 12,
+      order: 14,
     },
     wallet_connect: {
       chain_display_name: 'Ethereum Classic',
@@ -809,7 +809,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 16,
+      order: 6,
     },
   },
   ethereum_pow: {
@@ -832,14 +832,14 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'EthereumPoW',
-      order: 14,
+      order: 7,
     },
     scan_service: 'ethereum_pow',
     tx_hash_path: 'hash',
     eip_1559_not_supported: true,
     private_key_list: {
       label: 'EthereumPoW',
-      order: 13,
+      order: 15,
     },
     wallet_connect: {
       chain_display_name: 'EthereumPoW',
@@ -852,7 +852,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 17,
+      order: 7,
     },
   },
   kava: {
@@ -874,13 +874,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Kava',
-      order: 15,
+      order: 12,
     },
     tx_hash_path: 'hash',
     eip_1559_not_supported: true,
     private_key_list: {
       label: 'Kava',
-      order: 19,
+      order: 22,
     },
     tx_list_not_supported: true,
     wallet_connect: {
@@ -925,7 +925,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Ink',
-      order: 16,
+      order: 11,
     },
     scan_service: 'ink',
     tx_hash_path: 'hash',
@@ -933,7 +933,7 @@ export const CHAIN_CONFIG = {
     gas_oracle: '0x420000000000000000000000000000000000000F',
     private_key_list: {
       label: 'Ink',
-      order: 18,
+      order: 21,
     },
     wallet_connect: {
       chain_display_name: 'Ink',
@@ -958,7 +958,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 18,
+      order: 11,
     },
   },
   sei: {
@@ -983,13 +983,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Sei',
-      order: 17,
+      order: 18,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'Sei',
-      order: 26,
+      order: 29,
     },
     tx_list_limit_100: true,
     wallet_connect: {
@@ -1003,7 +1003,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 19,
+      order: 18,
     },
   },
   hyperliquid: {
@@ -1029,13 +1029,13 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Hyperliquid',
-      order: 18,
+      order: 10,
     },
     scan_service: 'etherscan',
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'Hyperliquid',
-      order: 17,
+      order: 20,
     },
     wallet_connect: {
       chain_display_name: 'Hyperliquid',
@@ -1047,7 +1047,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 20,
+      order: 10,
     },
   },
   robinhood: {
@@ -1074,7 +1074,7 @@ export const CHAIN_CONFIG = {
     },
     custom_rpc: {
       label: 'Robinhood',
-      order: 19,
+      order: 17,
     },
     scan_service: 'blockscout',
     tx_hash_path: 'hash',
@@ -1090,7 +1090,7 @@ export const CHAIN_CONFIG = {
       type: 'token',
       token_type: 'ERC20',
       isEVM: true,
-      order: 21,
+      order: 17,
     },
   },
   tron: {
@@ -1130,7 +1130,7 @@ export const CHAIN_CONFIG = {
     derive_address: true,
     private_key_list: {
       label: 'Tron',
-      order: 31,
+      order: 34,
     },
     staking_keys: ['trx'],
     staking_resources: [
@@ -1160,7 +1160,7 @@ export const CHAIN_CONFIG = {
       chain_symbol: 'TRX',
       type: 'token',
       token_type: 'TRC20',
-      order: 4,
+      order: 20,
     },
   },
   solana: {
@@ -1190,7 +1190,7 @@ export const CHAIN_CONFIG = {
     derive_address: true,
     private_key_list: {
       label: 'Solana',
-      order: 27,
+      order: 30,
     },
     staking_keys: ['sol'],
     staking_validators_screen: true,
@@ -1220,7 +1220,7 @@ export const CHAIN_CONFIG = {
       chain_symbol: 'SOL',
       type: 'token',
       token_type: 'SPL20',
-      order: 5,
+      order: 19,
     },
   },
   bitcoin: {
@@ -1280,7 +1280,7 @@ export const CHAIN_CONFIG = {
     derive_address: true,
     private_key_list: {
       label: 'Bitcoin Legacy',
-      order: 6,
+      order: 7,
     },
   },
   bitcoin_segwit: {
@@ -1301,7 +1301,7 @@ export const CHAIN_CONFIG = {
     derive_address: true,
     private_key_list: {
       label: 'Bitcoin Segwit',
-      order: 7,
+      order: 9,
     },
   },
   bitcoin_taproot: {
@@ -1322,7 +1322,7 @@ export const CHAIN_CONFIG = {
     derive_address: true,
     private_key_list: {
       label: 'Bitcoin Taproot',
-      order: 9,
+      order: 10,
     },
   },
   bitcoin_lightning: {
@@ -1345,7 +1345,7 @@ export const CHAIN_CONFIG = {
     fees_options: true,
     private_key_list: {
       label: 'Litecoin',
-      order: 21,
+      order: 24,
     },
     network_string: {
       messagePrefix: '\x18Litecoin Signed Message:\n',
@@ -1372,7 +1372,7 @@ export const CHAIN_CONFIG = {
     fees_options: true,
     private_key_list: {
       label: 'Dogecoin',
-      order: 10,
+      order: 12,
     },
     network_string: {
       messagePrefix: '\x19Dogecoin Signed Message:\n',
@@ -1399,7 +1399,7 @@ export const CHAIN_CONFIG = {
     fees_options: true,
     private_key_list: {
       label: 'Bitcoin Cash',
-      order: 5,
+      order: 6,
     },
     network_string: {
       messagePrefix: '\x18BitcoinCash Signed Message:\n',
@@ -1433,7 +1433,7 @@ export const CHAIN_CONFIG = {
     },
     private_key_list: {
       label: 'Cosmos',
-      order: 9,
+      order: 11,
     },
     wallet_connect: {
       chain_display_name: 'Cosmos',
@@ -1489,7 +1489,7 @@ export const CHAIN_CONFIG = {
     },
     private_key_list: {
       label: 'Polkadot',
-      order: 24,
+      order: 27,
     },
     wallet_connect: {
       chain_display_name: 'Polkadot',
@@ -1517,7 +1517,7 @@ export const CHAIN_CONFIG = {
     tx_hash_path: 'opHash',
     private_key_list: {
       label: 'Tezos',
-      order: 29,
+      order: 32,
     },
     wallet_connect: {
       chain_display_name: 'Tezos',
@@ -1559,7 +1559,7 @@ export const CHAIN_CONFIG = {
     },
     private_key_list: {
       label: 'Stellar',
-      order: 28,
+      order: 31,
     },
     wallet_connect: {
       chain_display_name: 'Stellar',
@@ -1621,7 +1621,7 @@ export const CHAIN_CONFIG = {
     tx_hash_path: 'hash',
     private_key_list: {
       label: 'Ton',
-      order: 30,
+      order: 33,
     },
     wallet_connect: {
       chain_display_name: 'TON',
@@ -1677,7 +1677,7 @@ export const CHAIN_CONFIG = {
     tx_hash_path: 'transactionId',
     private_key_list: {
       label: 'Hedera',
-      order: 16,
+      order: 19,
     },
     wallet_connect: {
       chain_display_name: 'Hedera',
@@ -1743,7 +1743,52 @@ export const CHAIN_CONFIG = {
     },
     private_key_list: {
       label: 'Filecoin',
-      order: 34,
+      order: 17,
+    },
+  },
+  arc: {
+    premium: {mainnet: true},
+    chain_id: {
+      sandbox: 5042002,
+      production: 5042,
+    },
+    is_evm: true,
+    chain_loader: 'evm',
+    free_rpc_urls: {
+      mainnet: ['https://rpc.mainnet.arc.io'],
+      testnet: [
+        'https://rpc.testnet.arc.network',
+        'https://arc-testnet.drpc.org',
+      ],
+    },
+    scan: {
+      sandbox: 'https://explorer.testnet.arc.io',
+      production: 'https://explorer.arc.io',
+      txPath: 'tx',
+    },
+    custom_rpc: {
+      label: 'Arc',
+      order: 1,
+    },
+    scan_service: 'etherscan',
+    tx_hash_path: 'hash',
+    tx_list_limit_100: true,
+    private_key_list: {
+      label: 'Arc',
+      order: 2,
+    },
+    wallet_connect: {
+      chain_display_name: 'Arc',
+      symbol: 'USDC',
+    },
+    logo: require('assets/chain_logo/arc.jpg'),
+    add_token: {
+      label: 'Arc',
+      chain_symbol: 'USDC',
+      type: 'token',
+      token_type: 'ERC20',
+      isEVM: true,
+      order: 1,
     },
   },
 };
