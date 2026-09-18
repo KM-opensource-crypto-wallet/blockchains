@@ -1,4 +1,4 @@
-import {BlockChairAPI} from 'dok-wallet-blockchain-networks/config/blockChair';
+import {BlockChairAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/blockChair';
 import BigNumber from 'bignumber.js';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 

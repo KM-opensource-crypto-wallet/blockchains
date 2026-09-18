@@ -9,8 +9,7 @@ import {
   getExplorerTxUrl,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
-import {Cipherscan} from 'dok-wallet-blockchain-networks/service/cipherscan';
+import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork';
 
 const CHAIN_CODE = 'zec';
 const ZEC_DECIMALS = 8;
@@ -232,8 +231,6 @@ const buildAndSignZcashTransaction = ({inputs, outputs, privateKey}) => {
 
   // const branchIdBuf = Buffer.from(consensusBranchId(), 'hex');
   const branchIdBuf = getConsensusBranchIdLE();
-
-  console.log('Consensus branch ID:', consensusBranchId());
 
   console.log('Branch ID LE:', branchIdBuf.toString('hex'));
 
@@ -613,14 +610,10 @@ export const ZcashChain = () => {
         // transaction, no private key material) so it can be decoded/
         // verified independently.
         console.log('Zcash rawTransaction about to broadcast:', rawTransaction);
-        // Called directly rather than through BitcoinFork.createTransaction:
-        // that wrapper's commonRetryFunc swallows every provider error behind
-        // a `null` defaultResponse (built for chains with several fallback
-        // providers), which for zec's single provider meant a real broadcast
-        // rejection reason (bad-txns-*, insufficient fee, etc.) was always
-        // replaced with a generic "Failed to broadcast" with no detail.
-        // Cipherscan.createTransaction throws with that reason attached.
-        return await Cipherscan.createTransaction({txHex: rawTransaction});
+        return await BitcoinFork.createTransaction({
+          chain: CHAIN_CODE,
+          txHex: rawTransaction,
+        });
       } catch (e) {
         console.error('Error in send zcash transaction', e);
         console.error('========== ZCASH SEND ERROR ==========');

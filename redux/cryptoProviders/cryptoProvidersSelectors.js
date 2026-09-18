@@ -5,7 +5,8 @@
 const EMPTY_ARRAY = [];
 const EMPTY_OBJECT = {};
 
-export const getCryptoProviders = state => state.cryptoProvider.providers || [];
+export const getCryptoProviders = state =>
+  state.cryptoProvider.providers || EMPTY_ARRAY;
 export const getCryptoProvidersOTC = state =>
   state.cryptoProvider.shownOTC || false;
 

@@ -22,16 +22,14 @@ const loadZcashChain = isSandbox => {
     getExplorerTxUrl: jest.fn(),
     parseBalance: jest.fn(value => value),
   }));
-  jest.doMock('dok-wallet-blockchain-networks/service/bitcoinFork', () => ({
+  jest.doMock('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork', () => ({
     BitcoinFork: {
       getBalance: jest.fn(),
       getTransactions: jest.fn(),
       getTransaction: jest.fn(),
       getUTXO: jest.fn(),
+      createTransaction: jest.fn(),
     },
-  }));
-  jest.doMock('dok-wallet-blockchain-networks/service/cipherscan', () => ({
-    Cipherscan: {createTransaction: jest.fn()},
   }));
   const {
     ZcashChain,
@@ -219,8 +217,7 @@ const assertTransparentAddress = (address, expectedPrefix, publicKey) => {
 afterEach(() => {
   jest.dontMock('dok-wallet-blockchain-networks/config/config');
   jest.dontMock('dok-wallet-blockchain-networks/helper');
-  jest.dontMock('dok-wallet-blockchain-networks/service/bitcoinFork');
-  jest.dontMock('dok-wallet-blockchain-networks/service/cipherscan');
+  jest.dontMock('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 });
 
 describe('ZcashChain isValidPrivateKey', () => {
@@ -284,7 +281,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 500000},
@@ -303,7 +300,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000000},
@@ -323,7 +320,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000000},
@@ -347,7 +344,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000000},
@@ -366,7 +363,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000000},
@@ -387,7 +384,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000},
@@ -406,7 +403,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 500000},
@@ -423,7 +420,7 @@ describe('ZcashChain getEstimateFee', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000},
@@ -439,10 +436,7 @@ describe('ZcashChain send', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
-    const {
-      Cipherscan,
-    } = require('dok-wallet-blockchain-networks/service/cipherscan');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     // eslint-disable-next-line no-undef
     const keyPair = ECPair.fromPrivateKey(Buffer.alloc(32, 7), {
@@ -459,7 +453,7 @@ describe('ZcashChain send', () => {
     ]);
     let capturedHex = null;
 
-    Cipherscan.createTransaction.mockImplementation(({txHex}) => {
+    BitcoinFork.createTransaction.mockImplementation(({txHex}) => {
       capturedHex = txHex;
       return Promise.resolve('mock-txid');
     });
@@ -484,7 +478,7 @@ describe('ZcashChain send', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     BitcoinFork.getUTXO.mockResolvedValue([
       {hash: '11'.repeat(32), vout: 0, value: 1000},
@@ -506,10 +500,7 @@ describe('ZcashChain send', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
-    const {
-      Cipherscan,
-    } = require('dok-wallet-blockchain-networks/service/cipherscan');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     // eslint-disable-next-line no-undef
     const keyPair = ECPair.fromPrivateKey(Buffer.alloc(32, 7), {
@@ -532,7 +523,7 @@ describe('ZcashChain send', () => {
     expect(fee).toBe('10000');
 
     let capturedHex = null;
-    Cipherscan.createTransaction.mockImplementation(({txHex}) => {
+    BitcoinFork.createTransaction.mockImplementation(({txHex}) => {
       capturedHex = txHex;
       return Promise.resolve('mock-txid');
     });
@@ -580,10 +571,7 @@ describe('ZcashChain send', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
-    const {
-      Cipherscan,
-    } = require('dok-wallet-blockchain-networks/service/cipherscan');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     // eslint-disable-next-line no-undef
     const keyPair = ECPair.fromPrivateKey(Buffer.alloc(32, 7), {
@@ -598,7 +586,7 @@ describe('ZcashChain send', () => {
       {hash: '22'.repeat(32), vout: 0, value: 10000000},
     ]);
     let capturedHex = null;
-    Cipherscan.createTransaction.mockImplementation(({txHex}) => {
+    BitcoinFork.createTransaction.mockImplementation(({txHex}) => {
       capturedHex = txHex;
       return Promise.resolve('mock-txid');
     });
@@ -621,10 +609,7 @@ describe('ZcashChain send', () => {
     const zcash = loadZcashChain(false);
     const {
       BitcoinFork,
-    } = require('dok-wallet-blockchain-networks/service/bitcoinFork');
-    const {
-      Cipherscan,
-    } = require('dok-wallet-blockchain-networks/service/cipherscan');
+    } = require('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork');
 
     // eslint-disable-next-line no-undef
     const keyPair = ECPair.fromPrivateKey(Buffer.alloc(32, 7), {
@@ -639,7 +624,7 @@ describe('ZcashChain send', () => {
       {hash: '22'.repeat(32), vout: 0, value: 10000000},
     ]);
     let capturedHex = null;
-    Cipherscan.createTransaction.mockImplementation(({txHex}) => {
+    BitcoinFork.createTransaction.mockImplementation(({txHex}) => {
       capturedHex = txHex;
       return Promise.resolve('mock-txid');
     });

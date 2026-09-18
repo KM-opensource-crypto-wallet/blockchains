@@ -3,7 +3,7 @@ import {
   broadcastBitcoinTransaction,
   fetchBitcoinAddressUsage,
 } from 'dok-wallet-blockchain-networks/service/bitcoinDataSource';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
+import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork';
 import {
   isElectrumQueryAvailable,
   runElectrumQuery,

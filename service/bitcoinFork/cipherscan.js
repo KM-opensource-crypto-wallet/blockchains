@@ -1,4 +1,4 @@
-import {CipherscanAPI} from 'dok-wallet-blockchain-networks/config/cipherscan';
+import {CipherscanAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/cipherscan';
 
 const toParsedTransaction = (tx, walletAddress) => {
   const isOutgoing = Number(tx?.inputValue) > 0 || Number(tx?.netChange) < 0;
