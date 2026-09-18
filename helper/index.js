@@ -355,14 +355,6 @@ export const SWAP_QUOTE_EXPIRED_ERROR =
 export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
-// The batch nonce moved between signing and broadcast, so nothing executed and
-// the caller should re-quote rather than record a failure.
-export const SPONSORED_BATCH_RETRY_ERROR =
-  'Sponsored transaction was interrupted. Please try again.';
-
-export const isSponsoredRetryError = message =>
-  message === SPONSORED_BATCH_RETRY_ERROR;
-
 export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
 
 const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
@@ -405,6 +397,19 @@ export const getSponsoredGasTokenSymbol = (chain_name, contractAddress) => {
     SPONSORED_GAS_TOKENS[chain_name]?.[contractAddress.toLowerCase()] ?? null
   );
 };
+
+export const getSponsoredGasCoins = (chain_name, coins) =>
+  (coins ?? [])
+    .filter(
+      coin =>
+        coin?.chain_name === chain_name &&
+        Number(coin?.totalAmount) > 0 &&
+        getSponsoredGasTokenSymbol(chain_name, coin?.contractAddress),
+    )
+    .map(coin => ({
+      symbol: getSponsoredGasTokenSymbol(chain_name, coin?.contractAddress),
+      contractAddress: coin?.contractAddress,
+    }));
 
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);

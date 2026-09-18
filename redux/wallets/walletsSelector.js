@@ -3,6 +3,7 @@ import {
   isHederaUnactivated,
   generateUniqueKeyForChain,
   isBitcoinChain,
+  getSponsoredGasTokenSymbol,
 } from 'dok-wallet-blockchain-networks/helper';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {createSelector} from '@reduxjs/toolkit';
@@ -123,6 +124,22 @@ export const checkIsNativeCoinAvailable = state => {
   } else {
     return true;
   }
+};
+
+export const checkCanPaySponsoredGas = state => {
+  const currentCoin = selectCurrentCoin(state);
+  if (currentCoin?.type !== 'token' || !currentCoin?.contractAddress) {
+    return false;
+  }
+  return selectUserCoins(state).some(
+    item =>
+      item?.chain_name === currentCoin?.chain_name &&
+      Number(item?.totalAmount) > 0 &&
+      getSponsoredGasTokenSymbol(
+        currentCoin?.chain_name,
+        item?.contractAddress,
+      ),
+  );
 };
 
 export const countTotalAssets = state => {

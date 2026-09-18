@@ -37,7 +37,6 @@ import {
   isValidEVMTransactionHash,
   parseBalance,
   sleep,
-  SPONSORED_BATCH_RETRY_ERROR,
   SWAP_QUOTE_EXPIRED_ERROR,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -469,7 +468,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   };
 
   const provisionalSponsorTerms = feeTokenAddress => ({
-    batchNonce: null,
     deadline: Math.floor(Date.now() / 1000) + 300,
     sponsor: SPONSOR_TREASURY_ADDRESS,
     feeToken: feeTokenAddress,
@@ -2381,7 +2379,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           ...provisionalTerms,
           batchNonce,
         });
-        let sponsoredCalldataBytes = 0;
+        let sponsoredCalldata = null;
         const estimatedGas = await retryFunc(async evmProvider => {
           const walletSigner = wallet.connect(evmProvider);
           const data = (batchIface ??= new ethers.Interface(
@@ -2398,12 +2396,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             ],
             provisionalSignature,
             provisionalTerms.sponsor,
-            1n,
+            0n,
             0n,
           ]);
           const {gasPrice: maxFeePerGas, maxPriorityFeePerGas} =
             await getEtherGasPrice('recommended', evmProvider);
-          sponsoredCalldataBytes = ethers.dataLength(data);
+          sponsoredCalldata = data;
           return await evmProvider.estimateGas({
             from: provisionalTerms.sponsor,
             to: walletSigner.address,
@@ -2426,18 +2424,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         if (estimatedGas == null) {
           throw new Error('Could not estimate the sponsored batch');
         }
+        const quoteAuthorization = isDelegated
+          ? null
+          : await createSponsorAuthorization(wallet, Number(currentNonce) + 1);
         const quote = await fetchSponsoredGasQuote({
           chain_name,
           is_sandbox: IS_SANDBOX,
           signer: wallet.address,
+          calls: calls.map(([to, value, data]) => ({to, value, data})),
+          calldata: sponsoredCalldata,
           estimatedGas: estimatedGas.toString(),
-          calldataBytes: sponsoredCalldataBytes,
+          authorization: serializeAuthorization(quoteAuthorization),
           feeTokenAddress,
         });
         if (
           !quote?.quoteToken ||
           !quote?.maxFee ||
-          !quote?.treasury ||
           !Number.isInteger(quote?.feeToken?.decimals)
         ) {
           throw new Error('Sponsored gas is unavailable right now');
@@ -2449,12 +2451,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             : undefined,
           sponsoredQuote: quote,
           nonce: currentNonce,
-          batchNonce,
-          feesOptions: [],
-          estimateGas: null,
-          gasFee: null,
-          maxPriorityFeePerGas: null,
-          l1Fees: 0,
         };
       } catch (e) {
         console.error('Error in getSponsoredGasFees', e);
@@ -2510,16 +2506,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           authorization,
         });
         if (!signed?.transactionHash) {
-          throw new Error(
-            signed?.error || 'Sponsored gas is unavailable right now',
-          );
+          throw new Error('Sponsored gas is unavailable right now');
         }
         return signed.transactionHash;
       } catch (e) {
         console.error('Error in send sponsored batch transaction', e);
-        if (e?.message?.toLowerCase()?.includes('invalid signature')) {
-          throw new Error(SPONSORED_BATCH_RETRY_ERROR);
-        }
         const {code, error} = e?.response?.data ?? {};
         if (!code || !error) {
           throw e;

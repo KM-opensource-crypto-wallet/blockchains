@@ -360,13 +360,11 @@ const getBaseCoin = async (chain, wallet, coin, walletData) => {
       await chain.getSponsoredGasFees({
         ...payload,
         privateKey: wallet.privateKey,
-        from: wallet.address,
       }),
     sendSponsoredBatchTransaction: async payload =>
       await chain.sendSponsoredBatchTransaction({
         ...payload,
         privateKey: wallet.privateKey,
-        from: wallet.address,
       }),
     unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
     approveClaimDeposit: async payload =>
@@ -632,13 +630,11 @@ const getTokenCoin = async (chain, wallet, token, transactionFee) => {
       await chain.getSponsoredGasFees({
         ...payload,
         privateKey: wallet.privateKey,
-        from: wallet.address,
       }),
     sendSponsoredBatchTransaction: async payload =>
       await chain.sendSponsoredBatchTransaction({
         ...payload,
         privateKey: wallet.privateKey,
-        from: wallet.address,
       }),
     unClaimedOnChainDeposit: async () => await chain.unClaimedOnChainDeposit(),
     approveClaimDeposit: async payload =>
