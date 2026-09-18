@@ -626,7 +626,7 @@ export const ZcashChain = () => {
         throw e;
       }
     },
-    waitForConfirmation: async ({transaction}) => {
+    waitForConfirmation: async ({transaction, address}) => {
       const transactionID = transaction;
       if (!transactionID) {
         console.error('No transaction id found for zcash');
@@ -640,6 +640,7 @@ export const ZcashChain = () => {
             const isConfirmed = await BitcoinFork.getTransaction({
               chain: CHAIN_CODE,
               transactionId: transactionID,
+              address,
             });
             if (isConfirmed?.status && Number(isConfirmed?.blockNumber) > 0) {
               clearInterval(timer);

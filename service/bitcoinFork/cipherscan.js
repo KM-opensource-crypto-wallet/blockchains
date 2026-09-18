@@ -20,6 +20,33 @@ const toParsedTransaction = (tx, walletAddress) => {
 const MAX_PAGES = 50;
 const PAGE_LIMIT = 100;
 
+// Cipherscan enforces 100 requests/minute per client; a wallet with many
+// transactions fetching every `/tx/:txid` detail via a single Promise.all
+// would burst well past that. Requests are chunked and spaced so the
+// sustained rate stays at RATE_LIMIT_PER_MINUTE regardless of tx count.
+const RATE_LIMIT_PER_MINUTE = 100;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_BATCH_SIZE = 20;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const fetchTransactionDetails = async transactions => {
+  const details = [];
+  for (let i = 0; i < transactions.length; i += RATE_LIMIT_BATCH_SIZE) {
+    const batch = transactions.slice(i, i + RATE_LIMIT_BATCH_SIZE);
+    const batchDetails = await Promise.all(
+      batch.map(tx => CipherscanAPI.get(`/tx/${tx.txid}`).then(r => r?.data)),
+    );
+    details.push(...batchDetails);
+    const isLastBatch = i + RATE_LIMIT_BATCH_SIZE >= transactions.length;
+    if (!isLastBatch) {
+      await sleep(
+        (RATE_LIMIT_WINDOW_MS * RATE_LIMIT_BATCH_SIZE) / RATE_LIMIT_PER_MINUTE,
+      );
+    }
+  }
+  return details;
+};
+
 const fetchAllTransactions = async address => {
   const transactions = [];
   let page = 1;
@@ -67,11 +94,7 @@ export const Cipherscan = {
   // missing entries would let coin selection under-report spendable funds.
   getUTXO: async ({address}) => {
     const transactions = await fetchAllTransactions(address);
-    const details = await Promise.all(
-      transactions.map(tx =>
-        CipherscanAPI.get(`/tx/${tx.txid}`).then(r => r?.data),
-      ),
-    );
+    const details = await fetchTransactionDetails(transactions);
     const utxos = [];
     details.forEach(detail => {
       const outputs = Array.isArray(detail?.outputs) ? detail.outputs : [];
