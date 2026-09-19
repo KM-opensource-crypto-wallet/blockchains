@@ -736,6 +736,8 @@ export const getAddressDetailsUrl = (chain_name, type, address) => {
     return `${config.CARDANO_SCAN_URL}/address/${address}`;
   } else if (chain_name === 'filecoin') {
     return `${config.FILECOIN_SCAN_URL}/address/${address}/#message_list`;
+  } else if (chain_name === 'zcash') {
+    return `${config.ZCASH_SCAN_URL}/address/${address}`;
   }
   return null;
 };

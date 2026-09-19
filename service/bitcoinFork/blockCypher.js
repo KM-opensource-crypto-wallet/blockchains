@@ -1,4 +1,4 @@
-import {BlockCypherAPI} from 'dok-wallet-blockchain-networks/config/blockCypher';
+import {BlockCypherAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/blockCypher';
 import BigNumber from 'bignumber.js';
 
 export const BlockCypher = {

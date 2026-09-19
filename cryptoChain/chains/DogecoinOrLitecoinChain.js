@@ -9,7 +9,7 @@ import {
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
+import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork';
 import {toCashAddress} from 'bchaddrjs';
 
 const chainDetails = {

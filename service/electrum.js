@@ -1,6 +1,6 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import {config} from 'dok-wallet-blockchain-networks/config/config';
-import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
+import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/bitcoinFork/blockChair';
 import {ensureEccInit} from 'dok-wallet-blockchain-networks/service/bitcoinEcc';
 
 /**

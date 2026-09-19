@@ -17,6 +17,7 @@ import {
   getBitcoinFeeMultiplier,
   getDogecoinFeeMultiplier,
   getLitecoinFeeMultiplier,
+  getZcashFeeMultiplier,
 } from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {
   convertToSmallAmount,
@@ -105,6 +106,7 @@ export const calculateEstimateFee = createAsyncThunk(
         getAdditionalL1FeePercentage(currentState);
       const bitcoinCashFeeMultiplier =
         getBitcoinCashFeeMultiplier(currentState);
+      const zcashFeeMultiplier = getZcashFeeMultiplier(currentState);
       const selectedWallet = payload?.selectedWallet;
       const selectedCoin = payload?.selectedCoin;
 
@@ -118,6 +120,7 @@ export const calculateEstimateFee = createAsyncThunk(
         litecoin: litecoinFeeMultiplier,
         dogecoin: dogecoinFeeMultiplier,
         bitcoin_cash: bitcoinCashFeeMultiplier,
+        zcash: zcashFeeMultiplier,
       };
       if (payload?.isBatchTransaction && transfer?.transactionsData) {
         await fetchBatchTransactionBalances(
@@ -514,7 +517,10 @@ export const currentTransferSlice = createSlice({
 
       const transactionFeeEtherBN = new BigNumber(transactionFee);
       const currencyBN = new BigNumber(state?.transferData?.currencyRate);
-      state.transferData.gasFee = BigInt(gasPriceBN.toString());
+      // Rounded to an integer before BigInt(): a non-EVM gasPrice is a
+      // whole-unit rate (sat/vByte, zat/action), but BigInt() throws on any
+      // decimal string, and nothing upstream guarantees an integer input.
+      state.transferData.gasFee = BigInt(gasPriceBN.integerValue().toString());
       state.transferData.transactionFee = transactionFee;
       // Optional custom tip (gwei, EVM only). A tip above the cap is
       // meaningless under EIP-1559 (the node would reject it), so clamp to the

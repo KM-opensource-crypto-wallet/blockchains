@@ -16,8 +16,6 @@ export const getCryptoProvidersLoading = state =>
 export const getSelectedCountry = state => state?.cryptoProvider?.country;
 export const getFetchProvider = state => state?.cryptoProvider?.fetchProvider;
 export const getDisableMessage = state => state?.cryptoProvider?.disableMessage;
-// A display string built by formatExchangeArray ('Changelly and ChangeNow'),
-// '' when there are none. Never an array.
 export const getExchangeProviders = state =>
   state?.cryptoProvider?.exchangeProviders || '';
 export const getSellCryptoAllProviders = state =>
@@ -34,7 +32,8 @@ export const getDogecoinFeeMultiplier = state =>
   state?.cryptoProvider?.dogecoin_fee_multiplier || EMPTY_OBJECT;
 export const getBitcoinCashFeeMultiplier = state =>
   state?.cryptoProvider?.bitcoin_cash_fee_multiplier || EMPTY_OBJECT;
-
+export const getZcashFeeMultiplier = state =>
+  state?.cryptoProvider?.zcash_fee_multiplier || EMPTY_OBJECT;
 export const getAdditionalL1FeePercentage = state =>
   state?.cryptoProvider?.additional_l1_fee_percentages || EMPTY_OBJECT;
 

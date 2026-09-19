@@ -27,6 +27,7 @@ const initialState = {
   litecoin_fee_multiplier: {...CHAIN_CONFIG.litecoin.fee_multiplier},
   dogecoin_fee_multiplier: {...CHAIN_CONFIG.dogecoin.fee_multiplier},
   bitcoin_cash_fee_multiplier: {...CHAIN_CONFIG.bitcoin_cash.fee_multiplier},
+  zcash_fee_multiplier: {...CHAIN_CONFIG.zcash.fee_multiplier},
   additional_l1_fee_percentages: Object.fromEntries(
     Object.entries(CHAIN_CONFIG)
       .filter(([, chainConfig]) => chainConfig.additional_l1_fee_percentage)
@@ -65,6 +66,7 @@ export const fetchSupportedBuyCryptoCurrency = createAsyncThunk(
       litecoin_fee_multiplier: data?.litecoin_fee_multiplier || {},
       dogecoin_fee_multiplier: data?.dogecoin_fee_multiplier || {},
       bitcoin_cash_fee_multiplier: data?.bitcoin_cash_fee_multiplier || {},
+      zcash_fee_multiplier: data?.zcash_fee_multiplier || {},
       additional_l1_fee_percentages: data?.additional_l1_fee_percentages || {},
       is_max_wallet_limit_reached: data?.is_max_wallet_limit_reached || false,
       android_latest_version: data?.android_latest_version || null,
@@ -154,6 +156,10 @@ export const cryptoProviderSlice = createSlice({
         state.bitcoin_cash_fee_multiplier = {
           ...state.bitcoin_cash_fee_multiplier,
           ...payload?.bitcoin_cash_fee_multiplier,
+        };
+        state.zcash_fee_multiplier = {
+          ...state.zcash_fee_multiplier,
+          ...payload?.zcash_fee_multiplier,
         };
         state.additional_l1_fee_percentages = {
           ...state.additional_l1_fee_percentages,
