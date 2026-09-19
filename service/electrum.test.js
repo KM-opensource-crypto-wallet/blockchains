@@ -11,7 +11,7 @@ jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   config: {},
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/blockChair', () => ({
+jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork/blockChair', () => ({
   parseBlockchainTransactions: jest.fn(() => []),
 }));
 

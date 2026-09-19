@@ -24,7 +24,7 @@ jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
   fetchBitcoinTransactionDetails: jest.fn(),
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork', () => ({
+jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork', () => ({
   BitcoinFork: {
     createTransaction: jest.fn(),
     getTransaction: jest.fn(),
