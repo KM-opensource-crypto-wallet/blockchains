@@ -405,3 +405,53 @@ export const selectIsRefreshingAllWallets = state =>
 
 export const selectRefreshingWalletClientId = state =>
   state.wallets?.refreshingWalletClientId || null;
+
+const sameAddress = (a, b) =>
+  typeof a === 'string' &&
+  typeof b === 'string' &&
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Private key for `{chain_name, address}` from the live wallets in memory.
+ * WalletConnect used to read it from the persisted per-session `walletData`,
+ * which is now stripped of secrets at rest. Searches the current wallet
+ * first, then every wallet; matches the coin itself, then its derive
+ * addresses. Returns undefined when nothing matches.
+ */
+export const selectLivePrivateKey = (
+  state,
+  {chain_name, address, clientId},
+) => {
+  const allWallets = selectAllWallets(state) || [];
+  const chain = chain_name?.toLowerCase?.();
+  const preferred = clientId || state.wallets?.currentWalletClientId;
+  const ordered = [
+    ...allWallets.filter(w => w?.clientId === preferred),
+    ...allWallets.filter(w => w?.clientId !== preferred),
+  ];
+  for (const wallet of ordered) {
+    for (const coin of wallet?.coins || []) {
+      if (coin?.chain_name?.toLowerCase?.() !== chain) {
+        continue;
+      }
+      if (sameAddress(coin.address, address) && coin.privateKey) {
+        return coin.privateKey;
+      }
+      const derived = (coin.deriveAddresses || []).find(
+        entry => sameAddress(entry?.address, address) && entry?.privateKey,
+      );
+      if (derived) {
+        return derived.privateKey;
+      }
+    }
+    const existing = wallet?.chain_existing_coin?.[chain];
+    if (
+      existing &&
+      sameAddress(existing.address, address) &&
+      existing.privateKey
+    ) {
+      return existing.privateKey;
+    }
+  }
+  return undefined;
+};

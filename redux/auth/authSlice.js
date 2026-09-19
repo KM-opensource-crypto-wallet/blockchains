@@ -65,7 +65,14 @@ export const handleAttempts = createAsyncThunk(
 );
 const initialState = {
   isLogin: false,
-  password: '',
+  // Whether onboarding created an account. Routing reads this; the password
+  // itself is never stored anywhere — "correct password" means the vault key
+  // unwrapped (security/vault.js).
+  hasAccount: false,
+  // Set by the app after the vault unlocks (never persisted; see
+  // AUTH_PERSIST_BLACKLIST). Gates work that needs key material (WalletConnect
+  // init, signing) until the user has unlocked in this session.
+  isVaultUnlocked: false,
   loading: false,
   error: null,
   fingerprintAuth: false,
@@ -79,22 +86,30 @@ export const authSlice = createSlice({
   name: 'auth',
   initialState: initialState,
   reducers: {
-    signUpSuccess: (state, action) => {
-      state.password = action.payload;
+    signUpSuccess: state => {
+      state.hasAccount = true;
       state.isLogin = true;
       state.loading = false;
     },
-    logInSuccess: (state, action) => {
-      state.password = action.payload;
+    logInSuccess: state => {
+      // Self-heal for accounts persisted before `hasAccount` existed.
+      state.hasAccount = true;
       state.isLogin = true;
     },
-    changePasswordSuccess: (state, action) => {
-      state.password = action.payload;
+    changePasswordSuccess: state => {
+      state.hasAccount = true;
       state.isLogin = true;
     },
     logOutSuccess: state => {
       state.isLogin = false;
-      state.password = '';
+      state.hasAccount = false;
+      state.isVaultUnlocked = false;
+    },
+    vaultUnlocked: state => {
+      state.isVaultUnlocked = true;
+    },
+    vaultLocked: state => {
+      state.isVaultUnlocked = false;
     },
     fingerprintAuthSuccess: (state, action) => {
       state.fingerprintAuth = action.payload;
@@ -159,6 +174,8 @@ export const {
   logInSuccess,
   changePasswordSuccess,
   logOutSuccess,
+  vaultUnlocked,
+  vaultLocked,
   fingerprintAuthSuccess,
   fingerprintAuthOut,
   loadingOn,

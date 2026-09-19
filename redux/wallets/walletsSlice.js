@@ -3,7 +3,11 @@ import {
   getCoin,
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {createAsyncThunk, createSlice, current} from '@reduxjs/toolkit';
+import {
+  hydrateWalletSecrets as hydrateAllWalletsSecrets,
+  stripAllWalletsSecrets,
+} from './walletSecrets';
 import {captureError, logger} from 'services/logger';
 import {
   clearSelectedUTXOs,
@@ -2491,6 +2495,20 @@ export const walletsSlice = createSlice({
       }
     },
     resetWallet: () => initialState,
+    // Merge vault secrets back onto the in-memory wallets after unlock. Pure
+    // merge (walletSecrets.js): memory wins, holes are filled, `undefined` is
+    // never written. Wallets absent from the payload are left untouched.
+    hydrateWalletSecrets: (state, {payload}) => {
+      state.allWallets = hydrateAllWalletsSecrets(
+        current(state).allWallets,
+        payload,
+      );
+    },
+    // Zeroise-on-lock: drop every secret from the in-memory wallets (the vault
+    // keeps them at rest). Inverse of hydrateWalletSecrets.
+    clearWalletSecrets: state => {
+      state.allWallets = stripAllWalletsSecrets(current(state).allWallets);
+    },
     updateWalletName: (state, action) => {
       const clientId = action?.payload?.clientId;
       const updateWalletName = action?.payload?.walletName?.trim?.();
@@ -3640,6 +3658,8 @@ export const {
   setCoinsInCurrentWallet,
   deleteWallet,
   resetWallet,
+  hydrateWalletSecrets,
+  clearWalletSecrets,
   setBackedUp,
   setWalletConnect,
   setWalletConnectWalletData,
