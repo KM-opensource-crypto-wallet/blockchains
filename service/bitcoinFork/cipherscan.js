@@ -20,29 +20,60 @@ const toParsedTransaction = (tx, walletAddress) => {
 const MAX_PAGES = 50;
 const PAGE_LIMIT = 100;
 
-// Cipherscan enforces 100 requests/minute per client; a wallet with many
-// transactions fetching every `/tx/:txid` detail via a single Promise.all
-// would burst well past that. Requests are chunked and spaced so the
-// sustained rate stays at RATE_LIMIT_PER_MINUTE regardless of tx count.
+// Cipherscan enforces 100 requests/minute per client across every endpoint,
+// so UTXO discovery's two request sources -- `/address` pagination and the
+// per-tx `/tx/:txid` details -- have to draw from one budget. Pacing them
+// separately still bursts past the limit (a wallet deep enough to paginate
+// spends most of the budget before the first detail fetch is even issued),
+// and a 429 mid-discovery would abort the whole UTXO set. Every request
+// goes through `limitedRequest`, which holds the caller until the oldest of
+// the last RATE_LIMIT_PER_MINUTE timestamps has aged out of the window.
 const RATE_LIMIT_PER_MINUTE = 100;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_BATCH_SIZE = 20;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+const requestTimestamps = [];
+
+// The check-and-record below is synchronous, so concurrent callers within a
+// batch can't claim the same slot; a caller that has to wait re-checks on
+// wake rather than assuming its slot survived.
+const acquireRequestSlot = async () => {
+  for (;;) {
+    const now = Date.now();
+    while (
+      requestTimestamps.length &&
+      now - requestTimestamps[0] >= RATE_LIMIT_WINDOW_MS
+    ) {
+      requestTimestamps.shift();
+    }
+    if (requestTimestamps.length < RATE_LIMIT_PER_MINUTE) {
+      requestTimestamps.push(now);
+      return;
+    }
+    await sleep(RATE_LIMIT_WINDOW_MS - (now - requestTimestamps[0]));
+  }
+};
+
+const limitedRequest = async requestFn => {
+  await acquireRequestSlot();
+  return requestFn();
+};
+
 const fetchTransactionDetails = async transactions => {
   const details = [];
+  // Batching now bounds how many requests are in flight at once; the shared
+  // limiter is what spaces them out.
   for (let i = 0; i < transactions.length; i += RATE_LIMIT_BATCH_SIZE) {
     const batch = transactions.slice(i, i + RATE_LIMIT_BATCH_SIZE);
     const batchDetails = await Promise.all(
-      batch.map(tx => CipherscanAPI.get(`/tx/${tx.txid}`).then(r => r?.data)),
+      batch.map(tx =>
+        limitedRequest(() => CipherscanAPI.get(`/tx/${tx.txid}`)).then(
+          r => r?.data,
+        ),
+      ),
     );
     details.push(...batchDetails);
-    const isLastBatch = i + RATE_LIMIT_BATCH_SIZE >= transactions.length;
-    if (!isLastBatch) {
-      await sleep(
-        (RATE_LIMIT_WINDOW_MS * RATE_LIMIT_BATCH_SIZE) / RATE_LIMIT_PER_MINUTE,
-      );
-    }
   }
   return details;
 };
@@ -51,15 +82,25 @@ const fetchAllTransactions = async address => {
   const transactions = [];
   let page = 1;
   while (page <= MAX_PAGES) {
-    const resp = await CipherscanAPI.get(`/address/${address}`, {
-      params: {limit: PAGE_LIMIT, page},
-    });
+    const resp = await limitedRequest(() =>
+      CipherscanAPI.get(`/address/${address}`, {
+        params: {limit: PAGE_LIMIT, page},
+      }),
+    );
     const pageTransactions = Array.isArray(resp?.data?.transactions)
       ? resp.data.transactions
       : [];
     transactions.push(...pageTransactions);
     if (pageTransactions.length < PAGE_LIMIT) {
       break;
+    }
+    // A full page at the cap means there are more transactions we haven't
+    // read. Returning here would hand back a partial list, which getUTXO
+    // would turn into a silently under-reported spendable balance.
+    if (page === MAX_PAGES) {
+      throw new Error(
+        `Cipherscan returned ${MAX_PAGES} full pages of transactions for ${address}; refusing to return a partial transaction list`,
+      );
     }
     page += 1;
   }

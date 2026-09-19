@@ -215,6 +215,7 @@ const getConsensusBranchIdLE = () => {
     throw new Error(`Invalid Zcash consensus branch ID: ${branchId}`);
   }
 
+  // eslint-disable-next-line no-undef
   return Buffer.from(branchId, 'hex').reverse();
 };
 // Builds and signs a v4 transparent (P2PKH-only) Zcash transaction. All
@@ -373,7 +374,12 @@ const selectUtxosAndFee = (
   }
   const selected = [];
   let total = 0n;
-  for (const utxo of utxos) {
+  const orderedUtxos = [...utxos].sort((a, b) => {
+    const aValue = BigInt(a.value);
+    const bValue = BigInt(b.value);
+    return aValue === bValue ? 0 : aValue > bValue ? -1 : 1;
+  });
+  for (const utxo of orderedUtxos) {
     selected.push(utxo);
     total += BigInt(utxo.value);
 
@@ -538,7 +544,10 @@ export const ZcashChain = () => {
           // and only re-throw if the balance can't even cover that.
           const totalUtxoValue = sumUtxoValues(utxos);
           const maxFee = calculateZip317Fee(utxos.length, 1, marginalFee);
-          if (totalUtxoValue <= maxFee) {
+          if (
+            BigInt(amountZatoshi) !== totalUtxoValue ||
+            totalUtxoValue <= maxFee
+          ) {
             throw err;
           }
           fee = maxFee;

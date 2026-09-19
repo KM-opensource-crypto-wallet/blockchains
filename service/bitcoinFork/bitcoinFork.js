@@ -32,14 +32,14 @@ const providerName = {
     'BCHBlockDaemon',
     'BCHMempool',
   ],
-  zec: ['ZcashPremiumBlockChair', 'ZcashBlockChair', 'ZcashCipherscan'],
+  zec: ['ZcashPremiumBlockChair', 'ZcashCipherscan', 'ZcashBlockChair'],
 };
 const providers = {
   ltc: [PremiumBlockChair, Mempool, BlockCypher, BlockChair, BlockDaemon],
   btc: [PremiumBlockChair, Mempool, BlockChair, BlockDaemon],
   doge: [PremiumBlockChair, BlockChair, BlockCypher, BlockDaemon],
   bch: [PremiumBlockChair, BlockChair, BlockDaemon],
-  zec: [PremiumBlockChair, BlockChair, Cipherscan],
+  zec: [PremiumBlockChair, Cipherscan, BlockChair],
 };
 
 export const BitcoinFork = {
