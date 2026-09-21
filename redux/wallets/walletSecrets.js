@@ -103,7 +103,12 @@ const stripDeep = (value, fields) => {
   return value;
 };
 
-const stripCoin = coin => {
+/**
+ * Returns a copy of a coin-shaped object with every secret removed, including
+ * nested `deriveAddresses[*]` keys. Never mutates. Also used for coin-shaped
+ * snapshots stored outside `allWallets` (batch transaction `coinInfo`).
+ */
+export const stripCoinSecrets = coin => {
   if (!isPlainObject(coin)) {
     return coin;
   }
@@ -127,7 +132,7 @@ export const stripWalletSecrets = wallet => {
   const out = omit(wallet, SECRET_WALLET_FIELDS.wallet);
   const result = out === wallet ? {...wallet} : out;
   if (Array.isArray(wallet.coins)) {
-    result.coins = wallet.coins.map(stripCoin);
+    result.coins = wallet.coins.map(stripCoinSecrets);
   }
   if (isPlainObject(wallet.chain_existing_coin)) {
     result.chain_existing_coin = Object.fromEntries(

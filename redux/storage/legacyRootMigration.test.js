@@ -1,5 +1,6 @@
 import {
   buildPersistEnvelope,
+  ensureWalletClientIds,
   fixCurrentWalletIndex,
   parseLegacyRoot,
   parsePersistEnvelope,
@@ -12,6 +13,7 @@ import {
 import {
   assertNoSecrets,
   extractVaultPayload,
+  hydrateWalletSecrets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletSecrets';
 
 const HEX = i => `0x${String(i).padStart(2, '0').repeat(32)}`;
@@ -74,6 +76,21 @@ const legacySlices = () => ({
     transactions: {
       w1: [
         {amount: '1', coinInfo: {chain_name: 'ethereum', privateKey: HEX(1)}},
+        {
+          amount: '2',
+          coinInfo: {
+            chain_name: 'ethereum',
+            address: '0xabc',
+            privateKey: HEX(1),
+            deriveAddresses: [
+              {
+                address: '0xdef',
+                derivePath: "m/44'/60'/0'/0/1",
+                privateKey: HEX(2),
+              },
+            ],
+          },
+        },
       ],
     },
   },
@@ -181,6 +198,19 @@ describe('legacyRootMigration', () => {
         coinInfo: {chain_name: 'ethereum'},
       });
     });
+
+    it('sanitizeBatchTransaction strips nested deriveAddresses keys', () => {
+      const out = sanitizeBatchTransaction(legacySlices().batchTransaction);
+      expect(out.transactions.w1[1]).toEqual({
+        amount: '2',
+        coinInfo: {
+          chain_name: 'ethereum',
+          address: '0xabc',
+          deriveAddresses: [{address: '0xdef', derivePath: "m/44'/60'/0'/0/1"}],
+        },
+      });
+      expect(() => assertNoSecrets(out)).not.toThrow();
+    });
   });
 
   describe('splitLegacyRoot', () => {
@@ -250,6 +280,85 @@ describe('legacyRootMigration', () => {
         b: {c: [1, 2]},
         _persist: {version: 1, rehydrated: true},
       });
+    });
+  });
+
+  // Wallets created before clientId existed only get one at runtime
+  // (walletsSlice.createClientIdIfNotExist, dispatched after rehydrate). The
+  // migration runs before the store exists, so it must assign the id itself or
+  // the wallet's secrets would be stripped from the slice and never reach the
+  // vault (extractVaultPayload keys by clientId).
+  describe('legacy wallets without clientId', () => {
+    const UUID_RE =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const walletsWithoutId = () => ({
+      allWallets: [
+        legacyWallets().allWallets[0],
+        {walletName: 'Old', phrase: MNEMONIC, coins: []},
+      ],
+      currentWalletIndex: 1,
+    });
+
+    it('ensureWalletClientIds is a no-op when every wallet already has one', () => {
+      const wallets = legacyWallets();
+      expect(ensureWalletClientIds(wallets)).toBe(wallets);
+      expect(ensureWalletClientIds(null)).toBe(null);
+      expect(ensureWalletClientIds({allWallets: 'nope'})).toEqual({
+        allWallets: 'nope',
+      });
+    });
+
+    it('ensureWalletClientIds assigns ids only where missing and never mutates', () => {
+      const wallets = walletsWithoutId();
+      const out = ensureWalletClientIds(wallets);
+      expect(out.allWallets[0]).toBe(wallets.allWallets[0]);
+      expect(out.allWallets[1].clientId).toMatch(UUID_RE);
+      expect(out.allWallets[1].phrase).toBe(MNEMONIC);
+      expect(wallets.allWallets[1].clientId).toBeUndefined();
+    });
+
+    it('splitLegacyRoot gives the slice, the vault payload and legacyWallets the same new id', () => {
+      const {
+        slices,
+        vaultPayload,
+        legacyWallets: normalized,
+      } = splitLegacyRoot({wallets: walletsWithoutId()});
+      const assigned = slices.wallets.allWallets[1].clientId;
+      expect(assigned).toMatch(UUID_RE);
+      expect(normalized.allWallets[1].clientId).toBe(assigned);
+      expect(slices.wallets.currentWalletClientId).toBe(assigned);
+      expect(Object.keys(vaultPayload.wallets).sort()).toEqual(
+        ['w1', assigned].sort(),
+      );
+      expect(vaultPayload.wallets[assigned].phrase).toBe(MNEMONIC);
+      expect(() => assertNoSecrets(slices.wallets)).not.toThrow();
+      const hydrated = hydrateWalletSecrets(
+        slices.wallets.allWallets,
+        vaultPayload,
+      );
+      expect(hydrated[1].phrase).toBe(MNEMONIC);
+    });
+
+    it('verifyMigration refuses wallets that still have no clientId', () => {
+      const legacy = walletsWithoutId();
+      const {slices, vaultPayload} = splitLegacyRoot({wallets: legacy});
+      const raw = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: slices.wallets,
+        decryptedVault: vaultPayload,
+      });
+      expect(raw.ok).toBe(false);
+      expect(raw.problems.join(' ')).toMatch(/without clientId/);
+
+      const migratedMissing = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: {
+          allWallets: slices.wallets.allWallets.map(({clientId, ...w}) => w),
+        },
+        decryptedVault: vaultPayload,
+      });
+      expect(migratedMissing.ok).toBe(false);
+      expect(migratedMissing.problems.join(' ')).toMatch(/without clientId/);
     });
   });
 

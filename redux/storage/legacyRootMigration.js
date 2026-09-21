@@ -8,10 +8,12 @@
 //   3. writes the vault from `vaultPayload`/`password`, and each sanitized
 //      slice via buildPersistEnvelope,
 //   4. reads back and calls verifyMigration before advancing schemaVersion.
+import {v4} from 'uuid';
 import {
   extractVaultPayload,
   findSecretPaths,
   stripAllWalletsSecrets,
+  stripCoinSecrets,
   stripWalletSecrets,
 } from '../wallets/walletSecrets';
 
@@ -59,6 +61,32 @@ export const parseLegacyRoot = (root, options = {}) => {
     }
   }
   return {slices, persist};
+};
+
+const hasClientId = wallet =>
+  !isPlainObject(wallet) || Boolean(wallet.clientId);
+
+/**
+ * Wallets created before `clientId` existed only get one at runtime
+ * (`walletsSlice.createClientIdIfNotExist`, dispatched after rehydrate). The
+ * migration runs before the store exists and keys the vault by clientId, so it
+ * has to assign the id itself, once, and use that same id for both the
+ * stripped slice and the vault payload. Same generator as the reducer.
+ * Returns `wallets` unchanged (same reference) when nothing is missing.
+ */
+export const ensureWalletClientIds = wallets => {
+  if (!isPlainObject(wallets) || !Array.isArray(wallets.allWallets)) {
+    return wallets;
+  }
+  if (wallets.allWallets.every(hasClientId)) {
+    return wallets;
+  }
+  return {
+    ...wallets,
+    allWallets: wallets.allWallets.map(wallet =>
+      hasClientId(wallet) ? wallet : {...wallet, clientId: v4()},
+    ),
+  };
 };
 
 /** One-time `currentWalletIndex` → `currentWalletClientId` (from store.js). */
@@ -125,14 +153,11 @@ export const sanitizeBatchTransaction = batch => {
     Object.entries(batch.transactions).map(([walletId, list]) => [
       walletId,
       Array.isArray(list)
-        ? list.map(tx => {
-            if (!isPlainObject(tx?.coinInfo)) {
-              return tx;
-            }
-            const {privateKey, extendedPrivateKey, phrase, ...coinInfo} =
-              tx.coinInfo;
-            return {...tx, coinInfo};
-          })
+        ? list.map(tx =>
+            isPlainObject(tx?.coinInfo)
+              ? {...tx, coinInfo: stripCoinSecrets(tx.coinInfo)}
+              : tx,
+          )
         : list,
     ]),
   );
@@ -175,15 +200,23 @@ export const splitLegacyRoot = slices => {
   }
   const password =
     typeof slices.auth?.password === 'string' ? slices.auth.password : '';
-  const legacyWallets = fixCurrentWalletIndex(slices.wallets);
+  // Ids first: fixCurrentWalletIndex and extractVaultPayload both key on them.
+  const legacyWallets = fixCurrentWalletIndex(
+    ensureWalletClientIds(slices.wallets),
+  );
   const vaultPayload = extractVaultPayload(legacyWallets?.allWallets || []);
   const sanitized = {};
   for (const [name, value] of Object.entries(slices)) {
-    sanitized[name] = SANITIZERS[name] ? SANITIZERS[name](value) : value;
+    // The wallets slice is sanitized from the normalized copy so the stripped
+    // slice carries exactly the clientIds the vault payload was keyed by.
+    const source = name === 'wallets' ? legacyWallets : value;
+    sanitized[name] = SANITIZERS[name] ? SANITIZERS[name](source) : source;
   }
   return {
     slices: sanitized,
     vaultPayload,
+    // Pass this (not the raw parsed slice) to verifyMigration.
+    legacyWallets,
     password,
     hasAccount: Boolean(password),
     counts: countPayload(vaultPayload),
@@ -236,6 +269,18 @@ export const verifyMigration = ({
   decryptedVault,
 }) => {
   const problems = [];
+  // A wallet without a clientId cannot be matched to its vault entry, so it
+  // would silently lose its secrets. splitLegacyRoot assigns ids up front;
+  // this catches a caller that passed the raw slice or a write that lost them.
+  const withoutId = list =>
+    (Array.isArray(list) ? list : []).filter(w => !hasClientId(w)).length;
+  const legacyMissing = withoutId(legacyWallets?.allWallets);
+  const migratedMissing = withoutId(migratedWallets?.allWallets);
+  if (legacyMissing || migratedMissing) {
+    problems.push(
+      `wallets without clientId: legacy=${legacyMissing} migrated=${migratedMissing}`,
+    );
+  }
   const legacy = walletSummary(legacyWallets?.allWallets);
   const migrated = walletSummary(migratedWallets?.allWallets);
   const legacyIds = Object.keys(legacy).sort();

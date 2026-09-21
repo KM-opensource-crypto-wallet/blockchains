@@ -1,7 +1,11 @@
 import * as vault from 'dok-wallet-blockchain-networks/security/vault';
 import {VAULT_ERROR_CODES} from 'dok-wallet-blockchain-networks/security/errors';
-import {base64Encode} from 'dok-wallet-blockchain-networks/security/bytes';
+import {
+  base64Decode,
+  base64Encode,
+} from 'dok-wallet-blockchain-networks/security/bytes';
 import * as secureStore from 'security/secureStore';
+import * as vaultCore from 'dok-wallet-blockchain-networks/security/vaultCore';
 
 // In-memory secure store with the knobs the vault needs to be tested against:
 // a biometric capability flag, a prompt counter, and a way to simulate the
@@ -18,6 +22,7 @@ jest.mock('security/secureStore', () => {
     prompts: 0,
     sensor: true,
     removes: [],
+    failNextSetKey: null,
   };
   const mock = {
     capabilities: {biometric: true},
@@ -34,6 +39,7 @@ jest.mock('security/secureStore', () => {
       state.prompts = 0;
       state.sensor = true;
       state.removes.length = 0;
+      state.failNextSetKey = null;
       mock.capabilities.biometric = true;
     },
     isBiometricAvailable: async () => state.sensor,
@@ -57,6 +63,13 @@ jest.mock('security/secureStore', () => {
       if (opts?.accessControl) {
         state.prompts += 1;
       }
+      if (state.failNextSetKey === key) {
+        state.failNextSetKey = null;
+        const {SecureStoreError, SECURE_STORE_ERROR_CODES} = jest.requireActual(
+          'dok-wallet-blockchain-networks/security/errors',
+        );
+        throw new SecureStoreError(SECURE_STORE_ERROR_CODES.UNKNOWN);
+      }
       items.set(key, value);
       options[key] = opts;
     },
@@ -78,10 +91,24 @@ jest.mock('dok-wallet-blockchain-networks/security/vaultCore', () => {
   const actual = jest.requireActual(
     'dok-wallet-blockchain-networks/security/vaultCore',
   );
+  // `gate`: a promise the state-key derivation waits on, so a test can
+  // interleave lock()/unlock while HKDF is "in flight". `failNext`: reject once.
+  const state = {gate: null, failNext: false};
   return {
     ...actual,
+    __state: state,
     wrapDek: (dek, password, options = {}) =>
       actual.wrapDek(dek, password, {iterations: 1000, ...options}),
+    deriveStateKey: async dek => {
+      if (state.gate) {
+        await state.gate;
+      }
+      if (state.failNext) {
+        state.failNext = false;
+        throw new Error('hkdf unavailable');
+      }
+      return actual.deriveStateKey(dek);
+    },
   };
 });
 
@@ -172,6 +199,39 @@ describe('vault', () => {
       code: VAULT_ERROR_CODES.INVALID_PASSWORD,
     });
     expect(await vault.unlockWithPassword('new')).toEqual(payload);
+  });
+
+  it('changePassword never changes the lock state', async () => {
+    await vault.createVault('old');
+    await vault.saveSecrets(payload);
+
+    // Unlocked stays unlocked, with the same working DEK.
+    await vault.changePassword('old', 'mid');
+    expect(vault.isUnlocked()).toBe(true);
+    expect(await vault.readSecrets()).toEqual(payload);
+
+    // Locked stays locked: re-keying is not an unlock.
+    vault.lock();
+    await vault.changePassword('mid', 'new');
+    expect(vault.isUnlocked()).toBe(false);
+    expect(() => vault.getStateKey()).toThrow();
+    expect(await vault.unlockWithPassword('new')).toEqual(payload);
+  });
+
+  it('changePassword leaves the old wrap and the lock state alone when the write fails', async () => {
+    await vault.createVault('old');
+    await vault.saveSecrets(payload);
+    const wrapBefore = secureStore.__items.get('vault.dek.password');
+
+    secureStore.__state.failNextSetKey = 'vault.dek.password';
+    await expect(vault.changePassword('old', 'new')).rejects.toBeTruthy();
+
+    expect(secureStore.__items.get('vault.dek.password')).toBe(wrapBefore);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(await vault.readSecrets()).toEqual(payload);
+    vault.lock();
+    expect(await vault.verifyPassword('old')).toBe(true);
+    expect(await vault.verifyPassword('new')).toBe(false);
   });
 
   it('changePassword rejects a wrong current password (fixes D1)', async () => {
@@ -352,5 +412,91 @@ describe('vault', () => {
     expect(after.updatedAt).toBeGreaterThanOrEqual(before.updatedAt);
     vault.lock();
     expect(await vault.verifyPassword('pw')).toBe(true);
+  });
+
+  it('a failed KDF re-wrap write neither blocks the unlock nor touches the old wrap', async () => {
+    await vault.createVault('pw'); // stale by construction (mocked 1000 iterations)
+    await vault.saveSecrets(payload);
+    vault.lock();
+    const before = secureStore.__items.get('vault.dek.password');
+
+    secureStore.__state.failNextSetKey = 'vault.dek.password';
+    await expect(vault.unlockWithPassword('pw')).resolves.toEqual(payload);
+
+    expect(vault.isUnlocked()).toBe(true);
+    expect(secureStore.__state.failNextSetKey).toBeNull(); // the write was attempted
+    expect(secureStore.__items.get('vault.dek.password')).toBe(before);
+    expect(await vault.needsKdfUpgrade()).toBe(true); // caller can report it
+    vault.lock();
+    expect(await vault.verifyPassword('pw')).toBe(true);
+  });
+
+  it('an unreadable blob leaves the vault locked and does not attempt the re-wrap', async () => {
+    await vault.createVault('pw');
+    await vault.saveSecrets(payload);
+    vault.lock();
+    const blob = JSON.parse(secureStore.__items.get('vault.blob'));
+    const ct = base64Decode(blob.ct);
+    ct[0] = (ct[0] + 1) % 256; // flip one ciphertext byte → GCM auth fails
+    blob.ct = base64Encode(ct);
+    secureStore.__items.set('vault.blob', JSON.stringify(blob));
+    const wrapBefore = secureStore.__items.get('vault.dek.password');
+
+    // Not INVALID_PASSWORD: the Login screen must not count this as an attempt.
+    await expect(vault.unlockWithPassword('pw')).rejects.toMatchObject({
+      code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
+    });
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(() => vault.getStateKey()).toThrow();
+    expect(secureStore.__items.get('vault.dek.password')).toBe(wrapBefore);
+  });
+
+  describe('getStateKey while the vault changes underneath', () => {
+    afterEach(() => {
+      vaultCore.__state.gate = null;
+      vaultCore.__state.failNext = false;
+    });
+
+    it('a derivation that lands after lock() rejects and stores nothing', async () => {
+      await vault.createVault('pw');
+      let open;
+      vaultCore.__state.gate = new Promise(resolve => (open = resolve));
+      const pending = vault.getStateKey();
+      vault.lock();
+      open();
+      await expect(pending).rejects.toMatchObject({
+        code: VAULT_ERROR_CODES.LOCKED,
+      });
+      expect(vault.isUnlocked()).toBe(false);
+      expect(() => vault.getStateKey()).toThrow();
+    });
+
+    it("a derivation from a previous DEK never becomes the new vault's state key", async () => {
+      await vault.createVault('pw');
+      const oldKey = base64Encode(await vault.getStateKey());
+      vault.lock();
+      await vault.unlockWithPassword('pw'); // memo cleared; derivation runs again
+      let open;
+      vaultCore.__state.gate = new Promise(resolve => (open = resolve));
+      const pending = vault.getStateKey(); // in flight for the OLD dek
+      await vault.destroy();
+      await vault.createVault('pw2'); // brand-new DEK
+      vaultCore.__state.gate = null;
+      open();
+      await expect(pending).rejects.toMatchObject({
+        code: VAULT_ERROR_CODES.LOCKED,
+      });
+      const newKey = base64Encode(await vault.getStateKey());
+      expect(newKey).not.toBe(oldKey);
+    });
+
+    it('a failed derivation does not poison later calls in the same unlock', async () => {
+      await vault.createVault('pw');
+      vaultCore.__state.failNext = true;
+      await expect(vault.getStateKey()).rejects.toThrow('hkdf unavailable');
+      expect(vault.isUnlocked()).toBe(true);
+      expect(await vault.getStateKey()).toHaveLength(32);
+    });
   });
 });

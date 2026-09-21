@@ -25,6 +25,11 @@ import {
 } from '../redux/wallets/walletSecrets';
 
 export const VAULT_SYNC_DEBOUNCE_MS = 500;
+// A failed vault write keeps its snapshot dirty and retries with doubling
+// delay (starting at the debounce) up to this cap; flush() and the next
+// wallets change retry it sooner. Dropping it would leave `persist:wallets`
+// holding a stripped wallet whose keys never reached the vault.
+export const VAULT_SYNC_MAX_RETRY_MS = 30000;
 
 export const IMMEDIATE_VAULT_WRITE_ACTIONS = Object.freeze([
   'wallets/createWallet/fulfilled',
@@ -49,11 +54,29 @@ export const createVaultSync = ({
   let lastWritten = null;
   let timer = null;
   let pendingWallets = null;
+  let retryDelayMs = debounceMs;
   let chain = Promise.resolve();
 
   const enqueue = task => {
     chain = chain.then(task, task);
     return chain;
+  };
+
+  const cancelTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const armTimer = delayMs => {
+    cancelTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      const wallets = pendingWallets;
+      pendingWallets = null;
+      enqueue(writeNow(wallets));
+    }, delayMs);
   };
 
   const writeNow = allWallets => async () => {
@@ -79,27 +102,28 @@ export const createVaultSync = ({
     try {
       await vault.saveSecrets(payload);
       lastWritten = serialized;
+      retryDelayMs = debounceMs;
     } catch (error) {
-      onError(error, {tags: {area: 'vault', op: 'save_secrets'}});
-    }
-  };
-
-  const cancelTimer = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
+      onError(error, {
+        tags: {area: 'vault', op: 'save_secrets'},
+        extra: {retryInMs: retryDelayMs},
+      });
+      // Stay dirty. A newer snapshot scheduled meanwhile supersedes this one
+      // (it contains everything this one did); otherwise retry it with
+      // backoff. flush() also picks it up.
+      if (!pendingWallets) {
+        pendingWallets = allWallets;
+      }
+      if (!timer) {
+        armTimer(retryDelayMs);
+      }
+      retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
     }
   };
 
   const schedule = allWallets => {
     pendingWallets = allWallets;
-    cancelTimer();
-    timer = setTimeout(() => {
-      timer = null;
-      const wallets = pendingWallets;
-      pendingWallets = null;
-      enqueue(writeNow(wallets));
-    }, debounceMs);
+    armTimer(debounceMs);
   };
 
   listener.startListening({
@@ -126,16 +150,11 @@ export const createVaultSync = ({
       cancelTimer();
       pendingWallets = null;
       lastWritten = null;
-      if (!vault.isUnlocked()) {
-        return;
-      }
-      await enqueue(async () => {
-        try {
-          await vault.saveSecrets({...vault.EMPTY_VAULT_PAYLOAD, wallets: {}});
-        } catch (error) {
-          onError(error, {tags: {area: 'vault', op: 'reset'}});
-        }
-      });
+      // The empty payload goes through the same path as any other write so a
+      // failure is reported, kept dirty and retried (timer / flush) instead of
+      // leaving the old wallets' keys in the blob. Locked → nothing to do,
+      // exactly as writeNow decides for a secret-free payload.
+      await enqueue(writeNow([]));
     },
   });
 
@@ -157,9 +176,13 @@ export const createVaultSync = ({
 
   return {
     middleware: listener.middleware,
-    /** Write any pending change now and wait for in-flight writes. */
+    /**
+     * Write any pending (debounced or previously failed) change now and wait
+     * for in-flight writes. Never rejects: a failure is reported through
+     * onError and the snapshot stays dirty for the next flush / retry.
+     */
     flush: async () => {
-      if (timer) {
+      if (timer || pendingWallets) {
         cancelTimer();
         const wallets = pendingWallets;
         pendingWallets = null;

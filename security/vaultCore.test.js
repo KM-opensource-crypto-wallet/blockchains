@@ -130,11 +130,28 @@ describe('vaultCore', () => {
       expect(await decryptBlob(dek, blob)).toEqual(payload);
     });
 
-    it('fails with the wrong DEK', async () => {
+    it('fails with the wrong DEK as CORRUPT_ENVELOPE, never INVALID_PASSWORD', async () => {
+      // The DEK is the live unwrapped key, so an auth failure here is bad data.
+      // INVALID_PASSWORD would feed the Login screen's wipe-after-N lockout.
       const blob = await encryptBlob(generateDek(), payload);
       await expect(decryptBlob(generateDek(), blob)).rejects.toMatchObject({
-        code: VAULT_ERROR_CODES.INVALID_PASSWORD,
+        code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
       });
+      const tampered = base64Decode(blob.ct);
+      tampered[0] ^= 0xff;
+      await expect(
+        decryptBlob(generateDek(), {...blob, ct: base64Encode(tampered)}),
+      ).rejects.toMatchObject({code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE});
+    });
+
+    it('decryptString with the wrong state key is CORRUPT_ENVELOPE too', async () => {
+      const sealed = await encryptString(
+        await deriveStateKey(generateDek()),
+        'x',
+      );
+      await expect(
+        decryptString(await deriveStateKey(generateDek()), sealed),
+      ).rejects.toMatchObject({code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE});
     });
 
     it('will not decrypt a blob whose AAD says it is a DEK envelope', async () => {
@@ -164,6 +181,20 @@ describe('vaultCore', () => {
       expect(sealed.aad).toBe(AAD.state);
       expect(sealed.ct).not.toContain('allWallets');
       expect(await decryptString(key, sealed)).toBe(slice);
+    });
+
+    it('round-trips an empty string (tag-only ciphertext) and still authenticates it', async () => {
+      const key = await deriveStateKey(generateDek());
+      const sealed = await encryptString(key, '');
+      expect(base64Decode(sealed.ct)).toHaveLength(16);
+      expect(await decryptString(key, sealed)).toBe('');
+      await expect(
+        decryptString(await deriveStateKey(generateDek()), sealed),
+      ).rejects.toMatchObject({code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE});
+      // Anything shorter than the tag is still malformed.
+      await expect(
+        decryptString(key, {...sealed, ct: base64Encode(new Uint8Array(15))}),
+      ).rejects.toMatchObject({code: VAULT_ERROR_CODES.CORRUPT_ENVELOPE});
     });
   });
 

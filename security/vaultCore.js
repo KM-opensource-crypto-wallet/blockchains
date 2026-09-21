@@ -50,13 +50,14 @@ const STATE_KEY_HKDF_SALT = 'dok.state.hkdf.salt.v1';
 
 export const generateDek = () => vaultCrypto.randomBytes(DEK_BYTES);
 
-const wrapCryptoError = (error, fallbackCode) => {
+// A GCM authentication failure means different things per purpose: on the
+// password-wrapped DEK it is the wrong password; on the blob or a sealed state
+// item the key is the live DEK-derived one, so it can only be corrupt or
+// tampered data. Callers pick `authFailureCode` accordingly — the Login screen
+// counts INVALID_PASSWORD towards the wipe-after-N-attempts lockout.
+const wrapCryptoError = (error, authFailureCode, fallbackCode) => {
   if (error && error.code === VAULT_CRYPTO_ERROR_CODES.AUTH_FAILED) {
-    return new VaultError(
-      VAULT_ERROR_CODES.INVALID_PASSWORD,
-      'Authentication failed',
-      error,
-    );
+    return new VaultError(authFailureCode, 'Authentication failed', error);
   }
   if (error instanceof VaultError) {
     return error;
@@ -143,11 +144,12 @@ const sealBytes = async (key, plaintext, aad) => {
   };
 };
 
-const openBytes = async (key, envelope, aad) => {
+const openBytes = async (key, envelope, aad, authFailureCode) => {
   assertEnvelopeShape(envelope, aad);
   const iv = decodeField(envelope, 'iv');
   const ct = decodeField(envelope, 'ct');
-  if (iv.byteLength !== IV_BYTES || ct.byteLength <= GCM_TAG_BYTES) {
+  // A tag-only ciphertext (exactly GCM_TAG_BYTES) is a valid empty plaintext.
+  if (iv.byteLength !== IV_BYTES || ct.byteLength < GCM_TAG_BYTES) {
     throw new VaultError(
       VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
       'Envelope byte lengths are wrong',
@@ -156,7 +158,11 @@ const openBytes = async (key, envelope, aad) => {
   try {
     return await vaultCrypto.aesGcmDecrypt(key, iv, ct, aad);
   } catch (error) {
-    throw wrapCryptoError(error, VAULT_ERROR_CODES.CORRUPT_ENVELOPE);
+    throw wrapCryptoError(
+      error,
+      authFailureCode,
+      VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
+    );
   }
 };
 
@@ -189,7 +195,12 @@ export const unwrapDek = async (envelope, password) => {
   const salt = decodeField(envelope.kdf, 'salt');
   const kek = await deriveKek(password, salt, envelope.kdf.iterations);
   try {
-    const dek = await openBytes(kek, envelope, AAD.dek);
+    const dek = await openBytes(
+      kek,
+      envelope,
+      AAD.dek,
+      VAULT_ERROR_CODES.INVALID_PASSWORD,
+    );
     if (dek.byteLength !== DEK_BYTES) {
       throw new VaultError(
         VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
@@ -202,11 +213,25 @@ export const unwrapDek = async (envelope, password) => {
   }
 };
 
-export const encryptBlob = (dek, payload) =>
-  sealBytes(dek, utf8Encode(JSON.stringify(payload)), AAD.vault);
+// Encrypt side mirrors decryptBlob/decryptString: the encoded plaintext buffer
+// is zeroised once sealed. Best-effort — the source JS string cannot be wiped.
+export const encryptBlob = async (dek, payload) => {
+  const plaintext = utf8Encode(JSON.stringify(payload));
+  try {
+    return await sealBytes(dek, plaintext, AAD.vault);
+  } finally {
+    zeroBytes(plaintext);
+  }
+};
 
+/** Blob under the live DEK: an auth failure is corruption, never a password. */
 export const decryptBlob = async (dek, envelope) => {
-  const plaintext = await openBytes(dek, envelope, AAD.vault);
+  const plaintext = await openBytes(
+    dek,
+    envelope,
+    AAD.vault,
+    VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
+  );
   try {
     return JSON.parse(utf8Decode(plaintext));
   } catch (error) {
@@ -229,11 +254,22 @@ export const deriveStateKey = dek =>
     STATE_KEY_BYTES,
   );
 
-export const encryptString = (stateKey, text) =>
-  sealBytes(stateKey, utf8Encode(text), AAD.state);
+export const encryptString = async (stateKey, text) => {
+  const plaintext = utf8Encode(text);
+  try {
+    return await sealBytes(stateKey, plaintext, AAD.state);
+  } finally {
+    zeroBytes(plaintext);
+  }
+};
 
 export const decryptString = async (stateKey, envelope) => {
-  const plaintext = await openBytes(stateKey, envelope, AAD.state);
+  const plaintext = await openBytes(
+    stateKey,
+    envelope,
+    AAD.state,
+    VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
+  );
   return utf8Decode(plaintext);
 };
 

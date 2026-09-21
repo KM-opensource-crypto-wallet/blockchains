@@ -123,18 +123,31 @@ export const unlockWithPassword = async password => {
     throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to unlock');
   }
   const unwrapped = await unwrapDek(envelope, password);
-  const payload = await readPayload(unwrapped);
-  setDek(unwrapped);
-  // In-place KDF upgrade (MetaMask pattern): the password is in hand and just
-  // proved itself, so re-wrap under the current parameters. The blob is
-  // untouched; a failure here is reported by the caller and the old wrap
-  // keeps working.
-  if (isKdfStale(envelope)) {
-    await writeJson(
-      VAULT_KEYS.dekPassword,
-      await wrapDek(unwrapped, password, {createdAt: envelope.createdAt}),
-    );
+  let payload;
+  try {
+    payload = await readPayload(unwrapped);
+    // In-place KDF upgrade (MetaMask pattern): the password is in hand and
+    // just proved itself, so re-wrap under the current parameters before the
+    // DEK is handed out. The blob is untouched and the old wrap stays valid,
+    // so a failed write must never turn a correct password into a lockout:
+    // it is swallowed here, `needsKdfUpgrade()` stays true, and the unlock
+    // thunk reports that.
+    if (isKdfStale(envelope)) {
+      try {
+        await writeJson(
+          VAULT_KEYS.dekPassword,
+          await wrapDek(unwrapped, password, {createdAt: envelope.createdAt}),
+        );
+      } catch (_) {
+        // Old wrap keeps working; see above.
+      }
+    }
+  } catch (error) {
+    // Corrupt/unreadable blob: never hold a DEK the caller did not receive.
+    zeroBytes(unwrapped);
+    throw error;
   }
+  setDek(unwrapped);
   return payload;
 };
 
@@ -156,21 +169,26 @@ export const verifyPassword = async password => {
   }
 };
 
-/** Re-wraps the DEK only; the blob is untouched. Verifies `current` first. */
+/**
+ * Re-wraps the DEK only; the blob is untouched. Verifies `current` first.
+ * Never changes the lock state: an unlocked vault keeps its in-memory DEK (the
+ * same key), a locked one stays locked — unlocking here would bypass the
+ * unlock flow (hydration, `isVaultUnlocked`). The temporary DEK is zeroised
+ * whether or not the re-wrap or the write succeeds.
+ */
 export const changePassword = async (current, next) => {
   const envelope = await readJson(VAULT_KEYS.dekPassword);
   if (!envelope) {
     throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to re-key');
   }
   const unwrapped = await unwrapDek(envelope, current);
-  const rewrapped = await wrapDek(unwrapped, next, {
-    createdAt: envelope.createdAt,
-  });
-  await writeJson(VAULT_KEYS.dekPassword, rewrapped);
-  if (dek) {
+  try {
+    const rewrapped = await wrapDek(unwrapped, next, {
+      createdAt: envelope.createdAt,
+    });
+    await writeJson(VAULT_KEYS.dekPassword, rewrapped);
+  } finally {
     zeroBytes(unwrapped);
-  } else {
-    setDek(unwrapped);
   }
 };
 
@@ -296,10 +314,29 @@ export const getStateKey = () => {
     return Promise.resolve(new Uint8Array(stateKey));
   }
   if (!stateKeyPromise) {
-    stateKeyPromise = deriveStateKey(current).then(derived => {
+    const pending = deriveStateKey(current).then(derived => {
+      // lock() / a new unlock may have run while HKDF was in flight. `dek` is
+      // a fresh buffer per unlock, so identity says whether this derivation
+      // still belongs to the live DEK; a stale one must neither be stored nor
+      // handed out (sealed data would end up under an unrecoverable key).
+      if (dek !== current) {
+        zeroBytes(derived);
+        throw new VaultError(
+          VAULT_ERROR_CODES.LOCKED,
+          'Vault was locked while deriving the state key',
+        );
+      }
       stateKey = derived;
-      return new Uint8Array(derived);
+      return derived;
     });
+    // A failed derivation must not pin a rejected promise for the rest of the
+    // unlock; the next call retries. lock() also drops it.
+    pending.catch(() => {
+      if (stateKeyPromise === pending) {
+        stateKeyPromise = null;
+      }
+    });
+    stateKeyPromise = pending;
   }
   return stateKeyPromise.then(key => new Uint8Array(key));
 };

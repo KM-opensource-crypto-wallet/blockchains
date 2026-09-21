@@ -21,16 +21,25 @@ jest.mock('services/logger', () => ({
 jest.mock('security/secureStore', () => {
   const items = new Map();
   const writes = [];
+  // `failSets`: how many upcoming writes of `failSetKey` should throw.
+  const state = {failSetKey: null, failSets: 0};
   return {
     capabilities: {biometric: false},
     __items: items,
     __writes: writes,
+    __state: state,
     __reset: () => {
       items.clear();
       writes.length = 0;
+      state.failSetKey = null;
+      state.failSets = 0;
     },
     get: async key => (items.has(key) ? items.get(key) : null),
     set: async (key, value) => {
+      if (state.failSets > 0 && key === state.failSetKey) {
+        state.failSets -= 1;
+        throw new Error('secure store write failed');
+      }
       writes.push(key);
       items.set(key, value);
     },
@@ -221,6 +230,86 @@ describe('vaultSync', () => {
     expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletB]));
   });
 
+  const failNextBlobWrites = n => {
+    secureStore.__state.failSetKey = 'vault.blob';
+    secureStore.__state.failSets = n;
+  };
+  const saveErrors = () =>
+    onError.mock.calls.filter(([, ctx]) => ctx?.tags?.op === 'save_secrets');
+  // The write runs through the platform crypto adapter: node crypto settles
+  // within microtasks, WebCrypto on real macrotasks (threadpool). Wait for the
+  // reported failure instead of assuming one tick.
+  const waitForSaveErrors = async n => {
+    for (let i = 0; i < 1000 && saveErrors().length < n; i++) {
+      await flushMicrotasks();
+    }
+  };
+
+  it('a failed vault write stays dirty and is retried by the timer', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(1);
+    store.dispatch(createWalletFulfilled([walletA]));
+    await waitForSaveErrors(1);
+
+    expect(saveErrors()).toHaveLength(1);
+    expect(await vault.readSecrets()).toEqual({v: 1, wallets: {}});
+
+    jest.advanceTimersByTime(500); // first retry after one debounce window
+    await flushMicrotasks();
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+    expect(saveErrors()).toHaveLength(1);
+  });
+
+  it('flush() retries a failed write instead of dropping it, and never rejects', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(1);
+    store.dispatch(createWalletFulfilled([walletA]));
+    await waitForSaveErrors(1);
+    expect(saveErrors()).toHaveLength(1);
+
+    // e.g. app goes to background before the retry timer fires.
+    await expect(sync.flush()).resolves.toBeUndefined();
+    expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+
+    // Once written, nothing is left dirty: no further write on the next flush.
+    const writesAfter = blobWrites();
+    jest.advanceTimersByTime(60000);
+    await flushMicrotasks();
+    await sync.flush();
+    expect(blobWrites()).toBe(writesAfter);
+  });
+
+  it('retries back off and a newer change supersedes the failed snapshot', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(2);
+    store.dispatch(createWalletFulfilled([walletA]));
+    await waitForSaveErrors(1);
+    expect(saveErrors()).toHaveLength(1);
+
+    jest.advanceTimersByTime(500); // retry #1 fails → next retry in 1000ms
+    await waitForSaveErrors(2);
+    expect(saveErrors()).toHaveLength(2);
+    expect(saveErrors()[1][1].extra.retryInMs).toBe(1000);
+
+    // A newer change arrives during the backoff: it carries walletA too, so
+    // it replaces the dirty snapshot and goes out on the normal debounce.
+    store.dispatch(walletsStub.actions.setWallets([walletA, walletB]));
+    jest.advanceTimersByTime(500);
+    await flushMicrotasks();
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual(
+      extractVaultPayload([walletA, walletB]),
+    );
+    expect(saveErrors()).toHaveLength(2);
+
+    // Nothing stale fires later.
+    const writesAfter = blobWrites();
+    jest.advanceTimersByTime(60000);
+    await flushMicrotasks();
+    expect(blobWrites()).toBe(writesAfter);
+  });
+
   it('markSynced() suppresses the redundant write after unlock+hydrate', async () => {
     await vault.createVault('pw');
     const before = blobWrites();
@@ -251,6 +340,35 @@ describe('vaultSync', () => {
     await flushMicrotasks();
     await sync.flush();
     expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletB]));
+  });
+
+  it('a failed reset write is retried until the vault is really emptied', async () => {
+    await vault.createVault('pw');
+    store.dispatch(walletsStub.actions.setWallets([walletA]));
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+
+    failNextBlobWrites(1);
+    store.dispatch(walletsStub.actions.resetWallet());
+    await waitForSaveErrors(1);
+    // Reported, and the old keys are still there for now…
+    expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+
+    // …until the retry (here via flush, e.g. going to background) lands.
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual({v: 1, wallets: {}});
+    expect(saveErrors()).toHaveLength(1);
+  });
+
+  it('resetWallet while locked writes nothing and reports nothing', async () => {
+    await vault.createVault('pw');
+    vault.lock();
+    const before = blobWrites();
+    store.dispatch(walletsStub.actions.resetWallet());
+    await flushMicrotasks();
+    await sync.flush();
+    expect(blobWrites()).toBe(before);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('logOutSuccess destroys the vault (account removed)', async () => {
