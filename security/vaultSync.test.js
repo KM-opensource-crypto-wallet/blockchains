@@ -195,17 +195,23 @@ describe('vaultSync', () => {
     expect(secureStore.__items.has('vault.blob')).toBe(false);
   });
 
-  it('stays silent for an empty payload while locked (pre-onboarding)', async () => {
+  it('stays silent while locked for secret-stripped wallets (pre-login housekeeping)', async () => {
+    // What the store holds before login: persisted wallets with every secret
+    // removed. Startup actions reorder / touch them constantly.
+    const stripped = {
+      clientId: 'x',
+      walletName: 'Main',
+      coins: [{chain_name: 'ethereum', symbol: 'ETH', address: '0xa'}],
+      hideSettings: {isHidden: true, relockOption: 'RELAUNCH'},
+    };
     store.dispatch(walletsStub.actions.setWallets([]));
-    store.dispatch(
-      walletsStub.actions.setWallets([{clientId: 'x', coins: []}]),
-    );
+    store.dispatch(walletsStub.actions.setWallets([stripped]));
+    store.dispatch(walletsStub.actions.touchBalance());
     jest.advanceTimersByTime(500);
     await flushMicrotasks();
     await sync.flush();
-    // {clientId:'x'} has no secrets → payload.wallets has an entry but the
-    // wallet has no key material; still a "wallet" from the vault's view.
-    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(secureStore.__items.has('vault.blob')).toBe(false);
   });
 
   it('flush() writes a pending debounced change right away', async () => {

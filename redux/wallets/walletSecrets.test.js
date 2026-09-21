@@ -8,6 +8,7 @@ import {
   hydrateWalletSecrets,
   stripAllWalletsSecrets,
   stripWalletSecrets,
+  vaultPayloadHasSecrets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletSecrets';
 
 const MNEMONIC =
@@ -333,5 +334,22 @@ describe('walletSecrets', () => {
     expect(getDeriveFamily('ethereum')).toBe('evm');
     expect(getDeriveFamily('polygon')).toBe('evm');
     expect(getDeriveFamily('bitcoin')).toBe('bitcoin');
+  });
+
+  it('vaultPayloadHasSecrets distinguishes key material from empty entries', () => {
+    expect(vaultPayloadHasSecrets(extractVaultPayload(fixtures()))).toBe(true);
+    expect(
+      vaultPayloadHasSecrets(
+        extractVaultPayload(stripAllWalletsSecrets(fixtures())),
+      ),
+    ).toBe(false);
+    expect(vaultPayloadHasSecrets({v: 1, wallets: {}})).toBe(false);
+    expect(vaultPayloadHasSecrets(null)).toBe(false);
+    expect(
+      vaultPayloadHasSecrets({
+        v: 1,
+        wallets: {a: {deriveKeys: {evm: {'m/0': 'k'}}}},
+      }),
+    ).toBe(true);
   });
 });

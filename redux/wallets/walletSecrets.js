@@ -299,6 +299,20 @@ export const hydrateWalletSecrets = (allWallets, payload) => {
   });
 };
 
+/** True when the payload carries any secret material at all. */
+export const vaultPayloadHasSecrets = payload =>
+  Object.values(payload?.wallets || {}).some(
+    entry =>
+      hasValue(entry?.phrase) ||
+      hasValue(entry?.privateKey) ||
+      Object.keys(entry?.hideSettings || {}).length > 0 ||
+      Object.keys(entry?.coins || {}).length > 0 ||
+      Object.keys(entry?.chainExisting || {}).length > 0 ||
+      Object.values(entry?.deriveKeys || {}).some(
+        family => Object.keys(family || {}).length > 0,
+      ),
+  );
+
 /** clientIds present in `allWallets` that the payload has no entry for. */
 export const findWalletsMissingSecrets = (allWallets, payload) =>
   (Array.isArray(allWallets) ? allWallets : [])

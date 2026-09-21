@@ -1,6 +1,7 @@
 import {
   clearWalletSecrets,
   hydrateWalletSecrets,
+  resetCoinsToDefaultAddressForPrivacyMode,
   walletsSlice,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {
@@ -124,5 +125,54 @@ describe('walletsSlice.hydrateWalletSecrets', () => {
       hydrateWalletSecrets(extractVaultPayload(wallets)),
     );
     expect(restored.allWallets).toEqual(wallets);
+  });
+
+  describe('privacy mode vs the vault split', () => {
+    // Wallet in privacy mode whose coin currently points at derive entry #1.
+    const privacyWallet = () => ({
+      ...wallets[0],
+      privacyMode: true,
+      coins: [
+        {
+          ...wallets[0].coins[0],
+          address: '0xa1',
+          privateKey: HEX(2),
+        },
+      ],
+      chain_existing_coin: {ethereum: {address: '0xa1', privateKey: HEX(2)}},
+    });
+
+    it('after hydrate, the reset re-points address AND key to the default entry', () => {
+      const payload = extractVaultPayload([privacyWallet()]);
+      let state = stateWith(stripAllWalletsSecrets([privacyWallet()]));
+      state = reduce(state, hydrateWalletSecrets(payload));
+      state = reduce(state, resetCoinsToDefaultAddressForPrivacyMode());
+      const coin = state.allWallets[0].coins[0];
+      expect(coin.address).toBe('0xa0');
+      expect(coin.privateKey).toBe(HEX(1));
+      // extractChainExistingCoins never overwrites an existing chain entry
+      // (pre-existing behaviour): it keeps the last pair, and that pair is
+      // internally consistent (address 0xa1 with its own key).
+      const existing = state.allWallets[0].chain_existing_coin.ethereum;
+      expect([existing.address, existing.privateKey]).toEqual(['0xa1', HEX(2)]);
+    });
+
+    it('before hydrate (keys stripped), the reset leaves the coin alone so hydrate cannot mis-pair it', () => {
+      const payload = extractVaultPayload([privacyWallet()]);
+      let state = stateWith(stripAllWalletsSecrets([privacyWallet()]));
+      state = reduce(state, resetCoinsToDefaultAddressForPrivacyMode());
+      // Address untouched: still the selected entry, with no key yet.
+      expect(state.allWallets[0].coins[0].address).toBe('0xa1');
+      expect(state.allWallets[0].coins[0].privateKey).toBeUndefined();
+      state = reduce(state, hydrateWalletSecrets(payload));
+      const coin = state.allWallets[0].coins[0];
+      // Consistent pair: the selected address with the selected key.
+      expect(coin.address).toBe('0xa1');
+      expect(coin.privateKey).toBe(HEX(2));
+      // And the post-unlock reset now lands on the default pair.
+      const after = reduce(state, resetCoinsToDefaultAddressForPrivacyMode())
+        .allWallets[0].coins[0];
+      expect([after.address, after.privateKey]).toEqual(['0xa0', HEX(1)]);
+    });
   });
 });

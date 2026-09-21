@@ -32,7 +32,17 @@ const state = {
       },
       {
         clientId: 'w2',
+        chain_existing_coin: {
+          hedera: {address: '0xEVM', accountId: '0.0.777', privateKey: HEX(6)},
+        },
         coins: [
+          {
+            chain_name: 'hedera',
+            symbol: 'HBAR',
+            address: '0xEVM',
+            accountId: '0.0.777',
+            privateKey: HEX(6),
+          },
           {
             chain_name: 'ethereum',
             symbol: 'ETH',
@@ -88,6 +98,19 @@ describe('selectLivePrivateKey', () => {
     ).toBeUndefined();
     expect(
       selectLivePrivateKey({wallets: {}}, {chain_name: 'x', address: 'y'}),
+    ).toBeUndefined();
+  });
+
+  it('matches a Hedera session by ledger account id (walletData.address holds 0.0.N)', () => {
+    expect(
+      selectLivePrivateKey(state, {chain_name: 'hedera', address: '0.0.777'}),
+    ).toBe(HEX(6));
+    // The EVM-relay form of the same coin still resolves by address.
+    expect(
+      selectLivePrivateKey(state, {chain_name: 'hedera', address: '0xevm'}),
+    ).toBe(HEX(6));
+    expect(
+      selectLivePrivateKey(state, {chain_name: 'hedera', address: '0.0.778'}),
     ).toBeUndefined();
   });
 });

@@ -411,6 +411,15 @@ const sameAddress = (a, b) =>
   typeof b === 'string' &&
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
+// Hedera WalletConnect sessions carry the ledger account id (`0.0.N`) in the
+// entry's `address` field (helper/walletConnectSession.getSessionAccountAddress),
+// while the coin keeps it in `accountId`, separate from its EVM address.
+const sameAccount = (entry, address) =>
+  sameAddress(entry?.address, address) ||
+  (typeof entry?.accountId === 'string' &&
+    typeof address === 'string' &&
+    entry.accountId.trim() === address.trim());
+
 /**
  * Private key for `{chain_name, address}` from the live wallets in memory.
  * WalletConnect used to read it from the persisted per-session `walletData`,
@@ -434,7 +443,7 @@ export const selectLivePrivateKey = (
       if (coin?.chain_name?.toLowerCase?.() !== chain) {
         continue;
       }
-      if (sameAddress(coin.address, address) && coin.privateKey) {
+      if (sameAccount(coin, address) && coin.privateKey) {
         return coin.privateKey;
       }
       const derived = (coin.deriveAddresses || []).find(
@@ -445,11 +454,7 @@ export const selectLivePrivateKey = (
       }
     }
     const existing = wallet?.chain_existing_coin?.[chain];
-    if (
-      existing &&
-      sameAddress(existing.address, address) &&
-      existing.privateKey
-    ) {
+    if (existing && sameAccount(existing, address) && existing.privateKey) {
       return existing.privateKey;
     }
   }

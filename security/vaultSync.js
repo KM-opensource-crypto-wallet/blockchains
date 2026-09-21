@@ -19,7 +19,10 @@
 import {createListenerMiddleware} from '@reduxjs/toolkit';
 import {captureError} from 'services/logger';
 import * as vault from './vault';
-import {extractVaultPayload} from '../redux/wallets/walletSecrets';
+import {
+  extractVaultPayload,
+  vaultPayloadHasSecrets,
+} from '../redux/wallets/walletSecrets';
 
 export const VAULT_SYNC_DEBOUNCE_MS = 500;
 
@@ -60,7 +63,12 @@ export const createVaultSync = ({
       return;
     }
     if (!vault.isUnlocked()) {
-      if (Object.keys(payload.wallets).length) {
+      // Before login the wallets slice holds the persisted, secret-stripped
+      // wallets, and startup housekeeping (privacy-mode addresses, hidden
+      // wallet reassignment, client ids) touches them. That is expected and
+      // carries nothing to vault. Only actual key material appearing while
+      // locked is a defect worth a report.
+      if (vaultPayloadHasSecrets(payload)) {
         onError(new Error('Vault write attempted while locked'), {
           tags: {area: 'vault', op: 'write_while_locked'},
           extra: {wallets: Object.keys(payload.wallets).length},
