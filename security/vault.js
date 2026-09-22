@@ -279,6 +279,14 @@ export const unlockWithBiometric = async prompt => {
         error,
       );
     }
+    if (error?.code === SECURE_STORE_ERROR_CODES.LOCKED_OUT) {
+      // The item is intact; the OS just refuses biometrics for now.
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_LOCKED_OUT,
+        'Too many failed biometric attempts; unlock with your password',
+        error,
+      );
+    }
     throw error;
   }
   if (raw == null) {

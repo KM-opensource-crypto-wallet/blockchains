@@ -19,6 +19,7 @@ jest.mock('security/secureStore', () => {
   const state = {
     invalidated: false,
     cancelNext: false,
+    lockoutNext: false,
     prompts: 0,
     sensor: true,
     removes: [],
@@ -36,6 +37,7 @@ jest.mock('security/secureStore', () => {
       }
       state.invalidated = false;
       state.cancelNext = false;
+      state.lockoutNext = false;
       state.prompts = 0;
       state.sensor = true;
       state.removes.length = 0;
@@ -55,6 +57,10 @@ jest.mock('security/secureStore', () => {
         if (state.cancelNext) {
           state.cancelNext = false;
           throw new SecureStoreError(SECURE_STORE_ERROR_CODES.USER_CANCELLED);
+        }
+        if (state.lockoutNext) {
+          state.lockoutNext = false;
+          throw new SecureStoreError(SECURE_STORE_ERROR_CODES.LOCKED_OUT);
         }
       }
       return items.has(key) ? items.get(key) : null;
@@ -332,6 +338,20 @@ describe('vault', () => {
       ).rejects.toMatchObject({code: VAULT_ERROR_CODES.BIOMETRIC_CANCELLED});
       expect(secureStore.__items.has('vault.dek.biometric')).toBe(true);
       expect(vault.isUnlocked()).toBe(false);
+    });
+
+    it('OS lockout after too many attempts → BIOMETRIC_LOCKED_OUT, item kept, password still works', async () => {
+      await vault.createVault('pw');
+      await vault.enableBiometric({title: 'x'});
+      await vault.saveSecrets(payload);
+      vault.lock();
+      secureStore.__state.lockoutNext = true;
+      await expect(
+        vault.unlockWithBiometric({title: 'x'}),
+      ).rejects.toMatchObject({code: VAULT_ERROR_CODES.BIOMETRIC_LOCKED_OUT});
+      expect(secureStore.__items.has('vault.dek.biometric')).toBe(true);
+      expect(vault.isUnlocked()).toBe(false);
+      expect(await vault.unlockWithPassword('pw')).toEqual(payload);
     });
 
     it('no enrolled sensor (simulator, nothing enrolled): enable and unlock refuse, nothing prompts', async () => {

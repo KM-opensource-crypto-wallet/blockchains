@@ -13,6 +13,9 @@ export const VAULT_ERROR_CODES = Object.freeze({
   BIOMETRIC_NOT_ENROLLED: 'biometric_not_enrolled',
   BIOMETRIC_INVALIDATED: 'biometric_invalidated',
   BIOMETRIC_CANCELLED: 'biometric_cancelled',
+  // Too many failed attempts; the OS refuses biometrics for a while. The item
+  // is intact — the user just types the password this time.
+  BIOMETRIC_LOCKED_OUT: 'biometric_locked_out',
 });
 
 export class VaultError extends Error {
@@ -31,6 +34,9 @@ export const SECURE_STORE_ERROR_CODES = Object.freeze({
   KEY_INVALIDATED: 'key_invalidated',
   // The user dismissed the OS authentication prompt.
   USER_CANCELLED: 'user_cancelled',
+  // Biometrics temporarily (or permanently) locked by the OS after too many
+  // failed attempts. Not a defect: fall back to the password.
+  LOCKED_OUT: 'locked_out',
   // Store cannot be opened at all (no Keystore, no IndexedDB, private window).
   UNAVAILABLE: 'unavailable',
   UNKNOWN: 'unknown',
