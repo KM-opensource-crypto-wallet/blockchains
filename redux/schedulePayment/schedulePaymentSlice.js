@@ -73,6 +73,8 @@ export const submitScheduledPayment = createAsyncThunk(
     const recurrence = buildRecurrence(values);
     const occurrences = computeOccurrences({scheduledAt, recurrence});
     const id = isEditMode ? editingPayment.id : v4();
+    const payGasWithToken =
+      !!values.payGasWithToken && !!currentCoin?.contractAddress;
     const asset = isEditMode
       ? editingPayment.asset
       : {
@@ -146,6 +148,7 @@ export const submitScheduledPayment = createAsyncThunk(
             memo,
             scheduledAt,
             recurrence,
+            payGasWithToken,
           },
         }),
       );
@@ -162,6 +165,7 @@ export const submitScheduledPayment = createAsyncThunk(
           memo,
           scheduledAt,
           recurrence,
+          payGasWithToken,
         }),
       );
     }
@@ -320,6 +324,7 @@ export const schedulePaymentSlice = createSlice({
           memo: payload?.memo || '',
           scheduledAt: payload?.scheduledAt,
           recurrence: payload?.recurrence,
+          payGasWithToken: !!payload?.payGasWithToken,
           createdAt: now,
           updatedAt: now,
         },
