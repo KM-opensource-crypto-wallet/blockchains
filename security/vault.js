@@ -38,6 +38,23 @@ let dek = null;
 let stateKey = null;
 let stateKeyPromise = null;
 
+// Every writer of `vault.dek.password` (createVault, unlockWithPassword's KDF
+// re-wrap, changePassword, destroy) reads the envelope, spends the KDF time,
+// then writes. Two of them in flight at once would let a stale wrap of the OLD
+// password land over a newer one (or resurrect an envelope destroy just
+// removed), so they run one at a time through this chain. Readers
+// (verifyPassword, needsKdfUpgrade) and the blob/biometric items are not
+// serialised: a stale read there is harmless.
+let envelopeQueue = Promise.resolve();
+const withEnvelopeLock = task => {
+  const run = envelopeQueue.then(task);
+  envelopeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+};
+
 const requireUnlocked = () => {
   if (!dek) {
     throw new VaultError(VAULT_ERROR_CODES.LOCKED, 'Vault is locked');
@@ -96,7 +113,10 @@ export const hasVault = async () =>
   (await secureStore.get(VAULT_KEYS.dekPassword)) != null;
 
 /** Registration: new DEK wrapped under the password, empty blob, unlocked. */
-export const createVault = async password => {
+export const createVault = password =>
+  withEnvelopeLock(() => createVaultUnlocked(password));
+
+const createVaultUnlocked = async password => {
   if (await hasVault()) {
     throw new VaultError(
       VAULT_ERROR_CODES.VAULT_EXISTS,
@@ -117,7 +137,10 @@ export const createVault = async password => {
  * Login. Resolves with the decrypted secrets payload; rejects with
  * INVALID_PASSWORD (GCM auth) or NO_VAULT.
  */
-export const unlockWithPassword = async password => {
+export const unlockWithPassword = password =>
+  withEnvelopeLock(() => unlockWithPasswordUnlocked(password));
+
+const unlockWithPasswordUnlocked = async password => {
   const envelope = await readJson(VAULT_KEYS.dekPassword);
   if (!envelope) {
     throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to unlock');
@@ -176,7 +199,10 @@ export const verifyPassword = async password => {
  * unlock flow (hydration, `isVaultUnlocked`). The temporary DEK is zeroised
  * whether or not the re-wrap or the write succeeds.
  */
-export const changePassword = async (current, next) => {
+export const changePassword = (current, next) =>
+  withEnvelopeLock(() => changePasswordUnlocked(current, next));
+
+const changePasswordUnlocked = async (current, next) => {
   const envelope = await readJson(VAULT_KEYS.dekPassword);
   if (!envelope) {
     throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to re-key');
@@ -349,12 +375,20 @@ export const getStateKey = () => {
   return stateKeyPromise.then(key => new Uint8Array(key));
 };
 
-/** Wallet reset / delete-all-data: remove every vault item and lock. */
-export const destroy = async () => {
+/**
+ * Wallet reset / delete-all-data: remove every vault item and lock. Locks
+ * immediately, then again once any in-flight unlock/re-key has finished, so
+ * that one can neither hand out a DEK for a vault that no longer exists nor
+ * write its envelope back after the removes.
+ */
+export const destroy = () => {
   lock();
-  await secureStore.remove(VAULT_KEYS.blob);
-  await secureStore.remove(VAULT_KEYS.dekBiometric);
-  await secureStore.remove(VAULT_KEYS.dekPassword);
+  return withEnvelopeLock(async () => {
+    lock();
+    await secureStore.remove(VAULT_KEYS.blob);
+    await secureStore.remove(VAULT_KEYS.dekBiometric);
+    await secureStore.remove(VAULT_KEYS.dekPassword);
+  });
 };
 
 // Test hook only.

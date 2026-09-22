@@ -360,6 +360,46 @@ describe('vaultSync', () => {
     expect(saveErrors()).toHaveLength(1);
   });
 
+  it('a write that fails after resetWallet is never retried over the emptied vault', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(1);
+    // The wallet write is in flight (will fail) when the reset comes in, so
+    // the empty write is queued behind it. The stale snapshot must not be
+    // restored and retried once the failure surfaces: that would put the old
+    // wallets' keys back into a vault the user just reset.
+    store.dispatch(createWalletFulfilled([walletA]));
+    store.dispatch(walletsStub.actions.resetWallet());
+    await waitForSaveErrors(1);
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual({v: 1, wallets: {}});
+
+    jest.advanceTimersByTime(60000);
+    await flushMicrotasks();
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual({v: 1, wallets: {}});
+    expect(saveErrors()).toHaveLength(1);
+  });
+
+  it('a write that fails behind a newer immediate write is never retried over it', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(1);
+    store.dispatch(createWalletFulfilled([walletA]));
+    store.dispatch(createWalletFulfilled([walletA, walletB]));
+    await waitForSaveErrors(1);
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual(
+      extractVaultPayload([walletA, walletB]),
+    );
+
+    jest.advanceTimersByTime(60000);
+    await flushMicrotasks();
+    await sync.flush();
+    expect(await vault.readSecrets()).toEqual(
+      extractVaultPayload([walletA, walletB]),
+    );
+    expect(saveErrors()).toHaveLength(1);
+  });
+
   it('resetWallet while locked writes nothing and reports nothing', async () => {
     await vault.createVault('pw');
     vault.lock();

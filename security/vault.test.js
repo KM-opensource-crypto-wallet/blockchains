@@ -99,12 +99,23 @@ jest.mock('dok-wallet-blockchain-networks/security/vaultCore', () => {
   );
   // `gate`: a promise the state-key derivation waits on, so a test can
   // interleave lock()/unlock while HKDF is "in flight". `failNext`: reject once.
-  const state = {gate: null, failNext: false};
+  // `holdWrapFor`: wraps under that password wait on `wrapGate`, so a test can
+  // park one envelope writer mid-KDF while another one runs.
+  const state = {
+    gate: null,
+    failNext: false,
+    holdWrapFor: null,
+    wrapGate: null,
+  };
   return {
     ...actual,
     __state: state,
-    wrapDek: (dek, password, options = {}) =>
-      actual.wrapDek(dek, password, {iterations: 1000, ...options}),
+    wrapDek: async (dek, password, options = {}) => {
+      if (state.holdWrapFor === password && state.wrapGate) {
+        await state.wrapGate;
+      }
+      return actual.wrapDek(dek, password, {iterations: 1000, ...options});
+    },
     deriveStateKey: async dek => {
       if (state.gate) {
         await state.gate;
@@ -470,6 +481,65 @@ describe('vault', () => {
     expect(vault.isUnlocked()).toBe(false);
     expect(() => vault.getStateKey()).toThrow();
     expect(secureStore.__items.get('vault.dek.password')).toBe(wrapBefore);
+  });
+
+  describe('envelope writers run one at a time', () => {
+    it('a changePassword during a stale unlock is never undone by the KDF re-wrap', async () => {
+      await vault.createVault('pw'); // stale by construction (mocked 1000 iterations)
+      await vault.saveSecrets(payload);
+      vault.lock();
+
+      // Without serialisation the unlock reads the old envelope, spends the KDF
+      // time, and then writes an upgraded wrap of the OLD password over the
+      // envelope changePassword has just written. Park the unlock's re-wrap
+      // (the only wrap under 'pw') to give changePassword every chance to land
+      // in that window.
+      let release;
+      vaultCore.__state.holdWrapFor = 'pw';
+      vaultCore.__state.wrapGate = new Promise(resolve => (release = resolve));
+      const unlocking = vault.unlockWithPassword('pw');
+      const changing = vault.changePassword('pw', 'new');
+      await Promise.race([
+        changing,
+        new Promise(resolve => setTimeout(resolve, 300)),
+      ]);
+      release();
+      vaultCore.__state.holdWrapFor = null;
+      vaultCore.__state.wrapGate = null;
+      await expect(unlocking).resolves.toEqual(payload);
+      await changing;
+
+      vault.lock();
+      expect(await vault.verifyPassword('new')).toBe(true);
+      expect(await vault.verifyPassword('pw')).toBe(false);
+    });
+
+    it('two concurrent createVault calls leave one consistent wrap/blob pair', async () => {
+      const results = await Promise.allSettled([
+        vault.createVault('pw'),
+        vault.createVault('pw'),
+      ]);
+      expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected']);
+      expect(results[1].reason).toMatchObject({
+        code: VAULT_ERROR_CODES.VAULT_EXISTS,
+      });
+      expect(vault.isUnlocked()).toBe(true);
+      await vault.saveSecrets(payload);
+      vault.lock();
+      // The blob must decrypt under the DEK the surviving envelope wraps.
+      await expect(vault.unlockWithPassword('pw')).resolves.toEqual(payload);
+    });
+
+    it('destroy during a stale unlock leaves nothing behind', async () => {
+      await vault.createVault('pw');
+      vault.lock();
+      const unlocking = vault.unlockWithPassword('pw');
+      await vault.destroy();
+      await unlocking.catch(() => {});
+      expect(vault.isUnlocked()).toBe(false);
+      expect(secureStore.__items.size).toBe(0);
+      expect(await vault.hasVault()).toBe(false);
+    });
   });
 
   describe('getStateKey while the vault changes underneath', () => {

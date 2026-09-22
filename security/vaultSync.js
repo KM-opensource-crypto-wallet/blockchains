@@ -53,9 +53,22 @@ export const createVaultSync = ({
   const listener = createListenerMiddleware();
   let lastWritten = null;
   let timer = null;
-  let pendingWallets = null;
+  // The newest snapshot waiting for the debounce / retry timer, or null.
+  let pending = null;
   let retryDelayMs = debounceMs;
   let chain = Promise.resolve();
+  // Bumped every time a snapshot is taken from the store (or reset/logout
+  // supersedes everything). A failed write may only re-arm its own snapshot
+  // while that snapshot is still the newest one: a stale retry landing after
+  // a reset or a newer write would put old key material back into the vault.
+  let revision = 0;
+
+  const takeSnapshot = allWallets => ({wallets: allWallets, rev: ++revision});
+  const takePending = () => {
+    const snapshot = pending;
+    pending = null;
+    return snapshot;
+  };
 
   const enqueue = task => {
     chain = chain.then(task, task);
@@ -73,14 +86,12 @@ export const createVaultSync = ({
     cancelTimer();
     timer = setTimeout(() => {
       timer = null;
-      const wallets = pendingWallets;
-      pendingWallets = null;
-      enqueue(writeNow(wallets));
+      enqueue(writeNow(takePending()));
     }, delayMs);
   };
 
-  const writeNow = allWallets => async () => {
-    const payload = extractVaultPayload(allWallets);
+  const writeNow = snapshot => async () => {
+    const payload = extractVaultPayload(snapshot.wallets);
     const serialized = JSON.stringify(payload);
     if (serialized === lastWritten) {
       return;
@@ -108,21 +119,21 @@ export const createVaultSync = ({
         tags: {area: 'vault', op: 'save_secrets'},
         extra: {retryInMs: retryDelayMs},
       });
-      // Stay dirty. A newer snapshot scheduled meanwhile supersedes this one
-      // (it contains everything this one did); otherwise retry it with
-      // backoff. flush() also picks it up.
-      if (!pendingWallets) {
-        pendingWallets = allWallets;
-      }
-      if (!timer) {
-        armTimer(retryDelayMs);
+      // Stay dirty, unless a newer snapshot (or a reset) was taken meanwhile:
+      // that one supersedes this write and must not be overwritten by a
+      // retry of it. Otherwise retry with backoff; flush() also picks it up.
+      if (snapshot.rev === revision) {
+        pending = snapshot;
+        if (!timer) {
+          armTimer(retryDelayMs);
+        }
       }
       retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
     }
   };
 
   const schedule = allWallets => {
-    pendingWallets = allWallets;
+    pending = takeSnapshot(allWallets);
     armTimer(debounceMs);
   };
 
@@ -136,8 +147,8 @@ export const createVaultSync = ({
       const allWallets = api.getState().wallets?.allWallets;
       if (IMMEDIATE_VAULT_WRITE_ACTIONS.includes(action.type)) {
         cancelTimer();
-        pendingWallets = null;
-        await enqueue(writeNow(allWallets));
+        pending = null;
+        await enqueue(writeNow(takeSnapshot(allWallets)));
       } else {
         schedule(allWallets);
       }
@@ -148,13 +159,13 @@ export const createVaultSync = ({
     type: RESET_ACTION,
     effect: async () => {
       cancelTimer();
-      pendingWallets = null;
+      pending = null;
       lastWritten = null;
       // The empty payload goes through the same path as any other write so a
       // failure is reported, kept dirty and retried (timer / flush) instead of
       // leaving the old wallets' keys in the blob. Locked → nothing to do,
       // exactly as writeNow decides for a secret-free payload.
-      await enqueue(writeNow([]));
+      await enqueue(writeNow(takeSnapshot([])));
     },
   });
 
@@ -162,8 +173,9 @@ export const createVaultSync = ({
     type: LOGOUT_ACTION,
     effect: async () => {
       cancelTimer();
-      pendingWallets = null;
+      pending = null;
       lastWritten = null;
+      revision += 1; // an in-flight write that fails now has nothing to retry
       await enqueue(async () => {
         try {
           await vault.destroy();
@@ -182,11 +194,9 @@ export const createVaultSync = ({
      * onError and the snapshot stays dirty for the next flush / retry.
      */
     flush: async () => {
-      if (timer || pendingWallets) {
+      if (pending) {
         cancelTimer();
-        const wallets = pendingWallets;
-        pendingWallets = null;
-        await enqueue(writeNow(wallets));
+        await enqueue(writeNow(takePending()));
       }
       await chain;
     },
@@ -197,8 +207,9 @@ export const createVaultSync = ({
     /** Force the next write regardless of the last one (tests, migration). */
     reset: () => {
       cancelTimer();
-      pendingWallets = null;
+      pending = null;
       lastWritten = null;
+      revision += 1;
     },
   };
 };
