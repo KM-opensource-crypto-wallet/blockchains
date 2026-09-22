@@ -1,0 +1,397 @@
+// The vault: holds the DEK in memory while unlocked and owns every read/write
+// of the three secure-store items. UI flows call this instead of comparing a
+// stored password; "correct password" is "unwrapDek authenticated".
+//
+// Platform pieces arrive through aliases each app resolves to its own file:
+//   security/secureStore  - get/set/remove/has + capabilities (RNSI | IndexedDB)
+//   security/vaultCrypto  - used indirectly through ./vaultCore
+// Nothing here branches on platform; the biometric path is gated on
+// `secureStore.capabilities.biometric` so the web adapter simply reports false.
+import * as secureStore from 'security/secureStore';
+import {
+  SECURE_STORE_ERROR_CODES,
+  VAULT_ERROR_CODES,
+  VaultError,
+} from './errors';
+import {base64Decode, base64Encode, zeroBytes} from './bytes';
+import {
+  decryptBlob,
+  deriveStateKey,
+  encryptBlob,
+  generateDek,
+  isKdfStale,
+  unwrapDek,
+  wrapDek,
+} from './vaultCore';
+
+export const VAULT_KEYS = Object.freeze({
+  dekPassword: 'vault.dek.password',
+  dekBiometric: 'vault.dek.biometric',
+  blob: 'vault.blob',
+});
+
+export const BIOMETRIC_ACCESS_CONTROL = 'biometryCurrentSet';
+
+export const EMPTY_VAULT_PAYLOAD = Object.freeze({v: 1, wallets: {}});
+
+let dek = null;
+let stateKey = null;
+let stateKeyPromise = null;
+
+// Every writer of `vault.dek.password` (createVault, unlockWithPassword's KDF
+// re-wrap, changePassword, destroy) reads the envelope, spends the KDF time,
+// then writes. Two of them in flight at once would let a stale wrap of the OLD
+// password land over a newer one (or resurrect an envelope destroy just
+// removed), so they run one at a time through this chain. Readers
+// (verifyPassword, needsKdfUpgrade) and the blob/biometric items are not
+// serialised: a stale read there is harmless.
+let envelopeQueue = Promise.resolve();
+const withEnvelopeLock = task => {
+  const run = envelopeQueue.then(task);
+  envelopeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+};
+
+const requireUnlocked = () => {
+  if (!dek) {
+    throw new VaultError(VAULT_ERROR_CODES.LOCKED, 'Vault is locked');
+  }
+  return dek;
+};
+
+const setDek = bytes => {
+  lock();
+  dek = bytes;
+};
+
+const readJson = async key => {
+  const raw = await secureStore.get(key);
+  if (raw == null) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new VaultError(
+      VAULT_ERROR_CODES.CORRUPT_ENVELOPE,
+      `Secure item "${key}" is not JSON`,
+      error,
+    );
+  }
+};
+
+const writeJson = (key, value, options) =>
+  secureStore.set(key, JSON.stringify(value), options);
+
+const readPayload = async currentDek => {
+  const blob = await readJson(VAULT_KEYS.blob);
+  if (!blob) {
+    return {...EMPTY_VAULT_PAYLOAD, wallets: {}};
+  }
+  return decryptBlob(currentDek, blob);
+};
+
+const biometricOptions = prompt => ({
+  accessControl: BIOMETRIC_ACCESS_CONTROL,
+  authenticationPrompt: prompt,
+});
+
+export const isUnlocked = () => dek !== null;
+
+export const lock = () => {
+  zeroBytes(dek);
+  zeroBytes(stateKey);
+  dek = null;
+  stateKey = null;
+  stateKeyPromise = null;
+};
+
+export const hasVault = async () =>
+  (await secureStore.get(VAULT_KEYS.dekPassword)) != null;
+
+/** Registration: new DEK wrapped under the password, empty blob, unlocked. */
+export const createVault = password =>
+  withEnvelopeLock(() => createVaultUnlocked(password));
+
+const createVaultUnlocked = async password => {
+  if (await hasVault()) {
+    throw new VaultError(
+      VAULT_ERROR_CODES.VAULT_EXISTS,
+      'A vault already exists; unlock or destroy it first',
+    );
+  }
+  const newDek = generateDek();
+  const envelope = await wrapDek(newDek, password);
+  await writeJson(VAULT_KEYS.dekPassword, envelope);
+  await writeJson(
+    VAULT_KEYS.blob,
+    await encryptBlob(newDek, EMPTY_VAULT_PAYLOAD),
+  );
+  setDek(newDek);
+};
+
+/**
+ * Login. Resolves with the decrypted secrets payload; rejects with
+ * INVALID_PASSWORD (GCM auth) or NO_VAULT.
+ */
+export const unlockWithPassword = password =>
+  withEnvelopeLock(() => unlockWithPasswordUnlocked(password));
+
+const unlockWithPasswordUnlocked = async password => {
+  const envelope = await readJson(VAULT_KEYS.dekPassword);
+  if (!envelope) {
+    throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to unlock');
+  }
+  const unwrapped = await unwrapDek(envelope, password);
+  let payload;
+  try {
+    payload = await readPayload(unwrapped);
+    // In-place KDF upgrade (MetaMask pattern): the password is in hand and
+    // just proved itself, so re-wrap under the current parameters before the
+    // DEK is handed out. The blob is untouched and the old wrap stays valid,
+    // so a failed write must never turn a correct password into a lockout:
+    // it is swallowed here, `needsKdfUpgrade()` stays true, and the unlock
+    // thunk reports that.
+    if (isKdfStale(envelope)) {
+      try {
+        await writeJson(
+          VAULT_KEYS.dekPassword,
+          await wrapDek(unwrapped, password, {createdAt: envelope.createdAt}),
+        );
+      } catch (_) {
+        // Old wrap keeps working; see above.
+      }
+    }
+  } catch (error) {
+    // Corrupt/unreadable blob: never hold a DEK the caller did not receive.
+    zeroBytes(unwrapped);
+    throw error;
+  }
+  setDek(unwrapped);
+  return payload;
+};
+
+/** True/false for the typed password; other failures propagate. */
+export const verifyPassword = async password => {
+  const envelope = await readJson(VAULT_KEYS.dekPassword);
+  if (!envelope) {
+    throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to verify');
+  }
+  try {
+    const unwrapped = await unwrapDek(envelope, password);
+    zeroBytes(unwrapped);
+    return true;
+  } catch (error) {
+    if (error?.code === VAULT_ERROR_CODES.INVALID_PASSWORD) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Re-wraps the DEK only; the blob is untouched. Verifies `current` first.
+ * Never changes the lock state: an unlocked vault keeps its in-memory DEK (the
+ * same key), a locked one stays locked — unlocking here would bypass the
+ * unlock flow (hydration, `isVaultUnlocked`). The temporary DEK is zeroised
+ * whether or not the re-wrap or the write succeeds.
+ */
+export const changePassword = (current, next) =>
+  withEnvelopeLock(() => changePasswordUnlocked(current, next));
+
+const changePasswordUnlocked = async (current, next) => {
+  const envelope = await readJson(VAULT_KEYS.dekPassword);
+  if (!envelope) {
+    throw new VaultError(VAULT_ERROR_CODES.NO_VAULT, 'No vault to re-key');
+  }
+  const unwrapped = await unwrapDek(envelope, current);
+  try {
+    const rewrapped = await wrapDek(unwrapped, next, {
+      createdAt: envelope.createdAt,
+    });
+    await writeJson(VAULT_KEYS.dekPassword, rewrapped);
+  } finally {
+    zeroBytes(unwrapped);
+  }
+};
+
+/** Whether the stored wrap uses older KDF parameters than the current build. */
+export const needsKdfUpgrade = async () => {
+  const envelope = await readJson(VAULT_KEYS.dekPassword);
+  return Boolean(envelope) && isKdfStale(envelope);
+};
+
+export const supportsBiometric = () =>
+  Boolean(secureStore.capabilities?.biometric);
+
+export const hasBiometric = async () =>
+  supportsBiometric() && (await secureStore.has(VAULT_KEYS.dekBiometric));
+
+/**
+ * Platform can store biometric items AND a sensor is enrolled right now.
+ * Adapters without the runtime check (web) fall back to the static flag.
+ */
+export const isBiometricAvailable = async () => {
+  if (!supportsBiometric()) {
+    return false;
+  }
+  if (typeof secureStore.isBiometricAvailable !== 'function') {
+    return true;
+  }
+  return Boolean(await secureStore.isBiometricAvailable());
+};
+
+const assertBiometricAvailable = async () => {
+  if (!(await isBiometricAvailable())) {
+    throw new VaultError(
+      VAULT_ERROR_CODES.BIOMETRIC_UNSUPPORTED,
+      'Biometric unlock is not available on this device',
+    );
+  }
+};
+
+/**
+ * Store the raw DEK under a biometric-bound item. Requires an unlocked vault
+ * and an enrolled sensor: the platform shows its prompt for this write, and
+ * without an enrolled sensor iOS would fall back to the device passcode.
+ * The item is deleted first — the Keychain keeps an existing item's access
+ * policy on update, so writing over an old item would silently keep the old
+ * policy.
+ */
+export const enableBiometric = async prompt => {
+  await assertBiometricAvailable();
+  const current = requireUnlocked();
+  await secureStore.remove(VAULT_KEYS.dekBiometric);
+  await secureStore.set(
+    VAULT_KEYS.dekBiometric,
+    base64Encode(current),
+    biometricOptions(prompt),
+  );
+};
+
+export const disableBiometric = async () => {
+  await secureStore.remove(VAULT_KEYS.dekBiometric);
+};
+
+/**
+ * Login with the OS biometric prompt. Enrollment change → the platform has
+ * destroyed the key: the item is removed and BIOMETRIC_INVALIDATED is thrown
+ * so the caller falls back to the password and re-enables afterwards.
+ */
+export const unlockWithBiometric = async prompt => {
+  await assertBiometricAvailable();
+  let raw;
+  try {
+    raw = await secureStore.get(
+      VAULT_KEYS.dekBiometric,
+      biometricOptions(prompt),
+    );
+  } catch (error) {
+    if (error?.code === SECURE_STORE_ERROR_CODES.KEY_INVALIDATED) {
+      await disableBiometric();
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
+        'Biometric enrollment changed; unlock with your password',
+        error,
+      );
+    }
+    if (error?.code === SECURE_STORE_ERROR_CODES.USER_CANCELLED) {
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_CANCELLED,
+        'Biometric prompt cancelled',
+        error,
+      );
+    }
+    if (error?.code === SECURE_STORE_ERROR_CODES.LOCKED_OUT) {
+      // The item is intact; the OS just refuses biometrics for now.
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_LOCKED_OUT,
+        'Too many failed biometric attempts; unlock with your password',
+        error,
+      );
+    }
+    throw error;
+  }
+  if (raw == null) {
+    throw new VaultError(
+      VAULT_ERROR_CODES.BIOMETRIC_NOT_ENROLLED,
+      'Biometric unlock is not set up',
+    );
+  }
+  const unwrapped = base64Decode(raw);
+  const payload = await readPayload(unwrapped);
+  setDek(unwrapped);
+  return payload;
+};
+
+/** Persist the secrets payload. Requires an unlocked vault. */
+export const saveSecrets = async payload => {
+  const current = requireUnlocked();
+  await writeJson(VAULT_KEYS.blob, await encryptBlob(current, payload));
+};
+
+/** Decrypt and return the stored payload. Requires an unlocked vault. */
+export const readSecrets = () => readPayload(requireUnlocked());
+
+/**
+ * Tier 1 sealing key, derived once per unlock. Requires an unlocked vault.
+ * Returns a copy: lock() zeroises the vault's own buffer, and a caller that
+ * kept the original (the sealed storage adapter) would otherwise silently
+ * continue with an all-zero key.
+ */
+export const getStateKey = () => {
+  const current = requireUnlocked();
+  if (stateKey) {
+    return Promise.resolve(new Uint8Array(stateKey));
+  }
+  if (!stateKeyPromise) {
+    const pending = deriveStateKey(current).then(derived => {
+      // lock() / a new unlock may have run while HKDF was in flight. `dek` is
+      // a fresh buffer per unlock, so identity says whether this derivation
+      // still belongs to the live DEK; a stale one must neither be stored nor
+      // handed out (sealed data would end up under an unrecoverable key).
+      if (dek !== current) {
+        zeroBytes(derived);
+        throw new VaultError(
+          VAULT_ERROR_CODES.LOCKED,
+          'Vault was locked while deriving the state key',
+        );
+      }
+      stateKey = derived;
+      return derived;
+    });
+    // A failed derivation must not pin a rejected promise for the rest of the
+    // unlock; the next call retries. lock() also drops it.
+    pending.catch(() => {
+      if (stateKeyPromise === pending) {
+        stateKeyPromise = null;
+      }
+    });
+    stateKeyPromise = pending;
+  }
+  return stateKeyPromise.then(key => new Uint8Array(key));
+};
+
+/**
+ * Wallet reset / delete-all-data: remove every vault item and lock. Locks
+ * immediately, then again once any in-flight unlock/re-key has finished, so
+ * that one can neither hand out a DEK for a vault that no longer exists nor
+ * write its envelope back after the removes.
+ */
+export const destroy = () => {
+  lock();
+  return withEnvelopeLock(async () => {
+    lock();
+    await secureStore.remove(VAULT_KEYS.blob);
+    await secureStore.remove(VAULT_KEYS.dekBiometric);
+    await secureStore.remove(VAULT_KEYS.dekPassword);
+  });
+};
+
+// Test hook only.
+export const __resetForTests = () => {
+  lock();
+};

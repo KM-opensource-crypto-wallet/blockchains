@@ -405,3 +405,58 @@ export const selectIsRefreshingAllWallets = state =>
 
 export const selectRefreshingWalletClientId = state =>
   state.wallets?.refreshingWalletClientId || null;
+
+const sameAddress = (a, b) =>
+  typeof a === 'string' &&
+  typeof b === 'string' &&
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// Hedera WalletConnect sessions carry the ledger account id (`0.0.N`) in the
+// entry's `address` field (helper/walletConnectSession.getSessionAccountAddress),
+// while the coin keeps it in `accountId`, separate from its EVM address.
+const sameAccount = (entry, address) =>
+  sameAddress(entry?.address, address) ||
+  (typeof entry?.accountId === 'string' &&
+    typeof address === 'string' &&
+    entry.accountId.trim() === address.trim());
+
+/**
+ * Private key for `{chain_name, address}` from the live wallets in memory.
+ * WalletConnect used to read it from the persisted per-session `walletData`,
+ * which is now stripped of secrets at rest. Searches the current wallet
+ * first, then every wallet; matches the coin itself, then its derive
+ * addresses. Returns undefined when nothing matches.
+ */
+export const selectLivePrivateKey = (
+  state,
+  {chain_name, address, clientId},
+) => {
+  const allWallets = selectAllWallets(state) || [];
+  const chain = chain_name?.toLowerCase?.();
+  const preferred = clientId || state.wallets?.currentWalletClientId;
+  const ordered = [
+    ...allWallets.filter(w => w?.clientId === preferred),
+    ...allWallets.filter(w => w?.clientId !== preferred),
+  ];
+  for (const wallet of ordered) {
+    for (const coin of wallet?.coins || []) {
+      if (coin?.chain_name?.toLowerCase?.() !== chain) {
+        continue;
+      }
+      if (sameAccount(coin, address) && coin.privateKey) {
+        return coin.privateKey;
+      }
+      const derived = (coin.deriveAddresses || []).find(
+        entry => sameAddress(entry?.address, address) && entry?.privateKey,
+      );
+      if (derived) {
+        return derived.privateKey;
+      }
+    }
+    const existing = wallet?.chain_existing_coin?.[chain];
+    if (existing && sameAccount(existing, address) && existing.privateKey) {
+      return existing.privateKey;
+    }
+  }
+  return undefined;
+};
