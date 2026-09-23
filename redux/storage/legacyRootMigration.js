@@ -255,7 +255,11 @@ export const splitLegacyRoot = slices => {
       if (paths.length) {
         residualSecrets[name] = {
           count: paths.length,
-          keys: [...new Set(paths.map(path => path.split('.').pop()))],
+          keys: [
+            ...new Set(
+              paths.map(path => normalizePathPattern(path).split('.').pop()),
+            ),
+          ],
           // Same value-free shape as verifyMigration's leakedPathPatterns.
           pathPatterns: summarizePaths(paths),
         };
@@ -318,7 +322,12 @@ const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // value, address, clientId, derive path or map key ever reaches the output,
 // so the report can go to Sentry as-is. Sentry's scrubObject drops any object
 // KEY that looks sensitive, so callers must put these strings under neutral
-// keys (never key an object by path).
+// keys (never key an object by path). Sentry's server-side `@password:filter`
+// additionally replaces any string VALUE containing `privatekey`, `secret`,
+// `password`, ... with `[Filtered]` (`token_type`, `extendedPublicKey` and
+// `session` pass) (it wiped every leakedPathPatterns
+// entry of KIMLWALLET-APP-8), so field names are aliased before they reach
+// any output string.
 
 const FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
 const MAX_FIELD_DIGITS = 3;
@@ -327,6 +336,19 @@ const MAX_SHAPE_KEYS = 12;
 // A path segment is kept only when it looks like a code-defined field name.
 // Addresses, uuids, derive paths, `chain_symbol_address` keys and session ids
 // fail the shape (length, digits, punctuation) and become `<key>`.
+// Aliases for the secret field names, and the words Sentry's server-side
+// password rule matches anywhere in a string value.
+export const SECRET_FIELD_ALIASES = Object.freeze({
+  privateKey: 'PK',
+  extendedPrivateKey: 'XPRV',
+  phrase: 'MNEM',
+  secretCodeHash: 'SC_HASH',
+  secretCodeSalt: 'SC_SALT',
+  secretCodeIterations: 'SC_ITER',
+});
+export const SENTRY_SENSITIVE_VALUE_RE =
+  /pass|secret|auth|credential|private_?key|api_?key|session_?key|mysql_pwd/i;
+
 const normalizeSegment = name => {
   if (name === '') {
     return '';
@@ -334,9 +356,13 @@ const normalizeSegment = name => {
   if (!FIELD_NAME_RE.test(name)) {
     return '<key>';
   }
-  return (name.match(/[0-9]/g) || []).length > MAX_FIELD_DIGITS
-    ? '<key>'
-    : name;
+  if ((name.match(/[0-9]/g) || []).length > MAX_FIELD_DIGITS) {
+    return '<key>';
+  }
+  if (SECRET_FIELD_ALIASES[name]) {
+    return SECRET_FIELD_ALIASES[name];
+  }
+  return SENTRY_SENSITIVE_VALUE_RE.test(name) ? '<sens>' : name;
 };
 
 /** `allWallets[3].coins[12].privateKey` → `allWallets[*].coins[*].privateKey`. */
@@ -369,6 +395,54 @@ const summarizePaths = (paths, {maxEntries = 20} = {}) => {
     out.push(`… +${sorted.length - maxEntries} more patterns`);
   }
   return out;
+};
+
+// Resolves a findSecretPaths path (`a.b[2].c`) against `root`. Best effort:
+// a map key containing `.` or `[` cannot be split back and resolves to
+// undefined.
+const resolvePathSegments = (root, segments) => {
+  let node = root;
+  for (const segment of segments) {
+    const match = segment.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+    if (!match || node === null || typeof node !== 'object') {
+      return undefined;
+    }
+    if (match[1] !== '') {
+      node = node[match[1]];
+    }
+    for (const index of match[2].match(/\d+/g) || []) {
+      if (!Array.isArray(node)) {
+        return undefined;
+      }
+      node = node[Number(index)];
+    }
+  }
+  return node;
+};
+
+/**
+ * For each leaked path pattern: the aliased shapes of the object holding the
+ * secret and of the object one level up (e.g. the coin copy around a
+ * `deriveAddresses[*]` entry). Keys and shapes only, never values.
+ */
+const leakContextFor = (root, paths, {maxEntries = 10} = {}) => {
+  const firstByPattern = new Map();
+  for (const path of paths) {
+    const pattern = normalizePathPattern(path);
+    if (!firstByPattern.has(pattern)) {
+      firstByPattern.set(pattern, path);
+    }
+  }
+  return [...firstByPattern.entries()]
+    .slice(0, maxEntries)
+    .map(([pattern, path]) => {
+      const segments = String(path).split('.');
+      const parent = resolvePathSegments(root, segments.slice(0, -1));
+      const grandparent = resolvePathSegments(root, segments.slice(0, -2));
+      return `${pattern} | parent ${shapeOf(parent)} | grandparent ${shapeOf(
+        grandparent,
+      )}`;
+    });
 };
 
 /** Value-free signature of any JSON value. */
@@ -549,13 +623,18 @@ export const verifyMigration = ({
   // Key-name scan only: value-shape heuristics misfire on public hashes.
   const secretPaths = findSecretPaths(migratedWallets, {valueShapes: false});
   if (secretPaths.length) {
-    const keys = [...new Set(secretPaths.map(p => p.split('.').pop()))];
+    const keys = [
+      ...new Set(
+        secretPaths.map(p => normalizePathPattern(p).split('.').pop()),
+      ),
+    ];
     problems.push(
-      `secrets left in migrated wallets: ${
+      `plaintext keys left in migrated wallets: ${
         secretPaths.length
       } field(s) under ${keys.join(', ')}`,
     );
     details.leakedPathPatterns = summarizePaths(secretPaths);
+    details.leakContext = leakContextFor(migratedWallets, secretPaths);
   }
   // The exact contract: what was written must be the legacy wallets with
   // nothing but secrets removed (slimming happens later, in the persist
@@ -578,7 +657,7 @@ export const verifyMigration = ({
     fixCurrentWalletIndex(legacyWallets)?.allWallets || [],
   );
   if (!deepEqual(decryptedVault, expectedVault)) {
-    problems.push('vault payload does not match legacy secrets');
+    problems.push('vault payload does not match the legacy key material');
     details.vaultDiff = structuralDiff(expectedVault, decryptedVault, {
       labelA: 'expected',
       labelB: 'actual',
@@ -586,6 +665,13 @@ export const verifyMigration = ({
   }
   if (problems.length) {
     details.walletFieldInventory = walletFieldInventory(migratedList);
+    details.sliceRootInventory = isPlainObject(migratedWallets)
+      ? Object.keys(migratedWallets)
+          .sort()
+          .map(
+            key => `${normalizeSegment(key)}: ${shapeOf(migratedWallets[key])}`,
+          )
+      : [shapeOf(migratedWallets)];
     details.counts = {
       legacyWallets: legacyList.length,
       migratedWallets: migratedList.length,
