@@ -2,8 +2,11 @@ import {
   buildPersistEnvelope,
   ensureWalletClientIds,
   fixCurrentWalletIndex,
+  normalizePathPattern,
   parseLegacyRoot,
   parsePersistEnvelope,
+  shapeOf,
+  structuralDiff,
   sanitizeAuth,
   sanitizeBatchTransaction,
   sanitizeSellCrypto,
@@ -13,6 +16,7 @@ import {
 import {
   assertNoSecrets,
   extractVaultPayload,
+  findSecretPaths,
   hydrateWalletSecrets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletSecrets';
 
@@ -70,6 +74,8 @@ const legacySlices = () => ({
     requestDetails: {
       amount: '1',
       selectedFromWallet: legacyWallets().allWallets[0],
+      // The sell screen stores the live coin next to the wallet.
+      selectedFromAsset: legacyWallets().allWallets[0].coins[0],
     },
   },
   batchTransaction: {
@@ -100,6 +106,23 @@ const legacySlices = () => ({
     pendingSubmitCount: 2,
   },
   customRpc: {rpcs: {}},
+});
+
+// initializeFilters.fulfilled stores clones of the in-memory transactions
+// (keys included) under filteredData.
+const withBatchFilteredData = slices => ({
+  ...slices,
+  batchTransaction: {
+    ...slices.batchTransaction,
+    filteredData: {
+      filteredTransactions: JSON.parse(
+        JSON.stringify(slices.batchTransaction.transactions.w1),
+      ),
+      uniqueChains: ['ethereum'],
+      loading: true,
+      error: null,
+    },
+  },
 });
 
 // Exactly what createPersistoid writes: a JSON object whose values are the
@@ -181,14 +204,44 @@ describe('legacyRootMigration', () => {
       expect(sanitizeAuth(undefined)).toEqual({hasAccount: false});
     });
 
-    it('sanitizeSellCrypto strips the embedded wallet', () => {
+    it('sanitizeSellCrypto strips the embedded wallet and the embedded coin', () => {
       const out = sanitizeSellCrypto(legacySlices().sellCrypto);
       expect(out.requestDetails.amount).toBe('1');
       expect(out.requestDetails.selectedFromWallet.walletName).toBe('Main');
+      expect(out.requestDetails.selectedFromAsset).toEqual({
+        _id: 'c1',
+        chain_name: 'ethereum',
+        symbol: 'ETH',
+        address: '0xa0',
+        deriveAddresses: [{address: '0xa0', derivePath: "m/44'/60'/0'/0/0"}],
+      });
       expect(() => assertNoSecrets(out)).not.toThrow();
       expect(sanitizeSellCrypto({requestDetails: {}})).toEqual({
         requestDetails: {},
       });
+      // Either field alone.
+      const assetOnly = sanitizeSellCrypto({
+        requestDetails: {
+          selectedFromAsset: {address: '0xa0', privateKey: HEX(1)},
+        },
+      });
+      expect(assetOnly.requestDetails).toEqual({
+        selectedFromAsset: {address: '0xa0'},
+      });
+    });
+
+    it('sanitizeBatchTransaction strips filteredData.filteredTransactions too', () => {
+      const legacy = withBatchFilteredData(legacySlices()).batchTransaction;
+      const out = sanitizeBatchTransaction(legacy);
+      expect(out.filteredData.filteredTransactions).toEqual(
+        out.transactions.w1,
+      );
+      expect(out.filteredData.uniqueChains).toEqual(['ethereum']);
+      expect(() => assertNoSecrets(out)).not.toThrow();
+      // Never adds the field when the legacy slice did not have it.
+      expect(
+        sanitizeBatchTransaction(legacySlices().batchTransaction).filteredData,
+      ).toBeUndefined();
     });
 
     it('sanitizeBatchTransaction deletes coinInfo secrets only', () => {
@@ -242,6 +295,42 @@ describe('legacyRootMigration', () => {
       });
       // Untouched slices pass through by reference.
       expect(result.slices.settings).toBe(slices.settings);
+      expect(result.slices.customRpc).toBe(slices.customRpc);
+    });
+
+    it('writes no secret into any slice and reports none for the known shapes', () => {
+      const result = splitLegacyRoot(withBatchFilteredData(legacySlices()));
+      for (const [name, slice] of Object.entries(result.slices)) {
+        expect({
+          name,
+          paths: findSecretPaths(slice, {valueShapes: false}),
+        }).toEqual({name, paths: []});
+      }
+      expect(result.residualSecrets).toEqual({});
+    });
+
+    it('deep-strips and reports secrets under a shape no sanitizer knows', () => {
+      const slices = legacySlices();
+      slices.settings = {
+        ...slices.settings,
+        paymentUrlCoin: {
+          symbol: 'ETH',
+          privateKey: HEX(5),
+          deriveAddresses: [{address: '0x1', privateKey: HEX(6)}],
+        },
+      };
+      const result = splitLegacyRoot(slices);
+      expect(result.slices.settings).toEqual({
+        theme: 'dark',
+        lockTime: 5,
+        paymentUrlCoin: {symbol: 'ETH', deriveAddresses: [{address: '0x1'}]},
+      });
+      expect(result.residualSecrets).toEqual({
+        settings: {count: 2, keys: ['privateKey']},
+      });
+      // Key names only, never a value.
+      expect(JSON.stringify(result.residualSecrets)).not.toContain(HEX(5));
+      // Untouched slices still pass through by reference.
       expect(result.slices.customRpc).toBe(slices.customRpc);
     });
 
@@ -373,7 +462,39 @@ describe('legacyRootMigration', () => {
         ),
         decryptedVault: vaultPayload,
       });
-      expect(result).toEqual({ok: true, problems: []});
+      expect(result).toEqual({ok: true, problems: [], details: {}});
+    });
+
+    it('passes when a wallet carries a selectedNft coin snapshot (Sentry 7750264661)', () => {
+      // setSelectedNft copies the live coin, with its 50 native derive keys,
+      // next to the NFT metadata; resetNfts only clears it 2 s after launch,
+      // so it is in the legacy blob of anyone who opened an NFT last session.
+      const legacy = legacyWallets();
+      const coin = legacy.allWallets[0].coins[0];
+      legacy.allWallets[0].selectedNft = {
+        token_id: '7',
+        name: 'Ape',
+        coin: {
+          ...coin,
+          deriveAddresses: Array.from({length: 50}, (_, i) => ({
+            address: `0xd${i}`,
+            derivePath: `m/44'/60'/0'/0/${i}`,
+            privateKey: HEX(2),
+          })),
+        },
+      };
+      const {slices, vaultPayload} = splitLegacyRoot({wallets: legacy});
+      const written = parsePersistEnvelope(
+        buildPersistEnvelope(slices.wallets),
+      );
+      expect(written.allWallets[0].selectedNft.token_id).toBe('7');
+      expect(written.allWallets[0].selectedNft.coin.address).toBe('0xa0');
+      const result = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: written,
+        decryptedVault: vaultPayload,
+      });
+      expect(result).toEqual({ok: true, problems: [], details: {}});
     });
 
     it('accepts public 64-hex values under chain-specific keys (Tron txID, block hashes)', () => {
@@ -394,7 +515,7 @@ describe('legacyRootMigration', () => {
         ),
         decryptedVault: vaultPayload,
       });
-      expect(result).toEqual({ok: true, problems: []});
+      expect(result).toEqual({ok: true, problems: [], details: {}});
     });
 
     it('still catches a real leak by key name and names the key, never the value', () => {
@@ -439,6 +560,244 @@ describe('legacyRootMigration', () => {
       expect(result.problems.join('\n')).toMatch(/vault payload/);
       // Never leaks a value into the report.
       expect(result.problems.join('\n')).not.toContain(HEX(3));
+    });
+  });
+
+  // Diagnostics for a failed self-check: structure, field names, lengths and
+  // counts only. Sentry's scrubObject drops any KEY that looks sensitive, so
+  // every detail is a string VALUE under a neutral key.
+  describe('verifyMigration details', () => {
+    const WIF = 'L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ';
+    const XPRV =
+      'xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi';
+    const UUID = '4f8b2c1e-9d3a-4b7f-8e21-0c5d6a7b8f90';
+    const BTC_ADDR = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+    const SOL_ADDR = '7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs';
+
+    const leakedWithSelectedNft = () => {
+      const legacy = legacyWallets();
+      const {slices, vaultPayload} = splitLegacyRoot({wallets: legacy});
+      const leaked = JSON.parse(JSON.stringify(slices.wallets));
+      leaked.allWallets[0].selectedNft = {
+        token_id: '7',
+        coin: {
+          address: '0xa0',
+          privateKey: HEX(2),
+          deriveAddresses: Array.from({length: 50}, (_, i) => ({
+            address: `0xd${i}`,
+            derivePath: `m/44'/60'/0'/0/${i}`,
+            privateKey: HEX(3),
+          })),
+        },
+      };
+      return {legacy, leaked, vaultPayload};
+    };
+
+    it('normalizePathPattern keeps code-defined field names and hides dynamic keys', () => {
+      expect(normalizePathPattern('allWallets[3].coins[12].privateKey')).toBe(
+        'allWallets[*].coins[*].privateKey',
+      );
+      expect(
+        normalizePathPattern('pendingTransactions.ethereum_ETH_0xabc0123.hash'),
+      ).toBe('pendingTransactions.<key>.hash');
+      expect(normalizePathPattern(`deriveKeys.evm.m/44'/60'/0'/0/1`)).toBe(
+        'deriveKeys.evm.<key>',
+      );
+      expect(normalizePathPattern(`wallets.${UUID}.coins.ethereum_ETH`)).toBe(
+        'wallets.<key>.coins.ethereum_ETH',
+      );
+      expect(normalizePathPattern(`walletData.${BTC_ADDR}`)).toBe(
+        'walletData.<key>',
+      );
+      expect(normalizePathPattern(`x.${SOL_ADDR}`)).toBe('x.<key>');
+      expect(normalizePathPattern('[0].privateKey')).toBe('[*].privateKey');
+    });
+
+    it('shapeOf never includes a value', () => {
+      expect(shapeOf(undefined)).toBe('missing');
+      expect(shapeOf(null)).toBe('null');
+      expect(shapeOf(HEX(1))).toBe('string(66)');
+      expect(shapeOf(3)).toBe('number');
+      expect(shapeOf(true)).toBe('boolean');
+      expect(shapeOf([1, 2])).toBe('array(2)');
+      expect(shapeOf({b: 1, a: 2, [BTC_ADDR]: 3})).toBe('object{<key>,a,b}');
+      const wide = Object.fromEntries(
+        Array.from({length: 14}, (_, i) => [`f${i}`, i]),
+      );
+      expect(shapeOf(wide)).toMatch(
+        /^object\{f0,f1,f10,f11,f12,f13,f2,f3,f4,f5,f6,f7,…\}$/,
+      );
+    });
+
+    it('structuralDiff names the path and the shapes, never the values', () => {
+      const a = {
+        allWallets: [
+          {name: 'x', coins: [{k: HEX(1)}, {k: HEX(2)}], list: [1, 2, 3]},
+        ],
+      };
+      const b = {
+        allWallets: [
+          {
+            name: 'x',
+            coins: [{k: HEX(1)}, {k: HEX(3)}],
+            list: [1, 2],
+            extra: {p: 1},
+          },
+        ],
+      };
+      const diff = structuralDiff(a, b, {labelA: 'legacy', labelB: 'migrated'});
+      expect(diff).toEqual([
+        'allWallets[*].coins[*].k: legacy string(66) vs migrated string(66)',
+        'allWallets[*].list: legacy array(3) vs migrated array(2)',
+        'allWallets[*].extra: legacy missing vs migrated object{p}',
+      ]);
+      expect(structuralDiff(a, JSON.parse(JSON.stringify(a)))).toEqual([]);
+      const many = structuralDiff(
+        {},
+        Object.fromEntries(Array.from({length: 13}, (_, i) => [`f${i}`, i])),
+        {maxEntries: 10},
+      );
+      expect(many).toHaveLength(11);
+      expect(many[10]).toBe('… +3 more differences');
+    });
+
+    it('is empty for a faithful migration', () => {
+      const legacy = legacyWallets();
+      const {slices, vaultPayload} = splitLegacyRoot({wallets: legacy});
+      const result = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: parsePersistEnvelope(
+          buildPersistEnvelope(slices.wallets),
+        ),
+        decryptedVault: vaultPayload,
+      });
+      expect(result.details).toEqual({});
+    });
+
+    it('a leaked selectedNft copy is pinpointed by path pattern and field inventory', () => {
+      const {legacy, leaked, vaultPayload} = leakedWithSelectedNft();
+      const {ok, details} = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: leaked,
+        decryptedVault: vaultPayload,
+      });
+      expect(ok).toBe(false);
+      expect(details.leakedPathPatterns).toEqual([
+        'allWallets[*].selectedNft.coin.deriveAddresses[*].privateKey x50',
+        'allWallets[*].selectedNft.coin.privateKey x1',
+      ]);
+      expect(details.walletsDiff).toEqual([
+        'allWallets[*].selectedNft: legacy missing vs migrated object{coin,token_id}',
+      ]);
+      expect(details.walletFieldInventory).toEqual(
+        expect.arrayContaining(['selectedNft', 'coins[*].deriveAddresses']),
+      );
+      expect(details.counts).toEqual({
+        legacyWallets: 2,
+        migratedWallets: 2,
+        coinsPerWallet: [1, 0],
+        deriveAddressesPerWallet: [1, 0],
+      });
+      const text = JSON.stringify(details);
+      expect(text).not.toContain(HEX(2));
+      expect(text).not.toContain(HEX(3));
+      expect(text).not.toContain('0x');
+      expect(text).not.toContain('w1');
+      expect(text).not.toContain("m/44'");
+    });
+
+    it('vault mismatch and coin-count drift point at the wallet and the entry', () => {
+      const legacy = legacyWallets();
+      const {slices, vaultPayload} = splitLegacyRoot({wallets: legacy});
+      const migrated = parsePersistEnvelope(
+        buildPersistEnvelope(slices.wallets),
+      );
+      migrated.allWallets[0].coins = [];
+      const {details, problems} = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: migrated,
+        decryptedVault: {
+          ...vaultPayload,
+          wallets: {
+            ...vaultPayload.wallets,
+            w1: {...vaultPayload.wallets.w1, coins: {}},
+          },
+        },
+      });
+      expect(problems.join('\n')).toMatch(/coin count differs/);
+      expect(details.coinCountDrift).toEqual(['wallet#0: 1 -> 0']);
+      expect(details.walletsDiff).toEqual([
+        'allWallets[*].coins: legacy array(1) vs migrated array(0)',
+      ]);
+      expect(details.vaultDiff).toEqual([
+        'wallets.w1.coins.ethereum_ETH: expected object{_id,privateKey} vs actual missing',
+      ]);
+      expect(details.walletCounts).toBeUndefined();
+    });
+
+    it('never leaks a value through any branch', () => {
+      const legacy = legacyWallets();
+      legacy.allWallets[0].coins.push({
+        _id: 'c-btc',
+        chain_name: 'bitcoin',
+        symbol: 'BTC',
+        address: BTC_ADDR,
+        privateKey: WIF,
+        extendedPrivateKey: XPRV,
+        deriveAddresses: [{address: BTC_ADDR, privateKey: WIF}],
+      });
+      legacy.allWallets[1].clientId = UUID;
+      legacy.allWallets[1].phrase = MNEMONIC;
+      legacy.allWallets[1].pendingTransactions = {
+        [`bitcoin_BTC_${BTC_ADDR}`]: [{hash: 'ab'.repeat(32)}],
+      };
+      const {slices} = splitLegacyRoot({wallets: legacy});
+      const broken = JSON.parse(JSON.stringify(slices.wallets));
+      // Every problem branch at once.
+      delete broken.allWallets[1].clientId;
+      broken.allWallets[0].coins[1].privateKey = WIF;
+      broken.allWallets[0].secretCodeSalt = 'b'.repeat(32);
+      broken.allWallets.push({clientId: 'ghost', coins: []});
+      const {details, problems} = verifyMigration({
+        legacyWallets: legacy,
+        migratedWallets: broken,
+        decryptedVault: {
+          v: 1,
+          wallets: {
+            [UUID]: {
+              phrase: MNEMONIC,
+              coins: {},
+              chainExisting: {},
+              deriveKeys: {},
+            },
+          },
+        },
+      });
+      expect(problems.length).toBeGreaterThanOrEqual(4);
+      const text = JSON.stringify(details);
+      for (const secret of [
+        WIF,
+        XPRV,
+        MNEMONIC,
+        HEX(1),
+        UUID,
+        BTC_ADDR,
+        SOL_ADDR,
+        '0xa0',
+        'abandon',
+      ]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(details.walletCounts).toEqual({
+        legacy: 2,
+        migrated: 3,
+        legacyWithoutId: 0,
+        migratedWithoutId: 1,
+      });
+      expect(details.leakedPathPatterns).toEqual([
+        'allWallets[*].coins[*].privateKey x1',
+        'allWallets[*].secretCodeSalt x1',
+      ]);
     });
   });
 });

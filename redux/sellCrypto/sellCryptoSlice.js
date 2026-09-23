@@ -46,37 +46,67 @@ const internalSellCryptoQuote = async (payload, thunkAPI) => {
   }
 };
 
+const sameText = (a, b) =>
+  typeof a === 'string' &&
+  typeof b === 'string' &&
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// The persisted requestDetails copies (selectedFromWallet, selectedFromAsset)
+// are stripped of their keys at rest, so after a relaunch they are keyless
+// stubs. Sign with the live objects from the wallets slice, falling back to
+// the stubs (address/display fields only) when nothing matches.
+const resolveLiveSellContext = (state, requestDetails) => {
+  const storedWallet = requestDetails?.selectedFromWallet;
+  const storedAsset = requestDetails?.selectedFromAsset;
+  const liveWallet = state.wallets?.allWallets?.find(
+    wallet => wallet?.clientId && wallet.clientId === storedWallet?.clientId,
+  );
+  const coins = Array.isArray(liveWallet?.coins) ? liveWallet.coins : [];
+  const liveCoin =
+    (storedAsset?._id && coins.find(coin => coin?._id === storedAsset._id)) ||
+    coins.find(
+      coin =>
+        coin?.chain_name === storedAsset?.chain_name &&
+        sameText(coin?.address, storedAsset?.address) &&
+        sameText(
+          coin?.contractAddress ?? '',
+          storedAsset?.contractAddress ?? '',
+        ),
+    );
+  return {
+    selectedWallet: liveWallet || storedWallet,
+    selectedCoin: liveCoin || storedAsset,
+  };
+};
+
 const initiateTransfer = async (payload, thunkAPI) => {
   const dispatch = thunkAPI.dispatch;
   const currentState = thunkAPI.getState();
   const requestDetails = currentState.sellCrypto.requestDetails;
   const transferDetails = currentState.sellCrypto.transferDetails;
   try {
+    const {selectedWallet, selectedCoin} = resolveLiveSellContext(
+      currentState,
+      requestDetails,
+    );
     dispatch(
       updateCurrentTransferData({
         toAddress: transferDetails?.depositAddress,
         amount: validateBigNumberStr(transferDetails?.depositAmount),
         memo: transferDetails?.memo,
-        currentCoin: requestDetails?.selectedFromAsset,
+        currentCoin: selectedCoin,
         isSendFunds: false,
       }),
     );
     dispatch(
       calculateEstimateFee({
         isFetchNonce: true,
-        fromAddress: requestDetails?.selectedFromAsset?.address,
+        fromAddress: selectedCoin?.address,
         toAddress: transferDetails?.depositAddress,
         amount: transferDetails?.depositAmount,
-        contractAddress: requestDetails?.selectedFromAsset?.contractAddress,
-        // The persisted copy of the wallet is stripped of its keys; sign with
-        // the live wallet from state, falling back to the stored stub.
-        selectedWallet:
-          currentState.wallets?.allWallets?.find(
-            wallet =>
-              wallet?.clientId &&
-              wallet.clientId === requestDetails?.selectedFromWallet?.clientId,
-          ) || requestDetails?.selectedFromWallet,
-        selectedCoin: requestDetails?.selectedFromAsset,
+        contractAddress: selectedCoin?.contractAddress,
+        selectedWallet,
+        selectedCoin,
       }),
     );
   } catch (e) {

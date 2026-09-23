@@ -108,6 +108,23 @@ const mnemonicWallet = () => ({
     },
     'session-2': [{address: 'bc1q...', privateKey: WIF}],
   },
+  // setSelectedNft stores a full copy of the live native coin next to the NFT
+  // metadata; it carries the coin key and every derive key.
+  selectedNft: {
+    token_id: '42',
+    token_address: '0xnft',
+    name: 'Ape',
+    metadata: {image: 'ipfs://img'},
+    coin: {
+      _id: 'coin-eth',
+      chain_name: 'ethereum',
+      symbol: 'ETH',
+      address: '0xaddr0',
+      publicKey: '0xpub',
+      privateKey: HEX(1),
+      deriveAddresses: evmDerives(50, {withCustom: true}),
+    },
+  },
 });
 
 const privateKeyWallet = () => ({
@@ -147,6 +164,29 @@ describe('walletSecrets', () => {
       expect(m.hideSettings.secretCodeSalt).toBeUndefined();
       expect(m.walletData['session-1']['eip155:1'].privateKey).toBeUndefined();
       expect(m.walletData['session-2'][0].privateKey).toBeUndefined();
+      expect(m.selectedNft.coin.privateKey).toBeUndefined();
+      expect(
+        m.selectedNft.coin.deriveAddresses.some(entry => 'privateKey' in entry),
+      ).toBe(false);
+      expect(findSecretPaths(stripped, {valueShapes: false})).toEqual([]);
+    });
+
+    it('strips the selectedNft coin snapshot like any other coin', () => {
+      const m = stripWalletSecrets(mnemonicWallet());
+      expect(m.selectedNft.token_id).toBe('42');
+      expect(m.selectedNft.metadata).toEqual({image: 'ipfs://img'});
+      expect(m.selectedNft.coin.address).toBe('0xaddr0');
+      expect(m.selectedNft.coin.publicKey).toBe('0xpub');
+      expect(m.selectedNft.coin.deriveAddresses).toHaveLength(51);
+      expect(m.selectedNft.coin.deriveAddresses[0]).toEqual({
+        address: '0xaddr0',
+        derivePath: "m/44'/60'/0'/0/0",
+      });
+      // A wallet with no NFT selected is left alone.
+      expect(stripWalletSecrets({clientId: 'x', selectedNft: null})).toEqual({
+        clientId: 'x',
+        selectedNft: null,
+      });
     });
 
     it('keeps everything that is not a secret', () => {
@@ -237,10 +277,16 @@ describe('walletSecrets', () => {
       const payload = extractVaultPayload(wallets);
       const stripped = stripAllWalletsSecrets(wallets);
       const hydrated = hydrateWalletSecrets(stripped, payload);
-      // walletData is stripped but deliberately not re-hydrated.
-      const expected = wallets.map(w =>
-        w.walletData ? {...w, walletData: stripWalletSecrets(w).walletData} : w,
-      );
+      // walletData and the selectedNft snapshot are stripped but deliberately
+      // not re-hydrated: the live coin is the source of truth for both.
+      const expected = wallets.map(w => {
+        const s = stripWalletSecrets(w);
+        return {
+          ...w,
+          ...(w.walletData ? {walletData: s.walletData} : {}),
+          ...(w.selectedNft ? {selectedNft: s.selectedNft} : {}),
+        };
+      });
       expect(hydrated).toEqual(expected);
     });
 

@@ -16,6 +16,9 @@
 // `coinKey` = generateUniqueKeyForChain(coin) (chain_symbol), the identity the
 // slice already treats as unique. `family` collapses every EVM coin onto one
 // list because their derive paths and keys are identical.
+//
+// Stripped but never hydrated (the live coin is the source of truth): the
+// WalletConnect `walletData` entries and the `selectedNft.coin` snapshot.
 import {
   generateUniqueKeyForChain,
   isEVMChain,
@@ -104,6 +107,16 @@ const stripDeep = (value, fields) => {
 };
 
 /**
+ * Deep copy of `value` with every key in SECRET_FIELD_NAMES removed at any
+ * depth. Last line of defence for state whose shape we do not own (the
+ * migrator applies it to non-wallet slices that still hold a secret after
+ * their sanitizer ran). Always returns a new object, so callers should only
+ * use it when a scan found something.
+ */
+export const stripSecretFieldsDeep = value =>
+  stripDeep(value, SECRET_FIELD_NAMES);
+
+/**
  * Returns a copy of a coin-shaped object with every secret removed, including
  * nested `deriveAddresses[*]` keys. Never mutates. Also used for coin-shaped
  * snapshots stored outside `allWallets` (batch transaction `coinInfo`).
@@ -153,6 +166,19 @@ export const stripWalletSecrets = wallet => {
       wallet.walletData,
       SECRET_WALLET_FIELDS.walletData,
     );
+  }
+  // `selectedNft.coin` is the copy of the live native coin that setSelectedNft
+  // stores next to the NFT metadata (key + every derive key). It is a UI
+  // snapshot: resetNfts clears it on launch and setSelectedNft rebuilds it from
+  // the hydrated coin, so it is stripped here and never re-hydrated.
+  if (
+    isPlainObject(wallet.selectedNft) &&
+    isPlainObject(wallet.selectedNft.coin)
+  ) {
+    result.selectedNft = {
+      ...wallet.selectedNft,
+      coin: stripCoinSecrets(wallet.selectedNft.coin),
+    };
   }
   return result;
 };
