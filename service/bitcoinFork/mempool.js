@@ -1,6 +1,6 @@
-import {LitecoinSpaceAPI} from 'dok-wallet-blockchain-networks/config/litecoinSpace';
+import {LitecoinSpaceAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/litecoinSpace';
 import BigNumber from 'bignumber.js';
-import {BitcoinMempoolAPI} from 'dok-wallet-blockchain-networks/config/bitcoinMempool';
+import {BitcoinMempoolAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/bitcoinMempool';
 
 const APIProvider = {
   btc: BitcoinMempoolAPI,

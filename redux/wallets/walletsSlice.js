@@ -3,7 +3,11 @@ import {
   getCoin,
   getHashString,
 } from 'dok-wallet-blockchain-networks/cryptoChain';
-import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import {createAsyncThunk, createSlice, current} from '@reduxjs/toolkit';
+import {
+  hydrateWalletSecrets as hydrateAllWalletsSecrets,
+  stripAllWalletsSecrets,
+} from './walletSecrets';
 import {captureError, logger} from 'services/logger';
 import {
   clearSelectedUTXOs,
@@ -2517,6 +2521,20 @@ export const walletsSlice = createSlice({
       }
     },
     resetWallet: () => initialState,
+    // Merge vault secrets back onto the in-memory wallets after unlock. Pure
+    // merge (walletSecrets.js): memory wins, holes are filled, `undefined` is
+    // never written. Wallets absent from the payload are left untouched.
+    hydrateWalletSecrets: (state, {payload}) => {
+      state.allWallets = hydrateAllWalletsSecrets(
+        current(state).allWallets,
+        payload,
+      );
+    },
+    // Zeroise-on-lock: drop every secret from the in-memory wallets (the vault
+    // keeps them at rest). Inverse of hydrateWalletSecrets.
+    clearWalletSecrets: state => {
+      state.allWallets = stripAllWalletsSecrets(current(state).allWallets);
+    },
     updateWalletName: (state, action) => {
       const clientId = action?.payload?.clientId;
       const updateWalletName = action?.payload?.walletName?.trim?.();
@@ -3077,12 +3095,22 @@ export const walletsSlice = createSlice({
       for (let i = 0; i < allWallets.length; i++) {
         const currentWallet = allWallets[i] || {};
         if (currentWallet?.privacyMode) {
-          currentWallet.coins = currentWallet.coins.map(item => ({
-            ...item,
-            address: item?.deriveAddresses?.[0]?.address || item?.address,
-            privateKey:
-              item?.deriveAddresses?.[0]?.privateKey || item?.privateKey,
-          }));
+          currentWallet.coins = currentWallet.coins.map(item => {
+            const first = item?.deriveAddresses?.[0];
+            // Address and key must move together. Before unlock the derive
+            // entries carry no keys (stripped at rest); re-pointing the address
+            // then would pair the default address with whatever key the vault
+            // fills in later. Leave the coin alone and let the post-unlock
+            // dispatch (unlockFlow) do the reset with the keys in place.
+            if (!first?.address || !first?.privateKey) {
+              return item;
+            }
+            return {
+              ...item,
+              address: first.address,
+              privateKey: first.privateKey,
+            };
+          });
           currentWallet.chain_existing_coin = extractChainExistingCoins(
             currentWallet.chain_existing_coin,
             currentWallet.coins,
@@ -3112,11 +3140,16 @@ export const walletsSlice = createSlice({
             item?.deriveAddresses?.filter(
               (subItem, index) => !index || !!subItem?.isCustom,
             ) || [];
+          const first = item?.deriveAddresses?.[0];
+          // Same rule as resetCoinsToDefaultAddressForPrivacyMode: only move
+          // the address when its key is present, so the pair stays consistent.
+          const defaultAddress =
+            first?.address && first?.privateKey
+              ? {address: first.address, privateKey: first.privateKey}
+              : {};
           return {
             ...item,
-            address: item?.deriveAddresses?.[0]?.address || item?.address,
-            privateKey:
-              item?.deriveAddresses?.[0]?.privateKey || item?.privateKey,
+            ...defaultAddress,
             deriveAddresses:
               customDeriveAddresses?.length > 1 ? customDeriveAddresses : null,
           };
@@ -3666,6 +3699,8 @@ export const {
   setCoinsInCurrentWallet,
   deleteWallet,
   resetWallet,
+  hydrateWalletSecrets,
+  clearWalletSecrets,
   setBackedUp,
   setWalletConnect,
   setWalletConnectWalletData,

@@ -68,7 +68,14 @@ const initiateTransfer = async (payload, thunkAPI) => {
         toAddress: transferDetails?.depositAddress,
         amount: transferDetails?.depositAmount,
         contractAddress: requestDetails?.selectedFromAsset?.contractAddress,
-        selectedWallet: requestDetails?.selectedFromWallet,
+        // The persisted copy of the wallet is stripped of its keys; sign with
+        // the live wallet from state, falling back to the stored stub.
+        selectedWallet:
+          currentState.wallets?.allWallets?.find(
+            wallet =>
+              wallet?.clientId &&
+              wallet.clientId === requestDetails?.selectedFromWallet?.clientId,
+          ) || requestDetails?.selectedFromWallet,
         selectedCoin: requestDetails?.selectedFromAsset,
       }),
     );

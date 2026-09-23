@@ -1,4 +1,4 @@
-import {BlockDaemonAPI} from 'dok-wallet-blockchain-networks/config/BlockDaemon';
+import {BlockDaemonAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/BlockDaemon';
 import BigNumber from 'bignumber.js';
 import {Mempool} from './mempool';
 import {convertToSmallAmount} from 'dok-wallet-blockchain-networks/helper';

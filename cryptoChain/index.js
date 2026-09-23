@@ -15,6 +15,7 @@ const loadEVMChain = () => require('./chains/EVMChain').EVMChain;
 const loadBitcoinChain = () => require('./chains/BitcoinChain').BitcoinChain;
 const loadDogecoinOrLitecoinChain = () =>
   require('./chains/DogecoinOrLitecoinChain').DogecoinOrLitecoinChain;
+const loadZcashChain = () => require('./chains/ZcashChain').ZcashChain;
 const loadBitcoinLightningChain = () =>
   require('./chains/BitcoinLightningChain').BitcoinLightningChain;
 const loadTronChain = () => require('./chains/TronChain').TronChain;
@@ -35,6 +36,7 @@ const CHAIN_LOADERS = {
   evm: loadEVMChain,
   bitcoin: loadBitcoinChain,
   doge_ltc: loadDogecoinOrLitecoinChain,
+  zcash: loadZcashChain,
   lightning: loadBitcoinLightningChain,
   tron: loadTronChain,
   solana: loadSolanaChain,

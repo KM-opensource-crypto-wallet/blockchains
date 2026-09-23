@@ -3,7 +3,7 @@ import {
   ELECTRUM_QUERIES,
   ElectrumClient,
 } from 'dok-wallet-blockchain-networks/service/electrum';
-import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/blockChair';
+import {parseBlockchainTransactions} from 'dok-wallet-blockchain-networks/service/bitcoinFork/blockChair';
 
 jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   IS_SANDBOX: false,
@@ -11,7 +11,7 @@ jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   config: {},
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/blockChair', () => ({
+jest.mock('dok-wallet-blockchain-networks/service/bitcoinFork/blockChair', () => ({
   parseBlockchainTransactions: jest.fn(() => []),
 }));
 

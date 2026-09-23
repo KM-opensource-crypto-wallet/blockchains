@@ -4,7 +4,7 @@ import {
   fetchBitcoinUTXO as dokFetchBitcoinUTXO,
   fetchBitcoinTransactionDetails as dokFetchBitcoinTransactionDetails,
 } from 'dok-wallet-blockchain-networks/service/dokApi';
-import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork';
+import {BitcoinFork} from 'dok-wallet-blockchain-networks/service/bitcoinFork/bitcoinFork';
 import {
   isElectrumQueryAvailable,
   runElectrumQuery,

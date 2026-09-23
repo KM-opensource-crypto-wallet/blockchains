@@ -1,4 +1,4 @@
-import {BlockChairAPI} from 'dok-wallet-blockchain-networks/config/blockChair';
+import {BlockChairAPI} from 'dok-wallet-blockchain-networks/config/bitcoinFork/blockChair';
 
 export const CardanoChainService = {
   getCardanoBalance: async address => {

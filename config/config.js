@@ -1791,6 +1791,34 @@ export const CHAIN_CONFIG = {
       order: 1,
     },
   },
+  // `supported` was iOS-only while signing went through a native WalletCore
+  // bridge (removed; see git history for the old signZcashTransaction
+  // native method). ZcashChain.js builds and signs v4 Zcash transactions
+  // itself in pure JS (WalletCore's native Zcash signer was found to
+  // produce cryptographically invalid signatures), so the only native
+  // requirement is address/key derivation, which android/.../coins/
+  // ZcashCoin.java now provides too (mirrors ios/ZcashCoin.swift).
+  zcash: {
+    supported: true,
+    chain_loader: 'zcash',
+    scan: {
+      sandbox: 'https://testnet.cipherscan.app',
+      production: 'https://cipherscan.app',
+      txPath: 'tx',
+    },
+    // Unlike Bitcoin's sat/vByte, ZIP-317's marginal fee is a network-defined
+    // *minimum*, not a congestion-driven market rate -- so `recommended`
+    // defaults to exactly 1x (today's unchanged fee) rather than Bitcoin's
+    // 1.65x, and `normal` is a purely elective higher rate for users who
+    // want to overpay. See ZcashChain.js's getEstimateFee/send.
+    fee_multiplier: {normal: 1.5, recommended: 1},
+    gas_currency: 'zat/action',
+    fees_options: true,
+    private_key_list: {
+      label: 'Zcash',
+      order: 35,
+    },
+  },
 };
 const forEnv = value => (IS_SANDBOX ? value.sandbox : value.production);
 const scanBase = chain_name => forEnv(CHAIN_CONFIG[chain_name].scan);
@@ -1943,6 +1971,13 @@ export const config = {
   HEDERA_SCAN_URL: scanBase('hedera'),
   CARDANO_SCAN_URL: scanBase('cardano'),
   FILECOIN_SCAN_URL: scanBase('filecoin'),
+  ZCASH_SCAN_URL: scanBase('zcash'),
+  // Current network upgrade's consensus branch ID (hex, no 0x prefix), per
+  // ZIP-258 (NU6.3, mainnet-active since height 3,428,143 / 2026-07-28).
+  // Same value on both networks for this upgrade -- bump both on the next
+  // network upgrade; no native change needed, see CustomMethods.swift.
+  ZCASH_CONSENSUS_BRANCH_ID: '37a5165b',
+  ZCASH_TESTNET_CONSENSUS_BRANCH_ID: '37a5165b',
 };
 export const SCAN_URL = Object.fromEntries(
   Object.entries(CHAIN_CONFIG)

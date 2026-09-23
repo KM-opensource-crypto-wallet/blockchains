@@ -1,4 +1,4 @@
-import {getAllBlockchairAPI} from './dokApi';
+import {getAllBlockchairAPI} from '../dokApi';
 
 export const PremiumBlockChair = {
   getBalance: async ({chain, address}) => {
