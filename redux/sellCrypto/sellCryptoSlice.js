@@ -5,6 +5,7 @@ import {getSellCryptoPaymentDetails} from 'dok-wallet-blockchain-networks/servic
 import {getSellCryptoQuote} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   calculateEstimateFee,
+  setCurrentTransferCustomError,
   updateCurrentTransferData,
 } from '../currentTransfer/currentTransferSlice';
 import {validateBigNumberStr} from 'dok-wallet-blockchain-networks/helper';
@@ -46,42 +47,86 @@ const internalSellCryptoQuote = async (payload, thunkAPI) => {
   }
 };
 
+const sameText = (a, b) =>
+  typeof a === 'string' &&
+  typeof b === 'string' &&
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+export const SELL_WALLET_MISSING_MESSAGE =
+  'The wallet for this sell request is no longer available. Please start the sell again.';
+
+// The persisted requestDetails copies (selectedFromWallet, selectedFromAsset)
+// are stripped of their keys at rest, so after a relaunch they are keyless
+// stubs. Sign with the live objects from the wallets slice. The wallet is
+// never a stub: passing one down would make getNativeCoin fall back to the
+// CURRENT wallet's phrase and sign from the wrong wallet, so a missing live
+// wallet is `null` and the thunk refuses to continue. The coin may fall back
+// to the stub (address/display fields only) because resolveWallet re-derives
+// it from the live wallet.
+const resolveLiveSellContext = (state, requestDetails) => {
+  const storedWallet = requestDetails?.selectedFromWallet;
+  const storedAsset = requestDetails?.selectedFromAsset;
+  const liveWallet = state.wallets?.allWallets?.find(
+    wallet => wallet?.clientId && wallet.clientId === storedWallet?.clientId,
+  );
+  const coins = Array.isArray(liveWallet?.coins) ? liveWallet.coins : [];
+  const liveCoin =
+    (storedAsset?._id && coins.find(coin => coin?._id === storedAsset._id)) ||
+    coins.find(
+      coin =>
+        coin?.chain_name === storedAsset?.chain_name &&
+        sameText(coin?.address, storedAsset?.address) &&
+        sameText(
+          coin?.contractAddress ?? '',
+          storedAsset?.contractAddress ?? '',
+        ),
+    );
+  return {
+    selectedWallet: liveWallet || null,
+    selectedCoin: liveCoin || storedAsset,
+  };
+};
+
 const initiateTransfer = async (payload, thunkAPI) => {
   const dispatch = thunkAPI.dispatch;
   const currentState = thunkAPI.getState();
   const requestDetails = currentState.sellCrypto.requestDetails;
   const transferDetails = currentState.sellCrypto.transferDetails;
   try {
+    const {selectedWallet, selectedCoin} = resolveLiveSellContext(
+      currentState,
+      requestDetails,
+    );
+    if (!selectedWallet) {
+      throw new Error(SELL_WALLET_MISSING_MESSAGE);
+    }
     dispatch(
       updateCurrentTransferData({
         toAddress: transferDetails?.depositAddress,
         amount: validateBigNumberStr(transferDetails?.depositAmount),
         memo: transferDetails?.memo,
-        currentCoin: requestDetails?.selectedFromAsset,
+        currentCoin: selectedCoin,
         isSendFunds: false,
       }),
     );
     dispatch(
       calculateEstimateFee({
         isFetchNonce: true,
-        fromAddress: requestDetails?.selectedFromAsset?.address,
+        fromAddress: selectedCoin?.address,
         toAddress: transferDetails?.depositAddress,
         amount: transferDetails?.depositAmount,
-        contractAddress: requestDetails?.selectedFromAsset?.contractAddress,
-        // The persisted copy of the wallet is stripped of its keys; sign with
-        // the live wallet from state, falling back to the stored stub.
-        selectedWallet:
-          currentState.wallets?.allWallets?.find(
-            wallet =>
-              wallet?.clientId &&
-              wallet.clientId === requestDetails?.selectedFromWallet?.clientId,
-          ) || requestDetails?.selectedFromWallet,
-        selectedCoin: requestDetails?.selectedFromAsset,
+        contractAddress: selectedCoin?.contractAddress,
+        selectedWallet,
+        selectedCoin,
       }),
     );
   } catch (e) {
     console.error('Error in initiateSellCryptoTransfer', e);
     dispatch(setSellCryptoError(e?.message));
+    // Both apps navigate to the Transfer/confirm screen without awaiting this
+    // thunk; that screen renders transferData.customError when the transfer
+    // is not marked successful, so surface the reason there too.
+    dispatch(setCurrentTransferCustomError(e?.message));
   }
 };
 
