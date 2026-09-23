@@ -7,6 +7,7 @@ import {createAsyncThunk, createSlice, current} from '@reduxjs/toolkit';
 import {
   hydrateWalletSecrets as hydrateAllWalletsSecrets,
   stripAllWalletsSecrets,
+  toChainExistingEntry,
 } from './walletSecrets';
 import {captureError, logger} from 'services/logger';
 import {
@@ -157,7 +158,8 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
   if (!Array.isArray(coins)) {
     return null;
   }
-  const chainWallets = chain_existing_coin || {};
+  // A copy: callers pass payload objects as well as drafts.
+  const chainWallets = {...(chain_existing_coin || {})};
   coins.forEach(item => {
     if (item?.chain_name && (item?.address || item?.privateKey)) {
       if (!chainWallets[item.chain_name]) {
@@ -169,6 +171,12 @@ const extractChainExistingCoins = (chain_existing_coin, coins) => {
           extendedPublicKey: item?.extendedPublicKey,
           extendedPrivateKey: item?.extendedPrivateKey,
         };
+      } else {
+        // Coin syncs before this fix stored the whole coin here (every derive
+        // key included); normalize it the next time the wallet is touched.
+        chainWallets[item.chain_name] = toChainExistingEntry(
+          chainWallets[item.chain_name],
+        );
       }
     }
   });
@@ -2402,7 +2410,14 @@ export const walletsSlice = createSlice({
       const {clientId, chainWallets} = action.payload;
       const wallet = getWalletByClientId(state, clientId);
       if (wallet) {
-        wallet.chain_existing_coin = chainWallets;
+        wallet.chain_existing_coin = chainWallets
+          ? Object.fromEntries(
+              Object.entries(chainWallets).map(([chain, entry]) => [
+                chain,
+                toChainExistingEntry(entry),
+              ]),
+            )
+          : chainWallets;
       }
     },
     setCoinsInCurrentWallet: (state, action) => {

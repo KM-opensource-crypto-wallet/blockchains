@@ -19,6 +19,9 @@
 //
 // Stripped but never hydrated (the live coin is the source of truth): the
 // WalletConnect `walletData` entries and the `selectedNft.coin` snapshot.
+// `chain_existing_coin` entries persist only CHAIN_EXISTING_PUBLIC_FIELDS; older
+// coin syncs stored a whole coin there (every derive key included), so the
+// strip keeps the public fields instead of omitting the known secrets.
 import {
   generateUniqueKeyForChain,
   isEVMChain,
@@ -48,6 +51,20 @@ export const SECRET_FIELD_NAMES = Object.freeze([
   'extendedPrivateKey',
   'secretCodeHash',
   'secretCodeSalt',
+]);
+
+// The six fields a `chain_existing_coin` entry is made of; the only readers
+// (cryptoChain createWalletForChain, selectLivePrivateKey) use nothing else.
+export const CHAIN_EXISTING_PUBLIC_FIELDS = Object.freeze([
+  'address',
+  'accountId',
+  'publicKey',
+  'extendedPublicKey',
+]);
+
+const CHAIN_EXISTING_FIELDS = Object.freeze([
+  ...CHAIN_EXISTING_PUBLIC_FIELDS,
+  ...SECRET_WALLET_FIELDS.chainExisting,
 ]);
 
 const hasValue = value => value !== undefined && value !== null && value !== '';
@@ -80,6 +97,21 @@ const pick = (object, fields) => {
   }
   return out;
 };
+
+/**
+ * The `chain_existing_coin` entry for a coin or chain wallet: the six known
+ * fields, nothing else. Never copy a whole coin in (its deriveAddresses carry
+ * every derive key).
+ */
+export const toChainExistingEntry = source =>
+  isPlainObject(source)
+    ? Object.fromEntries(
+        CHAIN_EXISTING_FIELDS.filter(field => field in source).map(field => [
+          field,
+          source[field],
+        ]),
+      )
+    : source;
 
 export const getCoinKey = coin => generateUniqueKeyForChain(coin);
 
@@ -151,7 +183,9 @@ export const stripWalletSecrets = wallet => {
     result.chain_existing_coin = Object.fromEntries(
       Object.entries(wallet.chain_existing_coin).map(([chain, value]) => [
         chain,
-        omit(value, SECRET_WALLET_FIELDS.chainExisting),
+        isPlainObject(value)
+          ? pick(value, CHAIN_EXISTING_PUBLIC_FIELDS)
+          : value,
       ]),
     );
   }
