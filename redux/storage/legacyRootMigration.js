@@ -134,7 +134,9 @@ export const sanitizeWallets = wallets => {
 
 // The sell screen stores copies of the live wallet AND the live coin it sells
 // from; both carry keys. initiateSellCryptoTransfer re-resolves the live
-// objects from the wallets slice before signing, so the stubs need no keys.
+// objects from the wallets slice before signing and refuses to continue when
+// the wallet is gone (a stub wallet is never signed with), so the persisted
+// stubs need no keys.
 export const sanitizeSellCrypto = sellCrypto => {
   const details = sellCrypto?.requestDetails;
   if (!isPlainObject(details)) {
@@ -254,6 +256,8 @@ export const splitLegacyRoot = slices => {
         residualSecrets[name] = {
           count: paths.length,
           keys: [...new Set(paths.map(path => path.split('.').pop()))],
+          // Same value-free shape as verifyMigration's leakedPathPatterns.
+          pathPatterns: summarizePaths(paths),
         };
         out = stripSecretFieldsDeep(out);
       }

@@ -5,6 +5,7 @@ import {getSellCryptoPaymentDetails} from 'dok-wallet-blockchain-networks/servic
 import {getSellCryptoQuote} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   calculateEstimateFee,
+  setCurrentTransferCustomError,
   updateCurrentTransferData,
 } from '../currentTransfer/currentTransferSlice';
 import {validateBigNumberStr} from 'dok-wallet-blockchain-networks/helper';
@@ -51,10 +52,17 @@ const sameText = (a, b) =>
   typeof b === 'string' &&
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
+export const SELL_WALLET_MISSING_MESSAGE =
+  'The wallet for this sell request is no longer available. Please start the sell again.';
+
 // The persisted requestDetails copies (selectedFromWallet, selectedFromAsset)
 // are stripped of their keys at rest, so after a relaunch they are keyless
-// stubs. Sign with the live objects from the wallets slice, falling back to
-// the stubs (address/display fields only) when nothing matches.
+// stubs. Sign with the live objects from the wallets slice. The wallet is
+// never a stub: passing one down would make getNativeCoin fall back to the
+// CURRENT wallet's phrase and sign from the wrong wallet, so a missing live
+// wallet is `null` and the thunk refuses to continue. The coin may fall back
+// to the stub (address/display fields only) because resolveWallet re-derives
+// it from the live wallet.
 const resolveLiveSellContext = (state, requestDetails) => {
   const storedWallet = requestDetails?.selectedFromWallet;
   const storedAsset = requestDetails?.selectedFromAsset;
@@ -74,7 +82,7 @@ const resolveLiveSellContext = (state, requestDetails) => {
         ),
     );
   return {
-    selectedWallet: liveWallet || storedWallet,
+    selectedWallet: liveWallet || null,
     selectedCoin: liveCoin || storedAsset,
   };
 };
@@ -89,6 +97,9 @@ const initiateTransfer = async (payload, thunkAPI) => {
       currentState,
       requestDetails,
     );
+    if (!selectedWallet) {
+      throw new Error(SELL_WALLET_MISSING_MESSAGE);
+    }
     dispatch(
       updateCurrentTransferData({
         toAddress: transferDetails?.depositAddress,
@@ -112,6 +123,10 @@ const initiateTransfer = async (payload, thunkAPI) => {
   } catch (e) {
     console.error('Error in initiateSellCryptoTransfer', e);
     dispatch(setSellCryptoError(e?.message));
+    // Both apps navigate to the Transfer/confirm screen without awaiting this
+    // thunk; that screen renders transferData.customError when the transfer
+    // is not marked successful, so surface the reason there too.
+    dispatch(setCurrentTransferCustomError(e?.message));
   }
 };
 

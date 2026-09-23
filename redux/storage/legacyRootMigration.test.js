@@ -326,7 +326,14 @@ describe('legacyRootMigration', () => {
         paymentUrlCoin: {symbol: 'ETH', deriveAddresses: [{address: '0x1'}]},
       });
       expect(result.residualSecrets).toEqual({
-        settings: {count: 2, keys: ['privateKey']},
+        settings: {
+          count: 2,
+          keys: ['privateKey'],
+          pathPatterns: [
+            'paymentUrlCoin.deriveAddresses[*].privateKey x1',
+            'paymentUrlCoin.privateKey x1',
+          ],
+        },
       });
       // Key names only, never a value.
       expect(JSON.stringify(result.residualSecrets)).not.toContain(HEX(5));

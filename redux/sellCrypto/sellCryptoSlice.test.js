@@ -11,10 +11,17 @@ jest.mock(
   () => ({
     calculateEstimateFee: payload => ({type: 'test/estimate', payload}),
     updateCurrentTransferData: payload => ({type: 'test/update', payload}),
+    setCurrentTransferCustomError: payload => ({
+      type: 'test/customError',
+      payload,
+    }),
   }),
 );
 
-import {initiateSellCryptoTransfer} from 'dok-wallet-blockchain-networks/redux/sellCrypto/sellCryptoSlice';
+import {
+  initiateSellCryptoTransfer,
+  SELL_WALLET_MISSING_MESSAGE,
+} from 'dok-wallet-blockchain-networks/redux/sellCrypto/sellCryptoSlice';
 
 const HEX = i => `0x${String(i).padStart(2, '0').repeat(32)}`;
 
@@ -56,6 +63,7 @@ const run = async ({asset, wallets}) => {
     undefined,
   );
   return {
+    dispatched,
     update: dispatched.find(a => a.type === 'test/update')?.payload,
     estimate: dispatched.find(a => a.type === 'test/estimate')?.payload,
   };
@@ -90,13 +98,38 @@ describe('initiateSellCryptoTransfer', () => {
     expect(estimate.selectedCoin).toBe(renamed);
   });
 
-  it('falls back to the stored stub when no live coin matches', async () => {
-    const {update, estimate} = await run({asset: strippedAsset, wallets: []});
+  it('falls back to the stored coin stub when the live wallet has no match', async () => {
+    const wallet = {
+      clientId: 'w1',
+      phrase: 'm',
+      coins: [{...liveCoin, _id: 'x', contractAddress: '0xOther'}],
+    };
+    const {update, estimate} = await run({
+      asset: strippedAsset,
+      wallets: [wallet],
+    });
     expect(update.currentCoin).toBe(strippedAsset);
     expect(estimate.selectedCoin).toBe(strippedAsset);
-    expect(estimate.selectedWallet).toEqual({
-      clientId: 'w1',
-      walletName: 'Main',
+    expect(estimate.selectedWallet).toBe(wallet);
+  });
+
+  it('refuses to continue when the live wallet is gone', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const {dispatched, update, estimate} = await run({
+      asset: strippedAsset,
+      wallets: [],
     });
+    spy.mockRestore();
+    expect(update).toBeUndefined();
+    expect(estimate).toBeUndefined();
+    expect(dispatched).toEqual(
+      expect.arrayContaining([
+        {
+          type: 'sellCrypto/setSellCryptoError',
+          payload: SELL_WALLET_MISSING_MESSAGE,
+        },
+        {type: 'test/customError', payload: SELL_WALLET_MISSING_MESSAGE},
+      ]),
+    );
   });
 });
