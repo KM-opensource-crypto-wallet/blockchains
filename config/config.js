@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -87,7 +87,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x0d19f7a92BB0cd49958210E16c255e64f6AdF3FB',
+      sandbox: '0x48d60BCde662D470116e561CC35A4051539CE26A',
       production: '0xDA1333D76a1B9883022513c089a0ca84043cF079',
     },
     sponsored_gas_tokens: {
@@ -269,7 +269,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x72ABb5A0029930A364AA30c0027A51196f69Fdfb',
+      sandbox: '0x67f21C62C64BEBc860e4Fa66CcFdB96C8781DF22',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -336,7 +336,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
+      sandbox: '0x1D8abf5Bb5CD8cA6CF6086A56e5E4BAeED238aDc',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -402,7 +402,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
+      sandbox: '0x1D8abf5Bb5CD8cA6CF6086A56e5E4BAeED238aDc',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -607,6 +607,7 @@ export const CHAIN_CONFIG = {
       symbol: 'XDAI',
     },
     batch_contract: {
+      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -940,7 +941,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x45bfb4731430dB8EF5bcAB618164bf87753536EF',
+      sandbox: '0x781e11aC0e75d3803450560517D08e25Fd975c3A',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     sponsored_gas_tokens: {
@@ -1907,13 +1908,10 @@ export const config = {
   ETHEREUM_SCAN_BASE_URL: 'https://api.etherscan.io/v2',
   INK_BLOCK_EXPLORER_BASE_URL: forEnv(CHAIN_CONFIG.ink.scan_api_url),
 
-  DOK_WALLET_BASE_URL: 'http://localhost:8787/dashboard',
-  // DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
-  // DOK_WALLET_BASE_URL: 'http://localhost:3001/dev',
-  // DOK_WALLET_BASE_URL:
-  //   'https://journalistic-superchemically-chelsey.ngrok-free.dev/dashboard',
-  // ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
-  ATTEST_WORKER_BASE_URL: 'http://localhost:8787',
+  // DOK_WALLET_BASE_URL: 'http://localhost:8787/dashboard',
+  DOK_WALLET_BASE_URL: process.env.DOK_WALLET_BASE_URL,
+  ATTEST_WORKER_BASE_URL: process.env.ATTEST_WORKER_BASE_URL,
+  // ATTEST_WORKER_BASE_URL: 'http://localhost:8787',
   BITCOIN_SCAN_URL: scanBase('bitcoin'),
   BITCOIN_BASE_URL: forEnv(CHAIN_CONFIG.bitcoin.api_base_url),
   get BITCOIN_NETWORK_STRING() {

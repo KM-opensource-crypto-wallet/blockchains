@@ -56,52 +56,87 @@ const errorDecoder = {
 };
 
 const BATCH_EXECUTE_SELECTOR = '0x3f707e6b'; // execute(Call[])
-const SPONSORED_BATCH_EXECUTE_SELECTOR = '0xc8105142';
+// execute(Call[],SponsorFee,bytes) on BatchCallAndSponsor and on the OP-Stack build,
+// whose SponsorFee carries the extra l1TxSize field.
+const SPONSORED_BATCH_EXECUTE_SELECTORS = ['0x2ae64a2f', '0xd471bf2c'];
 
 const LEGACY_SPONSORED_BATCH_EXECUTE_SELECTORS = [
+  '0xc8105142',
   '0x01bf0e52',
   '0x8f0d0deb',
   '0x6171d1c9',
 ];
 const isSponsoredBatchInput = input =>
   typeof input === 'string' &&
-  (input.startsWith(SPONSORED_BATCH_EXECUTE_SELECTOR) ||
-    LEGACY_SPONSORED_BATCH_EXECUTE_SELECTORS.some(sel =>
-      input.startsWith(sel),
-    ));
+  [
+    ...SPONSORED_BATCH_EXECUTE_SELECTORS,
+    ...LEGACY_SPONSORED_BATCH_EXECUTE_SELECTORS,
+  ].some(sel => input.startsWith(sel));
 
-const BATCH_NONCE_SLOT =
-  '0x44746e9606aa6bc254bf5d64dd86d0cd8a64eaa8f5e91abf3f4b185836c9a100';
+// `nonce` is the contract's first and only storage variable.
+const BATCH_NONCE_SLOT = `0x${'0'.repeat(64)}`;
 
-// Placeholder 65-byte signature used only to size the tx for GasPriceOracle
-// getL1Fee. Arbitrary high-entropy bytes; `s` kept in the low half so ethers
-// accepts it as canonical.
-const L1_FEE_PLACEHOLDER_SIGNATURE_R =
-  '0x8a3d1f7e2b9c4056d7e1a2f3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7';
-const L1_FEE_PLACEHOLDER_SIGNATURE_S =
-  '0x1b6e9d2c5f8a3b7e4d1c0f9a8b7e6d5c4b3a29181706f5e4d3c2b1a09f8e7d6c';
+// Signature-shaped bytes, random like a real one: a repeated-byte run compresses far
+// below what 65 signature bytes cost on L1.
+const l1FeePlaceholderSignature = () =>
+  ethers.Wallet.createRandom().signingKey.sign(ethers.randomBytes(32));
 const PLACEHOLDER_FEE_AMOUNT = '1000';
 const PLACEHOLDER_TOKEN_PER_ETH = '1';
+const PLACEHOLDER_MAX_TIP = '1';
+const PLACEHOLDER_PRE_GAS = '150000';
+const PLACEHOLDER_L1_TX_SIZE = '2000';
+const PLACEHOLDER_FEE_BPS = 300;
 
-const SPONSORED_EXECUTE_TYPES = {
-  Call: [
-    {name: 'to', type: 'address'},
-    {name: 'value', type: 'uint256'},
-    {name: 'data', type: 'bytes'},
-  ],
-  SponsoredBatch: [
-    {name: 'calls', type: 'Call[]'},
+const SPONSOR_CALL_TYPE = [
+  {name: 'to', type: 'address'},
+  {name: 'value', type: 'uint256'},
+  {name: 'data', type: 'bytes'},
+];
+
+const SPONSOR_FEE_HEAD = [
+  {name: 'token', type: 'address'},
+  {name: 'recipient', type: 'address'},
+  {name: 'tokenPerEth', type: 'uint256'},
+  {name: 'maxFee', type: 'uint256'},
+  {name: 'maxTip', type: 'uint256'},
+  {name: 'preGas', type: 'uint256'},
+];
+const SPONSOR_FEE_L1 = {name: 'l1TxSize', type: 'uint256'};
+const SPONSOR_FEE_TAIL = [
+  {name: 'feeBps', type: 'uint16'},
+  {name: 'deadline', type: 'uint256'},
+];
+
+const sponsorFeeFields = opStack =>
+  opStack
+    ? [...SPONSOR_FEE_HEAD, SPONSOR_FEE_L1, ...SPONSOR_FEE_TAIL]
+    : [...SPONSOR_FEE_HEAD, ...SPONSOR_FEE_TAIL];
+
+const sponsoredExecuteTypes = opStack => ({
+  Call: SPONSOR_CALL_TYPE,
+  SponsorFee: sponsorFeeFields(opStack),
+  Execute: [
     {name: 'nonce', type: 'uint256'},
-    {name: 'sponsor', type: 'address'},
-    {name: 'feeToken', type: 'address'},
-    {name: 'tokenPerEth', type: 'uint256'},
-    {name: 'maxFee', type: 'uint256'},
-    {name: 'deadline', type: 'uint256'},
+    {name: 'calls', type: 'Call[]'},
+    {name: 'fee', type: 'SponsorFee'},
   ],
-};
+});
 
-const SPONSORED_EXECUTE_FRAGMENT =
-  'executeSponsored(((address,uint256,bytes)[],uint256,address,address,uint256,uint256,uint256),bytes,address,uint256,uint256)';
+const sponsoredExecuteInterface = opStack =>
+  new ethers.Interface([
+    `function execute((address to,uint256 value,bytes data)[] calls, (${sponsorFeeFields(
+      opStack,
+    )
+      .map(f => `${f.type} ${f.name}`)
+      .join(',')}) fee, bytes signature) payable`,
+  ]);
+
+// The contract puts address(this).codehash in the EIP-712 salt; under EIP-7702 that is
+// the hash of the delegation designator.
+const delegationSalt = batchContract =>
+  ethers.keccak256(
+    ethers.concat(['0xef0100', ethers.getAddress(batchContract)]),
+  );
 
 const delegatedToBatchContract = async (chain_name, customRpcUrl, address) => {
   const {isDelegated, contractAddress} = await EVMChain(
@@ -426,23 +461,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
   // verifyingContract is the user's own account: under EIP-7702 the delegate runs
   // inside it, so address(this) is the EOA. Types come from the quote.
+  const isOpStackSponsor = () => !!GAS_ORACLE_CONTRACT_ADDRESS[chain_name];
+
+  // verifyingContract is the user's own account: under EIP-7702 the delegate runs
+  // inside it, so address(this) is the EOA. Types and salt come from the quote.
   const signBatchForSponsor = async (wallet, calls, params) => {
-    const {
-      batchNonce,
-      deadline,
-      sponsor,
-      feeToken,
-      tokenPerEth,
-      maxFee,
-      eip712,
-    } = params ?? {};
+    const {batchNonce, fee, eip712} = params ?? {};
     if (batchNonce == null || isNaN(Number(batchNonce))) {
       throw new Error('Cannot sign sponsored batch without a batch nonce');
     }
-    if (deadline == null || isNaN(Number(deadline))) {
-      throw new Error('Cannot sign sponsored batch without a deadline');
+    if (!fee?.deadline) {
+      throw new Error('Cannot sign sponsored batch without fee terms');
     }
-    if (!eip712?.types || !eip712?.name || !eip712?.version) {
+    if (!eip712?.types || !eip712?.name || !eip712?.version || !eip712?.salt) {
       throw new Error('Sponsored gas quote is missing its EIP-712 definition');
     }
     const domain = {
@@ -450,36 +481,47 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       version: eip712.version,
       chainId: Number(eip712.chainId ?? chainId),
       verifyingContract: ethers.getAddress(wallet.address),
+      salt: eip712.salt,
     };
     const message = {
+      nonce: BigInt(batchNonce),
       calls: calls.map(([to, value, data]) => ({
         to: ethers.getAddress(to),
         value: BigInt(value || 0),
         data: data || '0x',
       })),
-      nonce: BigInt(batchNonce),
-      sponsor: ethers.getAddress(sponsor),
-      feeToken: ethers.getAddress(feeToken),
-      tokenPerEth: BigInt(tokenPerEth),
-      maxFee: BigInt(maxFee),
-      deadline: BigInt(deadline),
+      fee,
     };
     return await wallet.signTypedData(domain, eip712.types, message);
   };
 
-  const provisionalSponsorTerms = feeTokenAddress => ({
-    deadline: Math.floor(Date.now() / 1000) + 300,
-    sponsor: SPONSOR_TREASURY_ADDRESS,
-    feeToken: feeTokenAddress,
-    tokenPerEth: PLACEHOLDER_TOKEN_PER_ETH,
-    maxFee: PLACEHOLDER_FEE_AMOUNT,
-    eip712: {
-      name: 'DokWallet BatchCallAndSponsor',
-      version: '1',
-      chainId,
-      types: SPONSORED_EXECUTE_TYPES,
-    },
-  });
+  // Stand-in terms for the gas estimate only. The worker prices the real ones; the
+  // placeholder cap saturates so an account that cannot pay fails here, not on chain.
+  const provisionalSponsorTerms = feeTokenAddress => {
+    const opStack = isOpStackSponsor();
+    return {
+      sponsor: SPONSOR_TREASURY_ADDRESS,
+      opStack,
+      fee: {
+        token: feeTokenAddress,
+        recipient: SPONSOR_TREASURY_ADDRESS,
+        tokenPerEth: PLACEHOLDER_TOKEN_PER_ETH,
+        maxFee: PLACEHOLDER_FEE_AMOUNT,
+        maxTip: PLACEHOLDER_MAX_TIP,
+        preGas: PLACEHOLDER_PRE_GAS,
+        ...(opStack ? {l1TxSize: PLACEHOLDER_L1_TX_SIZE} : {}),
+        feeBps: PLACEHOLDER_FEE_BPS,
+        deadline: Math.floor(Date.now() / 1000) + 300,
+      },
+      eip712: {
+        name: 'BatchCallAndSponsor',
+        version: '3',
+        chainId,
+        salt: delegationSalt(BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name]),
+        types: sponsoredExecuteTypes(opStack),
+      },
+    };
+  };
 
   async function revokeAuthorization(walletSigner, evmProvider) {
     try {
@@ -1131,11 +1173,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     // estimate on a serialization that carries a signature-sized placeholder.
     // Non-repeating bytes: Fjord's FastLZ size estimate would compress a run
     // of 0x00/0xff far below what a real 65-byte signature costs.
-    tx.signature = {
-      r: L1_FEE_PLACEHOLDER_SIGNATURE_R,
-      s: L1_FEE_PLACEHOLDER_SIGNATURE_S,
-      yParity: 1,
-    };
+    tx.signature = l1FeePlaceholderSignature();
     const str = tx.serialized;
     const contractAddress = GAS_ORACLE_CONTRACT_ADDRESS[chain_name];
     const contract = new ethers.Contract(
@@ -2379,33 +2417,21 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           ...provisionalTerms,
           batchNonce,
         });
-        let sponsoredCalldata = null;
+        const probeCalldata = sponsoredExecuteInterface(
+          provisionalTerms.opStack,
+        ).encodeFunctionData('execute', [
+          calls,
+          provisionalTerms.fee,
+          provisionalSignature,
+        ]);
         const estimatedGas = await retryFunc(async evmProvider => {
           const walletSigner = wallet.connect(evmProvider);
-          const data = (batchIface ??= new ethers.Interface(
-            contractABI,
-          )).encodeFunctionData(SPONSORED_EXECUTE_FRAGMENT, [
-            [
-              calls,
-              batchNonce,
-              provisionalTerms.sponsor,
-              provisionalTerms.feeToken,
-              provisionalTerms.tokenPerEth,
-              provisionalTerms.maxFee,
-              provisionalTerms.deadline,
-            ],
-            provisionalSignature,
-            provisionalTerms.sponsor,
-            0n,
-            0n,
-          ]);
           const {gasPrice: maxFeePerGas, maxPriorityFeePerGas} =
             await getEtherGasPrice('recommended', evmProvider);
-          sponsoredCalldata = data;
           return await evmProvider.estimateGas({
             from: provisionalTerms.sponsor,
             to: walletSigner.address,
-            data,
+            data: probeCalldata,
             value: 0n,
             maxFeePerGas,
             ...(maxPriorityFeePerGas ? {maxPriorityFeePerGas} : {}),
@@ -2432,20 +2458,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           is_sandbox: IS_SANDBOX,
           signer: wallet.address,
           calls: calls.map(([to, value, data]) => ({to, value, data})),
-          calldata: sponsoredCalldata,
           estimatedGas: estimatedGas.toString(),
           authorization: serializeAuthorization(quoteAuthorization),
           feeTokenAddress,
         });
         if (
           !quote?.quoteToken ||
-          !quote?.maxFee ||
+          !quote?.fee?.maxFee ||
           !Number.isInteger(quote?.feeToken?.decimals)
         ) {
           throw new Error('Sponsored gas is unavailable right now');
         }
         return {
-          fee: parseBalance(quote.maxFee, quote.feeToken.decimals),
+          fee: parseBalance(quote.fee.maxFee, quote.feeToken.decimals),
           estimatedFee: quote.minFee
             ? parseBalance(quote.minFee, quote.feeToken.decimals)
             : undefined,
@@ -2487,11 +2512,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         );
         const signature = await signBatchForSponsor(wallet, calls, {
           batchNonce: sponsoredQuote.batchNonce,
-          deadline: sponsoredQuote.deadline,
-          sponsor: sponsoredQuote.sponsor,
-          feeToken: sponsoredQuote.feeToken?.address,
-          tokenPerEth: sponsoredQuote.tokenPerEth,
-          maxFee: sponsoredQuote.maxFee,
+          fee: sponsoredQuote.fee,
           eip712: sponsoredQuote.eip712,
         });
         const authorization = isDelegated
