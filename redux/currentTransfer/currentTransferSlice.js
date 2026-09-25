@@ -118,9 +118,9 @@ export const calculateEstimateFee = createAsyncThunk(
 
       const isSwap = !!(payload?.isExchange && transfer?.swapData);
 
-      const isSponsoredGas = !!(
-        transfer?.payGasWithToken && transfer?.gasTokenContractAddress
-      );
+      const isSponsoredGas =
+        !isSwap &&
+        !!(transfer?.payGasWithToken && transfer?.gasTokenContractAddress);
       const multiplier = {
         bitcoin: bitcoinFeeMultiplier,
         bitcoin_legacy: bitcoinFeeMultiplier,
@@ -277,6 +277,15 @@ export const calculateEstimateFee = createAsyncThunk(
         const balanceBN = new BigNumber(
           transfer?.currentCoin?.totalAmount || 0,
         );
+        if (isFeeTokenBeingSent && feeAmountBN.gte(balanceBN)) {
+          dispatch(
+            setCurrentTransferCustomError(
+              `Not enough ${transfer?.currentCoin?.symbol} to cover the network fee`,
+            ),
+          );
+          dispatch(setCurrentTransferSuccess(false));
+          return null;
+        }
         if (
           isFeeTokenBeingSent &&
           transferAmountBN.plus(feeAmountBN).gt(balanceBN)

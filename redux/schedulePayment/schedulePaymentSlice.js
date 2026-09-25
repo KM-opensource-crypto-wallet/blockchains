@@ -74,7 +74,10 @@ export const submitScheduledPayment = createAsyncThunk(
     const occurrences = computeOccurrences({scheduledAt, recurrence});
     const id = isEditMode ? editingPayment.id : v4();
     const payGasWithToken =
-      !!values.payGasWithToken && !!currentCoin?.contractAddress;
+      !!values.payGasWithToken &&
+      !!(isEditMode
+        ? editingPayment.asset?.contractAddress
+        : currentCoin?.contractAddress);
     const asset = isEditMode
       ? editingPayment.asset
       : {

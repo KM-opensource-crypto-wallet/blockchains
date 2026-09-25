@@ -76,10 +76,10 @@ const isSponsoredBatchInput = input =>
 // `nonce` is the contract's first and only storage variable.
 const BATCH_NONCE_SLOT = `0x${'0'.repeat(64)}`;
 
-// Signature-shaped bytes, random like a real one: a repeated-byte run compresses far
-// below what 65 signature bytes cost on L1.
+// Signature-shaped bytes used only to size the tx for GasPriceOracle getL1Fee. Signed
+// from a throwaway key so `s` is always canonical, which raw random bytes are not.
 const l1FeePlaceholderSignature = () =>
-  ethers.Wallet.createRandom().signingKey.sign(ethers.randomBytes(32));
+  new ethers.SigningKey(ethers.randomBytes(32)).sign(ethers.randomBytes(32));
 const PLACEHOLDER_FEE_AMOUNT = '1000';
 const PLACEHOLDER_TOKEN_PER_ETH = '1';
 const PLACEHOLDER_MAX_TIP = '1';
@@ -337,8 +337,13 @@ function batchCallsFrom(decoded) {
   if (!args) {
     return null;
   }
+  // Legacy 7-arg execute(feeToken, feeRecipient, feeAmount, calls, ...) carries calls at index 3.
   const candidate =
-    decoded?.fragment?.name === 'executeSponsored' ? args[0]?.[0] : args[0];
+    decoded?.fragment?.name === 'executeSponsored'
+      ? args[0]?.[0]
+      : args.length === 7
+      ? args[3]
+      : args[0];
   return Array.isArray(candidate) ? candidate : null;
 }
 
@@ -354,6 +359,19 @@ function decodeBatchTotalAmount(input) {
     // ignore decode failures
   }
   return '0';
+}
+
+// The selector alone proves nothing: anyone can send calldata shaped like this to a
+// delegated EOA, so only calldata that actually decodes counts as a sponsored batch.
+function isSponsoredBatchTransaction(input) {
+  if (!isSponsoredBatchInput(input)) {
+    return false;
+  }
+  try {
+    return !!batchContractInterface.parseTransaction({data: input});
+  } catch (e) {
+    return false;
+  }
 }
 
 const TRANSFER_SELECTOR = '0xa9059cbb'; // transfer(address,uint256)
@@ -1756,15 +1774,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             const toAddress = item?.to?.toLowerCase();
             const fromAddress = item?.from?.toLowerCase();
             const normalizedAddress = address?.toLowerCase();
+            // Sponsored wallet sends it to the delegated EOA, so the sender on
+            // chain is the relayer, not the account the funds left.
+            const isSponsoredBatch =
+              toAddress === normalizedAddress &&
+              isSponsoredBatchTransaction(item?.input);
             const isBatch =
               (batchContractAddress &&
                 toAddress === batchContractAddress.toLowerCase()) ||
               (toAddress === normalizedAddress &&
                 fromAddress === normalizedAddress &&
                 item?.input?.startsWith(BATCH_EXECUTE_SELECTOR)) ||
-              // Sponsored wallet sends it to the delegated EOA.
-              (toAddress === normalizedAddress &&
-                isSponsoredBatchInput(item?.input));
+              isSponsoredBatch;
             const amount = isBatch
               ? decodeBatchTotalAmount(item?.input)
               : bnValue.toString();
@@ -1774,7 +1795,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               url: getExplorerTxUrl(chain_name, txHash),
               status: Number(item?.txreceipt_status) ? 'SUCCESS' : 'FAIL',
               date: item?.timeStamp * 1000, //new Date(transaction.raw_data.timestamp),
-              from: item?.from,
+              from: isSponsoredBatch ? item?.to : item?.from,
               to: item?.to,
               totalCourse: '0$',
               transactionType: getEVMTransactionType(item, isBatch, chain_name),
@@ -1835,7 +1856,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
         const toAddr = tx.to?.toLowerCase();
         const fromAddr = tx.from?.toLowerCase();
-        const isSponsoredBatchTx = isSponsoredBatchInput(tx.data);
+        const isSponsoredBatchTx = isSponsoredBatchTransaction(tx.data);
         const isBatchTx =
           (batchContractAddress &&
             toAddr === batchContractAddress.toLowerCase()) ||
@@ -2452,7 +2473,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         }
         const quoteAuthorization = isDelegated
           ? null
-          : await createSponsorAuthorization(wallet, Number(currentNonce) + 1);
+          : await createSponsorAuthorization(wallet, currentNonce);
         const quote = await fetchSponsoredGasQuote({
           chain_name,
           is_sandbox: IS_SANDBOX,
