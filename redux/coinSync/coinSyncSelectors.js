@@ -1,10 +1,14 @@
 import {createSelector} from '@reduxjs/toolkit';
 
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_ARRAY = [];
+
 // Basic selectors
 export const selectCoinSyncStatus = state => state.coinSync?.status || 'idle';
 
 export const selectCoinsWithBalance = state =>
-  state.coinSync?.coinsWithBalance || [];
+  state.coinSync?.coinsWithBalance || EMPTY_ARRAY;
 
 export const selectTotalCoins = state => state.coinSync?.totalCoins || 0;
 

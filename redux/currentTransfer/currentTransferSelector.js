@@ -1,3 +1,7 @@
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_ARRAY = [];
+
 export const getTransferData = state => state.currentTransfer.transferData;
 export const getTransferDataLoading = state =>
   state.currentTransfer.transferData?.isLoading;
@@ -10,7 +14,7 @@ export const getTransferDataEstimateFee = state =>
   state.currentTransfer?.transferData?.transactionFee;
 
 export const getTransferDataFeesOptions = state =>
-  state.currentTransfer?.transferData?.feesOptions || [];
+  state.currentTransfer?.transferData?.feesOptions || EMPTY_ARRAY;
 export const getTransferDataFeeSuccess = state =>
   state.currentTransfer?.transferData?.success;
 export const getTransferDataCustomError = state =>

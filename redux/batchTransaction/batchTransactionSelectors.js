@@ -1,3 +1,7 @@
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_OBJECT = {};
+
 export const getBatchTransactions = state => {
   return state.batchTransaction.transactions;
 };
@@ -37,7 +41,7 @@ export const getWalletIdFromTransactions = (state, transactions) => {
 };
 
 export const getBatchTransactionsBalances = state => {
-  return state.batchTransaction.balances || {};
+  return state.batchTransaction.balances || EMPTY_OBJECT;
 };
 
 export const getBatchTransactionIsValid = state => {
