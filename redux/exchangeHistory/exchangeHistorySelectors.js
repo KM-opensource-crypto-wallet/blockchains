@@ -1,5 +1,9 @@
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_ARRAY = [];
+
 export const selectExchangeTransactions = state =>
-  state.exchangeHistory?.transactions || [];
+  state.exchangeHistory?.transactions || EMPTY_ARRAY;
 
 export const selectExchangeHistoryMeta = state => state.exchangeHistory?.meta;
 

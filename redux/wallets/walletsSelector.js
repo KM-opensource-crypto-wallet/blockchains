@@ -8,6 +8,11 @@ import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTrans
 import {createSelector} from '@reduxjs/toolkit';
 import dayjs from 'dayjs';
 
+// Stable fallbacks so selectors don't hand useSelector a fresh []/{} every
+// call. Treat both as read-only - they are shared by every selector below.
+const EMPTY_ARRAY = [];
+const EMPTY_OBJECT = {};
+
 export const selectAllWallets = state => {
   return state.wallets?.allWallets;
 };
@@ -23,10 +28,10 @@ export const selectVisibleWallets = createSelector(
     (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
 );
 
-export const selectAllWalletName = state => {
-  const allWallets = state.wallets?.allWallets;
-  return allWallets.map(item => item?.walletName);
-};
+export const selectAllWalletName = createSelector(
+  [selectAllWallets],
+  allWallets => allWallets.map(item => item?.walletName),
+);
 
 export const selectCurrentWalletClientId = state =>
   state.wallets?.currentWalletClientId;
@@ -49,7 +54,7 @@ export const getSelectedNftData = state => {
   const selectedWallet = selectCurrentWallet(state);
   const selectedNftChain = selectedWallet?.selectedNftChain || 'Ethereum';
   const nft = selectedWallet?.nft || {};
-  return nft[`${selectedNftChain}_data`] || [];
+  return nft[`${selectedNftChain}_data`] || EMPTY_ARRAY;
 };
 
 export const getSelectedNftLoading = state => {
@@ -68,7 +73,7 @@ export const getSelectedNftAvailable = state => {
 
 export const getSelectedNft = state => {
   const selectedWallet = selectCurrentWallet(state);
-  return selectedWallet?.selectedNft || {};
+  return selectedWallet?.selectedNft || EMPTY_OBJECT;
 };
 
 export const isImportWalletWithPrivateKey = state => {
@@ -88,28 +93,31 @@ export const selectCurrentWalletSortOption = state => {
 
 export const selectCoinsForCurrentWallet = state => {
   const currentWallet = selectCurrentWallet(state);
-  return currentWallet?.coins || [];
+  return currentWallet?.coins || EMPTY_ARRAY;
 };
 
 // Select coins in the wallet
-export const selectUserCoins = state => {
-  const coins = selectCoinsForCurrentWallet(state);
-  return coins.filter(coin => coin?.isInWallet);
-};
+export const selectUserCoins = createSelector(
+  [selectCoinsForCurrentWallet],
+  coins => coins.filter(coin => coin?.isInWallet),
+);
 
-export const selectAllCoinSymbol = state => {
-  const coins = selectCoinsForCurrentWallet(state);
-  return coins.map(item => generateUniqueKeyForChain(item));
-};
+export const selectAllCoinSymbol = createSelector(
+  [selectCoinsForCurrentWallet],
+  coins => coins.map(item => generateUniqueKeyForChain(item)),
+);
 
-export const selectAllCoinWithIsInWalletSymbol = state => {
-  const coins = selectCoinsForCurrentWallet(state);
-  return coins.reduce(
-    (obj, item) =>
-      Object.assign(obj, {[generateUniqueKeyForChain(item)]: item?.isInWallet}),
-    {},
-  );
-};
+export const selectAllCoinWithIsInWalletSymbol = createSelector(
+  [selectCoinsForCurrentWallet],
+  coins =>
+    coins.reduce(
+      (obj, item) =>
+        Object.assign(obj, {
+          [generateUniqueKeyForChain(item)]: item?.isInWallet,
+        }),
+      {},
+    ),
+);
 
 export const checkIsNativeCoinAvailable = state => {
   const currentCoin = selectCurrentCoin(state);
@@ -157,25 +165,27 @@ export const getBalanceForNativeCoin = state => {
   return amount || 0;
 };
 // Select supported coins not in the wallet
-export const selectOtherCoins = state => {
-  const coins = selectCoinsForCurrentWallet(state);
-  return coins.filter(coin => !coin?.isInWallet);
-};
+export const selectOtherCoins = createSelector(
+  [selectCoinsForCurrentWallet],
+  coins => coins.filter(coin => !coin?.isInWallet),
+);
 
 export const selectAllCoins = state => {
   return selectCoinsForCurrentWallet(state);
 };
 
-export const selectAllCoinsAcrossWallet = state => {
-  const allWallets = state.wallets?.allWallets;
-  let allCoins = [];
-  allWallets.forEach(item => {
-    if (Array.isArray(item.coins)) {
-      allCoins = [...allCoins, ...item.coins];
-    }
-  });
-  return allCoins;
-};
+export const selectAllCoinsAcrossWallet = createSelector(
+  [selectAllWallets],
+  allWallets => {
+    let allCoins = [];
+    allWallets.forEach(item => {
+      if (Array.isArray(item.coins)) {
+        allCoins = [...allCoins, ...item.coins];
+      }
+    });
+    return allCoins;
+  },
+);
 
 export const selectAllCoinsWalletByMnemonic = state => {
   const allWallets = Array.isArray(state.wallets?.allWallets)
@@ -186,7 +196,7 @@ export const selectAllCoinsWalletByMnemonic = state => {
       return item.coins;
     }
   }
-  return [];
+  return EMPTY_ARRAY;
 };
 
 export const getCoinsOptions = createSelector(
@@ -287,30 +297,34 @@ export const selectCurrentCoin = state => {
   return selectedCoin;
 };
 
-export const selectAllWalletConnectSessions = state => {
-  const allWallets = state.wallets.allWallets;
-  let sessionObj = {};
-  allWallets.forEach(item => {
-    const session = item.session || {};
-    sessionObj = {...sessionObj, ...session};
-  });
-  return sessionObj;
-};
+export const selectAllWalletConnectSessions = createSelector(
+  [state => state.wallets.allWallets],
+  allWallets => {
+    let sessionObj = {};
+    allWallets.forEach(item => {
+      const session = item.session || {};
+      sessionObj = {...sessionObj, ...session};
+    });
+    return sessionObj;
+  },
+);
 
 export const selectWalletConnectSessions = state => {
   const currentWallet = selectCurrentWallet(state);
-  return currentWallet?.session || {};
+  return currentWallet?.session || EMPTY_OBJECT;
 };
 
-export const selectWalletConnectData = state => {
-  const allWallets = state.wallets.allWallets;
-  let walletObj = {};
-  allWallets.forEach(item => {
-    const walletData = item.walletData || {};
-    walletObj = {...walletObj, ...walletData};
-  });
-  return walletObj;
-};
+export const selectWalletConnectData = createSelector(
+  [state => state.wallets.allWallets],
+  allWallets => {
+    let walletObj = {};
+    allWallets.forEach(item => {
+      const walletData = item.walletData || {};
+      walletObj = {...walletObj, ...walletData};
+    });
+    return walletObj;
+  },
+);
 
 export const selectIsBackedUp = state => {
   const currentWallet = selectCurrentWallet(state);
@@ -335,12 +349,12 @@ export const getEthereumCoin = state => {
   return (
     allCoins?.find(
       item => item?.chain_name === 'ethereum' && item?.type === 'coin',
-    ) || {}
+    ) || EMPTY_OBJECT
   );
 };
 
 export const getPendingTransactions = state => {
-  return state?.wallets?.pendingTransactions || {};
+  return state?.wallets?.pendingTransactions || EMPTY_OBJECT;
 };
 
 export const getPendingTransactionsWithKey = (pendingTransactions, key) => {
