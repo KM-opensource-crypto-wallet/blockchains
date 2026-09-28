@@ -14,6 +14,7 @@ import {
   findSecretPaths,
   stripAllWalletsSecrets,
   stripCoinSecrets,
+  stripSecretFieldsDeep,
   stripWalletSecrets,
 } from '../wallets/walletSecrets';
 
@@ -31,6 +32,7 @@ const parseJson = (raw, label) => {
   } catch (error) {
     const err = new Error(`Legacy root: "${label}" is not valid JSON`);
     err.code = 'legacy_parse';
+    err.slice = label;
     err.cause = error;
     throw err;
   }
@@ -130,38 +132,70 @@ export const sanitizeWallets = wallets => {
   };
 };
 
+// The sell screen stores copies of the live wallet AND the live coin it sells
+// from; both carry keys. initiateSellCryptoTransfer re-resolves the live
+// objects from the wallets slice before signing and refuses to continue when
+// the wallet is gone (a stub wallet is never signed with), so the persisted
+// stubs need no keys.
 export const sanitizeSellCrypto = sellCrypto => {
-  if (!isPlainObject(sellCrypto?.requestDetails?.selectedFromWallet)) {
+  const details = sellCrypto?.requestDetails;
+  if (!isPlainObject(details)) {
+    return sellCrypto;
+  }
+  const hasWallet = isPlainObject(details.selectedFromWallet);
+  const hasAsset = isPlainObject(details.selectedFromAsset);
+  if (!hasWallet && !hasAsset) {
     return sellCrypto;
   }
   return {
     ...sellCrypto,
     requestDetails: {
-      ...sellCrypto.requestDetails,
-      selectedFromWallet: stripWalletSecrets(
-        sellCrypto.requestDetails.selectedFromWallet,
-      ),
+      ...details,
+      ...(hasWallet
+        ? {selectedFromWallet: stripWalletSecrets(details.selectedFromWallet)}
+        : {}),
+      ...(hasAsset
+        ? {selectedFromAsset: stripCoinSecrets(details.selectedFromAsset)}
+        : {}),
     },
   };
 };
 
+// `coinInfo` copies the selected coin's privateKey on purpose (in-memory
+// signing); every persisted copy of a transaction list drops it.
+const sanitizeBatchTransactionList = list =>
+  Array.isArray(list)
+    ? list.map(tx =>
+        isPlainObject(tx?.coinInfo)
+          ? {...tx, coinInfo: stripCoinSecrets(tx.coinInfo)}
+          : tx,
+      )
+    : list;
+
 export const sanitizeBatchTransaction = batch => {
-  if (!isPlainObject(batch?.transactions)) {
+  if (!isPlainObject(batch)) {
     return batch;
   }
-  const transactions = Object.fromEntries(
-    Object.entries(batch.transactions).map(([walletId, list]) => [
-      walletId,
-      Array.isArray(list)
-        ? list.map(tx =>
-            isPlainObject(tx?.coinInfo)
-              ? {...tx, coinInfo: stripCoinSecrets(tx.coinInfo)}
-              : tx,
-          )
-        : list,
-    ]),
-  );
-  return {...batch, transactions};
+  const out = {...batch};
+  if (isPlainObject(batch.transactions)) {
+    out.transactions = Object.fromEntries(
+      Object.entries(batch.transactions).map(([walletId, list]) => [
+        walletId,
+        sanitizeBatchTransactionList(list),
+      ]),
+    );
+  }
+  // initializeFilters.fulfilled stores clones of the in-memory transactions
+  // (derived UI state, recomputed every time the sheet opens).
+  if (Array.isArray(batch.filteredData?.filteredTransactions)) {
+    out.filteredData = {
+      ...batch.filteredData,
+      filteredTransactions: sanitizeBatchTransactionList(
+        batch.filteredData.filteredTransactions,
+      ),
+    };
+  }
+  return out;
 };
 
 export const sanitizeSchedulePayment = schedule =>
@@ -206,11 +240,33 @@ export const splitLegacyRoot = slices => {
   );
   const vaultPayload = extractVaultPayload(legacyWallets?.allWallets || []);
   const sanitized = {};
+  // Secrets found in a non-wallet slice after its sanitizer ran (a shape no
+  // sanitizer knows). Key names and counts only, never values; the caller
+  // reports it. The slice itself is deep-stripped so nothing is written.
+  const residualSecrets = {};
   for (const [name, value] of Object.entries(slices)) {
     // The wallets slice is sanitized from the normalized copy so the stripped
     // slice carries exactly the clientIds the vault payload was keyed by.
     const source = name === 'wallets' ? legacyWallets : value;
-    sanitized[name] = SANITIZERS[name] ? SANITIZERS[name](source) : source;
+    let out = SANITIZERS[name] ? SANITIZERS[name](source) : source;
+    if (name !== 'wallets') {
+      // Key names only: value-shape heuristics misfire on public hashes.
+      const paths = findSecretPaths(out, {valueShapes: false});
+      if (paths.length) {
+        residualSecrets[name] = {
+          count: paths.length,
+          keys: [
+            ...new Set(
+              paths.map(path => normalizePathPattern(path).split('.').pop()),
+            ),
+          ],
+          // Same value-free shape as verifyMigration's leakedPathPatterns.
+          pathPatterns: summarizePaths(paths),
+        };
+        out = stripSecretFieldsDeep(out);
+      }
+    }
+    sanitized[name] = out;
   }
   return {
     slices: sanitized,
@@ -220,6 +276,7 @@ export const splitLegacyRoot = slices => {
     password,
     hasAccount: Boolean(password),
     counts: countPayload(vaultPayload),
+    residualSecrets,
   };
 };
 
@@ -259,6 +316,250 @@ const walletSummary = allWallets =>
 
 const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+// ---------------------------------------------------------------------------
+// Failure diagnostics. Everything below describes STRUCTURE only: normalized
+// field names, array lengths, string lengths, counts and wallet indices. No
+// value, address, clientId, derive path or map key ever reaches the output,
+// so the report can go to Sentry as-is. Sentry's scrubObject drops any object
+// KEY that looks sensitive, so callers must put these strings under neutral
+// keys (never key an object by path). Sentry's server-side `@password:filter`
+// additionally replaces any string VALUE containing `privatekey`, `secret`,
+// `password`, ... with `[Filtered]` (`token_type`, `extendedPublicKey` and
+// `session` pass) (it wiped every leakedPathPatterns
+// entry of KIMLWALLET-APP-8), so field names are aliased before they reach
+// any output string.
+
+const FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+const MAX_FIELD_DIGITS = 3;
+const MAX_SHAPE_KEYS = 12;
+
+// A path segment is kept only when it looks like a code-defined field name.
+// Addresses, uuids, derive paths, `chain_symbol_address` keys and session ids
+// fail the shape (length, digits, punctuation) and become `<key>`.
+// Aliases for the secret field names, and the words Sentry's server-side
+// password rule matches anywhere in a string value.
+export const SECRET_FIELD_ALIASES = Object.freeze({
+  privateKey: 'PK',
+  extendedPrivateKey: 'XPRV',
+  phrase: 'MNEM',
+  secretCodeHash: 'SC_HASH',
+  secretCodeSalt: 'SC_SALT',
+  secretCodeIterations: 'SC_ITER',
+});
+export const SENTRY_SENSITIVE_VALUE_RE =
+  /pass|secret|auth|credential|private_?key|api_?key|session_?key|mysql_pwd/i;
+
+const normalizeSegment = name => {
+  if (name === '') {
+    return '';
+  }
+  if (!FIELD_NAME_RE.test(name)) {
+    return '<key>';
+  }
+  if ((name.match(/[0-9]/g) || []).length > MAX_FIELD_DIGITS) {
+    return '<key>';
+  }
+  if (SECRET_FIELD_ALIASES[name]) {
+    return SECRET_FIELD_ALIASES[name];
+  }
+  return SENTRY_SENSITIVE_VALUE_RE.test(name) ? '<sens>' : name;
+};
+
+/** `allWallets[3].coins[12].privateKey` → `allWallets[*].coins[*].privateKey`. */
+export const normalizePathPattern = path =>
+  String(path)
+    .split('.')
+    .map(segment => {
+      const match = segment.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+      if (!match) {
+        return '<key>';
+      }
+      const brackets = (match[2].match(/\[/g) || []).length;
+      return normalizeSegment(match[1]) + '[*]'.repeat(brackets);
+    })
+    .join('.');
+
+const summarizePaths = (paths, {maxEntries = 20} = {}) => {
+  const counts = new Map();
+  for (const path of paths) {
+    const pattern = normalizePathPattern(path);
+    counts.set(pattern, (counts.get(pattern) || 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1),
+  );
+  const out = sorted
+    .slice(0, maxEntries)
+    .map(([pattern, count]) => `${pattern} x${count}`);
+  if (sorted.length > maxEntries) {
+    out.push(`… +${sorted.length - maxEntries} more patterns`);
+  }
+  return out;
+};
+
+// Resolves a findSecretPaths path (`a.b[2].c`) against `root`. Best effort:
+// a map key containing `.` or `[` cannot be split back and resolves to
+// undefined.
+const resolvePathSegments = (root, segments) => {
+  let node = root;
+  for (const segment of segments) {
+    const match = segment.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+    if (!match || node === null || typeof node !== 'object') {
+      return undefined;
+    }
+    if (match[1] !== '') {
+      node = node[match[1]];
+    }
+    for (const index of match[2].match(/\d+/g) || []) {
+      if (!Array.isArray(node)) {
+        return undefined;
+      }
+      node = node[Number(index)];
+    }
+  }
+  return node;
+};
+
+/**
+ * For each leaked path pattern: the aliased shapes of the object holding the
+ * secret and of the object one level up (e.g. the coin copy around a
+ * `deriveAddresses[*]` entry). Keys and shapes only, never values.
+ */
+const leakContextFor = (root, paths, {maxEntries = 10} = {}) => {
+  const firstByPattern = new Map();
+  for (const path of paths) {
+    const pattern = normalizePathPattern(path);
+    if (!firstByPattern.has(pattern)) {
+      firstByPattern.set(pattern, path);
+    }
+  }
+  return [...firstByPattern.entries()]
+    .slice(0, maxEntries)
+    .map(([pattern, path]) => {
+      const segments = String(path).split('.');
+      const parent = resolvePathSegments(root, segments.slice(0, -1));
+      const grandparent = resolvePathSegments(root, segments.slice(0, -2));
+      return `${pattern} | parent ${shapeOf(parent)} | grandparent ${shapeOf(
+        grandparent,
+      )}`;
+    });
+};
+
+/** Value-free signature of any JSON value. */
+export const shapeOf = value => {
+  if (value === undefined) {
+    return 'missing';
+  }
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value === 'string') {
+    return `string(${value.length})`;
+  }
+  if (Array.isArray(value)) {
+    return `array(${value.length})`;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).map(normalizeSegment).sort();
+    const shown = keys.slice(0, MAX_SHAPE_KEYS);
+    if (keys.length > MAX_SHAPE_KEYS) {
+      shown.push('…');
+    }
+    return `object{${shown.join(',')}}`;
+  }
+  return typeof value;
+};
+
+/**
+ * First `maxEntries` differences between two JSON values, as
+ * "<pattern>: <labelA> <shape> vs <labelB> <shape>". Arrays of different
+ * length are reported once and not descended; equal-length arrays and objects
+ * (key union) are. Differing primitives report their shapes only.
+ */
+export const structuralDiff = (
+  a,
+  b,
+  {labelA = 'legacy', labelB = 'migrated', maxEntries = 10} = {},
+) => {
+  const out = [];
+  let overflow = 0;
+  const record = (path, x, y) => {
+    if (out.length < maxEntries) {
+      out.push(
+        `${normalizePathPattern(path)}: ${labelA} ${shapeOf(
+          x,
+        )} vs ${labelB} ${shapeOf(y)}`,
+      );
+    } else {
+      overflow += 1;
+    }
+  };
+  const walk = (x, y, path) => {
+    if (x === y) {
+      return;
+    }
+    if (isPlainObject(x) && isPlainObject(y)) {
+      const keys = [...new Set([...Object.keys(x), ...Object.keys(y)])];
+      for (const key of keys) {
+        walk(x[key], y[key], path ? `${path}.${key}` : key);
+      }
+      return;
+    }
+    if (Array.isArray(x) && Array.isArray(y)) {
+      if (x.length !== y.length) {
+        record(path, x, y);
+        return;
+      }
+      x.forEach((item, index) => walk(item, y[index], `${path}[${index}]`));
+      return;
+    }
+    record(path, x, y);
+  };
+  walk(a, b, '');
+  if (overflow) {
+    out.push(`… +${overflow} more differences`);
+  }
+  return out;
+};
+
+// Union of normalized wallet field names plus `coins[*].<field>` names.
+const walletFieldInventory = allWallets => {
+  const names = new Set();
+  for (const wallet of Array.isArray(allWallets) ? allWallets : []) {
+    if (!isPlainObject(wallet)) {
+      continue;
+    }
+    for (const key of Object.keys(wallet)) {
+      names.add(normalizeSegment(key));
+    }
+    for (const coin of Array.isArray(wallet.coins) ? wallet.coins : []) {
+      if (isPlainObject(coin)) {
+        for (const key of Object.keys(coin)) {
+          names.add(`coins[*].${normalizeSegment(key)}`);
+        }
+      }
+    }
+  }
+  return [...names].sort();
+};
+
+const perWalletCounts = allWallets =>
+  (Array.isArray(allWallets) ? allWallets : []).map(wallet =>
+    Array.isArray(wallet?.coins) ? wallet.coins.length : 0,
+  );
+
+const perWalletDeriveCounts = allWallets =>
+  (Array.isArray(allWallets) ? allWallets : []).map(wallet =>
+    (Array.isArray(wallet?.coins) ? wallet.coins : []).reduce(
+      (sum, coin) =>
+        sum +
+        (Array.isArray(coin?.deriveAddresses)
+          ? coin.deriveAddresses.length
+          : 0),
+      0,
+    ),
+  );
+
 /**
  * Compare what was written with what the legacy blob held. Returns
  * {ok, problems[]}; never throws so the caller can log every problem at once.
@@ -269,20 +570,28 @@ export const verifyMigration = ({
   decryptedVault,
 }) => {
   const problems = [];
+  // Structure-only diagnostics per problem (see the helpers above). Empty
+  // when everything passes.
+  const details = {};
+  const legacyList = Array.isArray(legacyWallets?.allWallets)
+    ? legacyWallets.allWallets
+    : [];
+  const migratedList = Array.isArray(migratedWallets?.allWallets)
+    ? migratedWallets.allWallets
+    : [];
   // A wallet without a clientId cannot be matched to its vault entry, so it
   // would silently lose its secrets. splitLegacyRoot assigns ids up front;
   // this catches a caller that passed the raw slice or a write that lost them.
-  const withoutId = list =>
-    (Array.isArray(list) ? list : []).filter(w => !hasClientId(w)).length;
-  const legacyMissing = withoutId(legacyWallets?.allWallets);
-  const migratedMissing = withoutId(migratedWallets?.allWallets);
+  const withoutId = list => list.filter(w => !hasClientId(w)).length;
+  const legacyMissing = withoutId(legacyList);
+  const migratedMissing = withoutId(migratedList);
   if (legacyMissing || migratedMissing) {
     problems.push(
       `wallets without clientId: legacy=${legacyMissing} migrated=${migratedMissing}`,
     );
   }
-  const legacy = walletSummary(legacyWallets?.allWallets);
-  const migrated = walletSummary(migratedWallets?.allWallets);
+  const legacy = walletSummary(legacyList);
+  const migrated = walletSummary(migratedList);
   const legacyIds = Object.keys(legacy).sort();
   const migratedIds = Object.keys(migrated).sort();
   if (!deepEqual(legacyIds, migratedIds)) {
@@ -290,22 +599,42 @@ export const verifyMigration = ({
       `wallet clientIds differ: legacy=${legacyIds.length} migrated=${migratedIds.length}`,
     );
   }
+  if (legacyMissing || migratedMissing || !deepEqual(legacyIds, migratedIds)) {
+    details.walletCounts = {
+      legacy: legacyList.length,
+      migrated: migratedList.length,
+      legacyWithoutId: legacyMissing,
+      migratedWithoutId: migratedMissing,
+    };
+  }
+  const coinCountDrift = [];
   for (const id of legacyIds) {
     if (migrated[id] !== undefined && migrated[id] !== legacy[id]) {
       problems.push(
         `coin count differs for a wallet: ${legacy[id]} → ${migrated[id]}`,
       );
+      const index = legacyList.findIndex(w => w?.clientId === id);
+      coinCountDrift.push(`wallet#${index}: ${legacy[id]} -> ${migrated[id]}`);
     }
+  }
+  if (coinCountDrift.length) {
+    details.coinCountDrift = coinCountDrift;
   }
   // Key-name scan only: value-shape heuristics misfire on public hashes.
   const secretPaths = findSecretPaths(migratedWallets, {valueShapes: false});
   if (secretPaths.length) {
-    const keys = [...new Set(secretPaths.map(p => p.split('.').pop()))];
+    const keys = [
+      ...new Set(
+        secretPaths.map(p => normalizePathPattern(p).split('.').pop()),
+      ),
+    ];
     problems.push(
-      `secrets left in migrated wallets: ${
+      `plaintext keys left in migrated wallets: ${
         secretPaths.length
       } field(s) under ${keys.join(', ')}`,
     );
+    details.leakedPathPatterns = summarizePaths(secretPaths);
+    details.leakContext = leakContextFor(migratedWallets, secretPaths);
   }
   // The exact contract: what was written must be the legacy wallets with
   // nothing but secrets removed (slimming happens later, in the persist
@@ -318,12 +647,37 @@ export const verifyMigration = ({
     !deepEqual(migratedWallets.allWallets, expectedWallets)
   ) {
     problems.push('migrated wallets differ from the stripped legacy wallets');
+    details.walletsDiff = structuralDiff(
+      {allWallets: expectedWallets},
+      {allWallets: migratedWallets.allWallets},
+      {labelA: 'legacy', labelB: 'migrated'},
+    );
   }
   const expectedVault = extractVaultPayload(
     fixCurrentWalletIndex(legacyWallets)?.allWallets || [],
   );
   if (!deepEqual(decryptedVault, expectedVault)) {
-    problems.push('vault payload does not match legacy secrets');
+    problems.push('vault payload does not match the legacy key material');
+    details.vaultDiff = structuralDiff(expectedVault, decryptedVault, {
+      labelA: 'expected',
+      labelB: 'actual',
+    });
   }
-  return {ok: problems.length === 0, problems};
+  if (problems.length) {
+    details.walletFieldInventory = walletFieldInventory(migratedList);
+    details.sliceRootInventory = isPlainObject(migratedWallets)
+      ? Object.keys(migratedWallets)
+          .sort()
+          .map(
+            key => `${normalizeSegment(key)}: ${shapeOf(migratedWallets[key])}`,
+          )
+      : [shapeOf(migratedWallets)];
+    details.counts = {
+      legacyWallets: legacyList.length,
+      migratedWallets: migratedList.length,
+      coinsPerWallet: perWalletCounts(migratedList),
+      deriveAddressesPerWallet: perWalletDeriveCounts(migratedList),
+    };
+  }
+  return {ok: problems.length === 0, problems, details};
 };

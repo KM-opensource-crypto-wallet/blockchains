@@ -192,6 +192,10 @@ export const createVaultSync = ({
      * Write any pending (debounced or previously failed) change now and wait
      * for in-flight writes. Never rejects: a failure is reported through
      * onError and the snapshot stays dirty for the next flush / retry.
+     * Resolves true when nothing is left dirty (every write landed), false
+     * when a write failed and its snapshot is still pending, so callers that
+     * must not proceed over an unwritten vault (the orphan legacy migration)
+     * can tell.
      */
     flush: async () => {
       if (pending) {
@@ -199,6 +203,7 @@ export const createVaultSync = ({
         await enqueue(writeNow(takePending()));
       }
       await chain;
+      return pending === null;
     },
     /** After unlock+hydrate: the vault already holds this payload. */
     markSynced: payload => {

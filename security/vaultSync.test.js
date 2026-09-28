@@ -268,8 +268,9 @@ describe('vaultSync', () => {
     await waitForSaveErrors(1);
     expect(saveErrors()).toHaveLength(1);
 
-    // e.g. app goes to background before the retry timer fires.
-    await expect(sync.flush()).resolves.toBeUndefined();
+    // e.g. app goes to background before the retry timer fires. Resolves
+    // true: nothing is left dirty.
+    await expect(sync.flush()).resolves.toBe(true);
     expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
 
     // Once written, nothing is left dirty: no further write on the next flush.
@@ -278,6 +279,22 @@ describe('vaultSync', () => {
     await flushMicrotasks();
     await sync.flush();
     expect(blobWrites()).toBe(writesAfter);
+  });
+
+  it('flush() resolves false while a failed write is still dirty (the orphan migration must not commit over it)', async () => {
+    await vault.createVault('pw');
+    failNextBlobWrites(2);
+    store.dispatch(createWalletFulfilled([walletA]));
+    await waitForSaveErrors(1);
+
+    // The flush retry fails too: still dirty, nothing in the vault.
+    await expect(sync.flush()).resolves.toBe(false);
+    expect(saveErrors()).toHaveLength(2);
+    expect(await vault.readSecrets()).toEqual({v: 1, wallets: {}});
+
+    // The next flush lands it.
+    await expect(sync.flush()).resolves.toBe(true);
+    expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
   });
 
   it('retries back off and a newer change supersedes the failed snapshot', async () => {

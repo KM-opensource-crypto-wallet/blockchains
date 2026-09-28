@@ -48,6 +48,22 @@ describe('persistTransforms', () => {
       expect(out[0].hideSettings.relockOption).toBe('RELAUNCH');
     });
 
+    it('inbound allWallets strips the selectedNft coin snapshot', () => {
+      const w = wallet('a', 'MANUAL');
+      w.selectedNft = {
+        token_id: '1',
+        coin: {
+          ...w.coins[0],
+          deriveAddresses: [{address: '0xb', privateKey: HEX(2)}],
+        },
+      };
+      const [out] = transform.in([w], 'allWallets');
+      expect(() => assertNoSecrets(out)).not.toThrow();
+      expect(out.selectedNft.token_id).toBe('1');
+      expect(out.selectedNft.coin.address).toBe('0xa');
+      expect(out.selectedNft.coin.deriveAddresses).toEqual([{address: '0xb'}]);
+    });
+
     it('inbound other fields pass through', () => {
       expect(transform.in('w1', 'currentWalletClientId')).toBe('w1');
     });
@@ -74,19 +90,52 @@ describe('persistTransforms', () => {
     expect(schedulePaymentPersistTransform.in(true, 'isSubmitting')).toBe(true);
   });
 
-  it('sellCrypto inbound strips the embedded wallet', () => {
+  it('sellCrypto inbound strips the embedded wallet and the embedded coin', () => {
+    const w = wallet('a', 'MANUAL');
     const out = sellCryptoPersistTransform.in(
-      {amount: '1', selectedFromWallet: wallet('a', 'MANUAL')},
+      {
+        amount: '1',
+        selectedFromWallet: w,
+        selectedFromAsset: {
+          ...w.coins[0],
+          deriveAddresses: [{address: '0xb', privateKey: HEX(2)}],
+        },
+      },
       'requestDetails',
     );
     expect(out.amount).toBe('1');
     expect(out.selectedFromWallet.clientId).toBe('a');
+    expect(out.selectedFromAsset).toEqual({
+      chain_name: 'ethereum',
+      symbol: 'ETH',
+      address: '0xa',
+      deriveAddresses: [{address: '0xb'}],
+    });
     expect(() => assertNoSecrets(out)).not.toThrow();
     expect(
       sellCryptoPersistTransform.in({amount: '1'}, 'requestDetails'),
     ).toEqual({
       amount: '1',
     });
+  });
+
+  it('batchTransaction inbound strips filteredData clones as well', () => {
+    const tx = {
+      amount: '1',
+      coinInfo: {chain_name: 'ethereum', address: '0xa', privateKey: HEX(1)},
+    };
+    const out = batchTransactionPersistTransform.in(
+      {filteredTransactions: [tx], uniqueChains: ['ethereum'], loading: false},
+      'filteredData',
+    );
+    expect(out).toEqual({
+      filteredTransactions: [
+        {amount: '1', coinInfo: {chain_name: 'ethereum', address: '0xa'}},
+      ],
+      uniqueChains: ['ethereum'],
+      loading: false,
+    });
+    expect(batchTransactionPersistTransform.in('x', 'isValid')).toBe('x');
   });
 
   it('batchTransaction inbound strips coinInfo secrets', () => {

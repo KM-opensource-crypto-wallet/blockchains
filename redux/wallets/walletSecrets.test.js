@@ -8,6 +8,7 @@ import {
   hydrateWalletSecrets,
   stripAllWalletsSecrets,
   stripWalletSecrets,
+  toChainExistingEntry,
   vaultPayloadHasSecrets,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletSecrets';
 
@@ -108,6 +109,23 @@ const mnemonicWallet = () => ({
     },
     'session-2': [{address: 'bc1q...', privateKey: WIF}],
   },
+  // setSelectedNft stores a full copy of the live native coin next to the NFT
+  // metadata; it carries the coin key and every derive key.
+  selectedNft: {
+    token_id: '42',
+    token_address: '0xnft',
+    name: 'Ape',
+    metadata: {image: 'ipfs://img'},
+    coin: {
+      _id: 'coin-eth',
+      chain_name: 'ethereum',
+      symbol: 'ETH',
+      address: '0xaddr0',
+      publicKey: '0xpub',
+      privateKey: HEX(1),
+      deriveAddresses: evmDerives(50, {withCustom: true}),
+    },
+  },
 });
 
 const privateKeyWallet = () => ({
@@ -147,6 +165,93 @@ describe('walletSecrets', () => {
       expect(m.hideSettings.secretCodeSalt).toBeUndefined();
       expect(m.walletData['session-1']['eip155:1'].privateKey).toBeUndefined();
       expect(m.walletData['session-2'][0].privateKey).toBeUndefined();
+      expect(m.selectedNft.coin.privateKey).toBeUndefined();
+      expect(
+        m.selectedNft.coin.deriveAddresses.some(entry => 'privateKey' in entry),
+      ).toBe(false);
+      expect(findSecretPaths(stripped, {valueShapes: false})).toEqual([]);
+    });
+
+    it('strips the selectedNft coin snapshot like any other coin', () => {
+      const m = stripWalletSecrets(mnemonicWallet());
+      expect(m.selectedNft.token_id).toBe('42');
+      expect(m.selectedNft.metadata).toEqual({image: 'ipfs://img'});
+      expect(m.selectedNft.coin.address).toBe('0xaddr0');
+      expect(m.selectedNft.coin.publicKey).toBe('0xpub');
+      expect(m.selectedNft.coin.deriveAddresses).toHaveLength(51);
+      expect(m.selectedNft.coin.deriveAddresses[0]).toEqual({
+        address: '0xaddr0',
+        derivePath: "m/44'/60'/0'/0/0",
+      });
+      // A wallet with no NFT selected is left alone.
+      expect(stripWalletSecrets({clientId: 'x', selectedNft: null})).toEqual({
+        clientId: 'x',
+        selectedNft: null,
+      });
+    });
+
+    // KIMLWALLET-APP-8: coinSync used to store the whole coin as the chain
+    // wallet, so chain_existing_coin.bitcoin carried every derive key.
+    const walletWithFullCoinChainEntry = () => ({
+      clientId: 'w-sync',
+      phrase: MNEMONIC,
+      coins: [],
+      chain_existing_coin: {
+        bitcoin: {
+          _id: 'btc',
+          chain_name: 'bitcoin',
+          symbol: 'BTC',
+          address: 'bc1qa',
+          publicKey: '02pub',
+          extendedPublicKey: 'zpub',
+          privateKey: WIF,
+          extendedPrivateKey: XPRV,
+          deriveAddresses: Array.from({length: 40}, (_, i) => ({
+            address: `bc1q${i}`,
+            derivePath: `m/84'/0'/0'/${i < 20 ? 0 : 1}/${i % 20}`,
+            privateKey: WIF,
+          })),
+          UTXOs: [{txid: 'aa', vout: 0}],
+        },
+      },
+    });
+
+    it('reduces a chain_existing_coin entry to its public fields, even a whole coin copy', () => {
+      const wallet = walletWithFullCoinChainEntry();
+      const stripped = stripWalletSecrets(wallet);
+      expect(stripped.chain_existing_coin).toEqual({
+        bitcoin: {
+          address: 'bc1qa',
+          publicKey: '02pub',
+          extendedPublicKey: 'zpub',
+        },
+      });
+      expect(findSecretPaths(stripped, {valueShapes: false})).toEqual([]);
+      // The chain wallet's own keys still go to the vault and come back.
+      const payload = extractVaultPayload([wallet]);
+      expect(payload.wallets['w-sync'].chainExisting).toEqual({
+        bitcoin: {privateKey: WIF, extendedPrivateKey: XPRV},
+      });
+      const [hydrated] = hydrateWalletSecrets([stripped], payload);
+      expect(hydrated.chain_existing_coin.bitcoin).toEqual({
+        address: 'bc1qa',
+        publicKey: '02pub',
+        extendedPublicKey: 'zpub',
+        privateKey: WIF,
+        extendedPrivateKey: XPRV,
+      });
+    });
+
+    it('toChainExistingEntry keeps the six chain-wallet fields only', () => {
+      const coin = walletWithFullCoinChainEntry().chain_existing_coin.bitcoin;
+      expect(toChainExistingEntry(coin)).toEqual({
+        address: 'bc1qa',
+        publicKey: '02pub',
+        extendedPublicKey: 'zpub',
+        privateKey: WIF,
+        extendedPrivateKey: XPRV,
+      });
+      expect(toChainExistingEntry(null)).toBe(null);
     });
 
     it('keeps everything that is not a secret', () => {
@@ -237,10 +342,16 @@ describe('walletSecrets', () => {
       const payload = extractVaultPayload(wallets);
       const stripped = stripAllWalletsSecrets(wallets);
       const hydrated = hydrateWalletSecrets(stripped, payload);
-      // walletData is stripped but deliberately not re-hydrated.
-      const expected = wallets.map(w =>
-        w.walletData ? {...w, walletData: stripWalletSecrets(w).walletData} : w,
-      );
+      // walletData and the selectedNft snapshot are stripped but deliberately
+      // not re-hydrated: the live coin is the source of truth for both.
+      const expected = wallets.map(w => {
+        const s = stripWalletSecrets(w);
+        return {
+          ...w,
+          ...(w.walletData ? {walletData: s.walletData} : {}),
+          ...(w.selectedNft ? {selectedNft: s.selectedNft} : {}),
+        };
+      });
       expect(hydrated).toEqual(expected);
     });
 

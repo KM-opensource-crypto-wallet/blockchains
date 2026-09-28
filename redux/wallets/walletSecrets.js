@@ -16,6 +16,12 @@
 // `coinKey` = generateUniqueKeyForChain(coin) (chain_symbol), the identity the
 // slice already treats as unique. `family` collapses every EVM coin onto one
 // list because their derive paths and keys are identical.
+//
+// Stripped but never hydrated (the live coin is the source of truth): the
+// WalletConnect `walletData` entries and the `selectedNft.coin` snapshot.
+// `chain_existing_coin` entries persist only CHAIN_EXISTING_PUBLIC_FIELDS; older
+// coin syncs stored a whole coin there (every derive key included), so the
+// strip keeps the public fields instead of omitting the known secrets.
 import {
   generateUniqueKeyForChain,
   isEVMChain,
@@ -45,6 +51,20 @@ export const SECRET_FIELD_NAMES = Object.freeze([
   'extendedPrivateKey',
   'secretCodeHash',
   'secretCodeSalt',
+]);
+
+// The six fields a `chain_existing_coin` entry is made of; the only readers
+// (cryptoChain createWalletForChain, selectLivePrivateKey) use nothing else.
+export const CHAIN_EXISTING_PUBLIC_FIELDS = Object.freeze([
+  'address',
+  'accountId',
+  'publicKey',
+  'extendedPublicKey',
+]);
+
+const CHAIN_EXISTING_FIELDS = Object.freeze([
+  ...CHAIN_EXISTING_PUBLIC_FIELDS,
+  ...SECRET_WALLET_FIELDS.chainExisting,
 ]);
 
 const hasValue = value => value !== undefined && value !== null && value !== '';
@@ -78,6 +98,21 @@ const pick = (object, fields) => {
   return out;
 };
 
+/**
+ * The `chain_existing_coin` entry for a coin or chain wallet: the six known
+ * fields, nothing else. Never copy a whole coin in (its deriveAddresses carry
+ * every derive key).
+ */
+export const toChainExistingEntry = source =>
+  isPlainObject(source)
+    ? Object.fromEntries(
+        CHAIN_EXISTING_FIELDS.filter(field => field in source).map(field => [
+          field,
+          source[field],
+        ]),
+      )
+    : source;
+
 export const getCoinKey = coin => generateUniqueKeyForChain(coin);
 
 export const getDeriveFamily = chain_name =>
@@ -102,6 +137,16 @@ const stripDeep = (value, fields) => {
   }
   return value;
 };
+
+/**
+ * Deep copy of `value` with every key in SECRET_FIELD_NAMES removed at any
+ * depth. Last line of defence for state whose shape we do not own (the
+ * migrator applies it to non-wallet slices that still hold a secret after
+ * their sanitizer ran). Always returns a new object, so callers should only
+ * use it when a scan found something.
+ */
+export const stripSecretFieldsDeep = value =>
+  stripDeep(value, SECRET_FIELD_NAMES);
 
 /**
  * Returns a copy of a coin-shaped object with every secret removed, including
@@ -138,7 +183,9 @@ export const stripWalletSecrets = wallet => {
     result.chain_existing_coin = Object.fromEntries(
       Object.entries(wallet.chain_existing_coin).map(([chain, value]) => [
         chain,
-        omit(value, SECRET_WALLET_FIELDS.chainExisting),
+        isPlainObject(value)
+          ? pick(value, CHAIN_EXISTING_PUBLIC_FIELDS)
+          : value,
       ]),
     );
   }
@@ -153,6 +200,19 @@ export const stripWalletSecrets = wallet => {
       wallet.walletData,
       SECRET_WALLET_FIELDS.walletData,
     );
+  }
+  // `selectedNft.coin` is the copy of the live native coin that setSelectedNft
+  // stores next to the NFT metadata (key + every derive key). It is a UI
+  // snapshot: resetNfts clears it on launch and setSelectedNft rebuilds it from
+  // the hydrated coin, so it is stripped here and never re-hydrated.
+  if (
+    isPlainObject(wallet.selectedNft) &&
+    isPlainObject(wallet.selectedNft.coin)
+  ) {
+    result.selectedNft = {
+      ...wallet.selectedNft,
+      coin: stripCoinSecrets(wallet.selectedNft.coin),
+    };
   }
   return result;
 };

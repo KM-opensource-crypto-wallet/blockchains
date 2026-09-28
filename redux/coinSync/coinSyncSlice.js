@@ -19,6 +19,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {getCoinSnapshot} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {selectIsSyncing} from 'dok-wallet-blockchain-networks/redux/coinSync/coinSyncSelectors';
+import {toChainExistingEntry} from 'dok-wallet-blockchain-networks/redux/wallets/walletSecrets';
 import BigNumber from 'bignumber.js';
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 
@@ -175,7 +176,9 @@ export const syncAllCoins = createAsyncThunk(
       // Check if current wallet already has a coin with this chain
       const existingWallet = getExistingChainWallet(walletCoins, chainKey);
       if (existingWallet) {
-        chainWallets[chainKey] = existingWallet;
+        // The six chain-wallet fields only: the coin itself carries every
+        // derive key, which must never be copied into chain_existing_coin.
+        chainWallets[chainKey] = toChainExistingEntry(existingWallet);
         continue;
       }
 
@@ -200,14 +203,7 @@ export const syncAllCoins = createAsyncThunk(
         );
 
         if (wallet) {
-          chainWallets[chainKey] = {
-            address: wallet.address,
-            accountId: wallet.accountId,
-            privateKey: wallet.privateKey,
-            publicKey: wallet.publicKey,
-            extendedPublicKey: wallet.extendedPublicKey,
-            extendedPrivateKey: wallet.extendedPrivateKey,
-          };
+          chainWallets[chainKey] = toChainExistingEntry(wallet);
         }
       } catch (error) {
         console.warn(`Failed to create wallet for ${chainKey}:`, error);

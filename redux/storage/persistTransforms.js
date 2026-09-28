@@ -17,11 +17,11 @@
 //   sellCrypto        inbound strip the embedded selectedFromWallet
 //   batchTransaction  inbound strip coinInfo secrets
 import {createTransform} from 'redux-persist';
+import {stripAllWalletsSecrets} from '../wallets/walletSecrets';
 import {
-  stripAllWalletsSecrets,
-  stripWalletSecrets,
-} from '../wallets/walletSecrets';
-import {sanitizeBatchTransaction} from './legacyRootMigration';
+  sanitizeBatchTransaction,
+  sanitizeSellCrypto,
+} from './legacyRootMigration';
 
 // Never persisted: the password (vault replaces it), request flags, and the
 // per-session "vault is unlocked" flag.
@@ -212,13 +212,12 @@ export const schedulePaymentPersistTransform = createTransform(
   },
 );
 
+// One definition of each strip for runtime and migration: the transforms
+// delegate to the legacyRootMigration sanitizers field by field.
 export const sellCryptoPersistTransform = createTransform(
   (inbound, key) =>
-    key === 'requestDetails' && inbound?.selectedFromWallet
-      ? {
-          ...inbound,
-          selectedFromWallet: stripWalletSecrets(inbound.selectedFromWallet),
-        }
+    key === 'requestDetails'
+      ? sanitizeSellCrypto({requestDetails: inbound}).requestDetails
       : inbound,
   outbound => outbound,
 );
@@ -227,6 +226,8 @@ export const batchTransactionPersistTransform = createTransform(
   (inbound, key) =>
     key === 'transactions'
       ? sanitizeBatchTransaction({transactions: inbound}).transactions
+      : key === 'filteredData'
+      ? sanitizeBatchTransaction({filteredData: inbound}).filteredData
       : inbound,
   outbound => outbound,
 );
