@@ -1,10 +1,14 @@
 import {createSelector} from '@reduxjs/toolkit';
 import {isWalletHiddenAndLocked} from '../wallets/walletsSelector';
 
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_ARRAY = [];
+
 export const getNotificationAlerts = state =>
   Array.isArray(state.notificationAlerts?.notificationAlerts)
     ? state.notificationAlerts?.notificationAlerts
-    : [];
+    : EMPTY_ARRAY;
 
 // Alerts carry walletName/threshold/address - rendering a hidden (locked)
 // wallet's alerts would leak its existence. Revealed hidden wallets DO show

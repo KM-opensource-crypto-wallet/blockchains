@@ -1,6 +1,10 @@
 import {selectCurrentCoin} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {validateNumber} from 'dok-wallet-blockchain-networks/helper';
 
+// Stable fallback: a fresh []/{} per call makes useSelector warn and rerender.
+// Read-only - shared by every caller.
+const EMPTY_ARRAY = [];
+
 export const getStakingLoading = state => state.staking.loading;
 export const getStakingAllowance = state => state.staking.allowanceData;
 export const getStakingAllowanceLoading = state =>
@@ -10,7 +14,7 @@ export const getStakingError = state => state.staking.error;
 export const getStakingValidatorsByChain = state => {
   const validators = state.staking.validators;
   const currentCoin = selectCurrentCoin(state);
-  return validators[currentCoin?.chain_name] || [];
+  return validators[currentCoin?.chain_name] || EMPTY_ARRAY;
 };
 
 export const getSelectedVotes = state => {
