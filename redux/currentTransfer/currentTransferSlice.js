@@ -21,6 +21,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/cryptoProviders/cryptoProvidersSelectors';
 import {
   convertToSmallAmount,
+  SPONSOR_EMPTY_CODE,
   isSwapBlockingError,
   parseBalance,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -61,6 +62,7 @@ const initialState = {
     maxPriorityFeePerGas: null,
     isMax: false,
     customError: '',
+    customErrorCode: '',
     selectedUTXOsValue: undefined,
     selectedUTXOs: undefined,
     nonce: undefined,
@@ -76,6 +78,10 @@ const initialState = {
     // the Transfer screen and sendFunds block past quoteCreatedAt + TTL.
     quoteCreatedAt: null,
     quoteTtlSeconds: null,
+    payGasWithToken: false,
+    gasTokenSymbol: null,
+    gasTokenContractAddress: null,
+    sponsoredQuote: null,
   },
   pendingTransferData: {
     isLoading: false,
@@ -112,6 +118,9 @@ export const calculateEstimateFee = createAsyncThunk(
 
       const isSwap = !!(payload?.isExchange && transfer?.swapData);
 
+      const isSponsoredGas =
+        !isSwap &&
+        !!(transfer?.payGasWithToken && transfer?.gasTokenContractAddress);
       const multiplier = {
         bitcoin: bitcoinFeeMultiplier,
         bitcoin_legacy: bitcoinFeeMultiplier,
@@ -166,6 +175,21 @@ export const calculateEstimateFee = createAsyncThunk(
         respData = await nativeCoin?.getEstimateFeeForWithdrawStaking(payload);
       } else if (payload?.isStakingRewards) {
         respData = await nativeCoin?.getEstimateFeeForStakingRewards(payload);
+      } else if (isSponsoredGas) {
+        const sponsoredCalls = payload?.isBatchTransaction
+          ? payload?.calls
+          : [
+              await nativeCoin?.createTokenCall({
+                contractAddress: transfer?.currentCoin?.contractAddress,
+                toAddress: transfer?.toAddress,
+                amount: transfer?.amount,
+                decimals: transfer?.currentCoin?.decimal,
+              }),
+            ];
+        respData = await nativeCoin?.getSponsoredGasFees({
+          calls: sponsoredCalls,
+          feeTokenAddress: transfer?.gasTokenContractAddress,
+        });
       } else if (payload?.isBatchTransaction) {
         respData = await nativeCoin?.getEstimateFeeForBatchTransaction(payload);
       } else if (isSwap) {
@@ -202,11 +226,18 @@ export const calculateEstimateFee = createAsyncThunk(
       const feesOptions = respData?.feesOptions;
       const l1Fees = respData?.l1Fees || 0;
       const allUserCoins = selectUserCoins(currentState);
-      const foundCoin = allUserCoins.find(
-        item =>
-          item?.symbol === transfer?.currentCoin?.chain_symbol &&
-          item?.chain_name === transfer?.currentCoin?.chain_name,
-      );
+      const foundCoin = isSponsoredGas
+        ? allUserCoins.find(
+            item =>
+              item?.chain_name === transfer?.currentCoin?.chain_name &&
+              item?.contractAddress?.toLowerCase() ===
+                transfer?.gasTokenContractAddress?.toLowerCase(),
+          )
+        : allUserCoins.find(
+            item =>
+              item?.symbol === transfer?.currentCoin?.chain_symbol &&
+              item?.chain_name === transfer?.currentCoin?.chain_name,
+          );
       const currencyRate = foundCoin?.currencyRate || '0';
       const currencyRateBN = new BigNumber(currencyRate);
       const feeAmountBN = new BigNumber(fee);
@@ -234,9 +265,41 @@ export const calculateEstimateFee = createAsyncThunk(
           l1Fees,
           currencyRate,
           nonce,
+          sponsoredQuote: respData?.sponsoredQuote || null,
         }),
       );
-      if (isSwap) {
+      if (isSponsoredGas) {
+        // The user pays no native gas here, so the max-amount clamp must not rewrite the amount.
+        const isFeeTokenBeingSent =
+          transfer?.currentCoin?.contractAddress?.toLowerCase() ===
+          transfer?.gasTokenContractAddress?.toLowerCase();
+        const transferAmountBN = new BigNumber(transfer?.amount);
+        const balanceBN = new BigNumber(
+          transfer?.currentCoin?.totalAmount || 0,
+        );
+        if (isFeeTokenBeingSent && feeAmountBN.gte(balanceBN)) {
+          dispatch(
+            setCurrentTransferCustomError(
+              `Not enough ${transfer?.currentCoin?.symbol} to cover the network fee`,
+            ),
+          );
+          dispatch(setCurrentTransferSuccess(false));
+          return null;
+        }
+        if (
+          isFeeTokenBeingSent &&
+          transferAmountBN.plus(feeAmountBN).gt(balanceBN)
+        ) {
+          dispatch(
+            setCurrentTransferData({
+              amount: balanceBN.minus(feeAmountBN).toString(),
+              isMax: true,
+            }),
+          );
+        } else {
+          dispatch(setCurrentTransferData({isMax: false}));
+        }
+      } else if (isSwap) {
         // A swap spends exactly what the provider encoded in swapData, so the
         // max-amount clamp must not rewrite it — that would desync the amount we
         // display from what the router actually pulls. isMax is still cleared
@@ -287,6 +350,10 @@ export const calculateEstimateFee = createAsyncThunk(
         // (estimateExchangeFee, the approval thunks) stop before Transfer.
         dispatch(setCurrentTransferCustomError(e?.message));
         throw e;
+      }
+      if (e?.code === SPONSOR_EMPTY_CODE) {
+        dispatch(setCurrentTransferCustomError(e?.message));
+        dispatch(setCurrentTransferCustomErrorCode(e.code));
       }
       if (e?.message?.startsWith('The')) {
         dispatch(setCurrentTransferCustomError(e?.message));
@@ -461,6 +528,7 @@ export const currentTransferSlice = createSlice({
       state.transferData.success = payload;
       if (payload) {
         state.transferData.customError = '';
+        state.transferData.customErrorCode = '';
       }
     },
     setCurrentTransferRefreshing(state, {payload}) {
@@ -482,6 +550,7 @@ export const currentTransferSlice = createSlice({
       state.transferData.currencyRate = payload?.currencyRate;
       state.transferData.maxPriorityFeePerGas = payload?.maxPriorityFeePerGas;
       state.transferData.l1Fees = payload?.l1Fees;
+      state.transferData.sponsoredQuote = payload?.sponsoredQuote || null;
       if (payload?.nonce != null) {
         state.transferData.nonce = payload?.nonce;
       }
@@ -491,6 +560,9 @@ export const currentTransferSlice = createSlice({
     },
     setCurrentTransferCustomError(state, {payload}) {
       state.transferData.customError = payload;
+    },
+    setCurrentTransferCustomErrorCode(state, {payload}) {
+      state.transferData.customErrorCode = payload;
     },
     updateFees(state, {payload}) {
       const gasPrice = payload?.gasPrice;
@@ -623,6 +695,7 @@ export const {
   setCurrentTransferAmount,
   setCurrentTransferSuccess,
   setCurrentTransferCustomError,
+  setCurrentTransferCustomErrorCode,
   updateFees,
   setPendingTransferData,
   setPendingTransferLoading,

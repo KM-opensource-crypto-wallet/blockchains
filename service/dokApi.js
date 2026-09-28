@@ -215,6 +215,16 @@ export const fetchRpcSession = async () => {
   return resp?.data;
 };
 
+export const fetchSponsoredGasQuote = async payload => {
+  const resp = await DokApi.post('/sponsor/quote', payload);
+  return resp?.data;
+};
+
+export const signSponsoredBatch = async payload => {
+  const resp = await DokApi.post('/sponsor/sign', payload);
+  return resp?.data;
+};
+
 export const getBuyCryptoQuote = async payload => {
   try {
     const resp = await DokApi.post('/get-buy-crypto-quote', {
