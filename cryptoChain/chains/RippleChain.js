@@ -57,10 +57,32 @@ function derivePublicKey(privateKey) {
   );
 }
 
+let sharedClient = null; // {url, client}
+
+// RippleChain() runs for every balance/history/fee/send call. One xrpl Client
+// (one websocket, one heartbeat) per RPC URL is shared by all of them; a new
+// URL (RPC list refresh, sandbox flip) replaces it and closes the old one.
+const getRippleClient = () => {
+  const url = getRPCUrl('ripple');
+  if (sharedClient?.url === url) {
+    return sharedClient.client;
+  }
+  const previous = sharedClient?.client;
+  const client = new Client(url);
+  // xrpl re-emits websocket failures as 'error' events; with no listener the
+  // EventEmitter throws "Unhandled error". Requests still reject on their own.
+  client.on('error', (errorCode, errorMessage) => {
+    console.warn(`ripple client error: ${errorCode} ${errorMessage}`);
+  });
+  sharedClient = {url, client};
+  previous?.disconnect().catch(() => {});
+  return client;
+};
+
 export const RippleChain = () => {
   let rippleProvider;
   try {
-    rippleProvider = new Client(getRPCUrl('ripple'));
+    rippleProvider = getRippleClient();
   } catch (e) {
     console.error(`error creating RippleChain ${e}`);
     throw e;
