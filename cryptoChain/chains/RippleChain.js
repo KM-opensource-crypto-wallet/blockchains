@@ -61,6 +61,11 @@ export const RippleChain = () => {
   let rippleProvider;
   try {
     rippleProvider = new Client(getRPCUrl('ripple'));
+    // xrpl re-emits websocket failures as 'error' events; with no listener the
+    // EventEmitter throws "Unhandled error". Requests still reject on their own.
+    rippleProvider.on('error', (errorCode, errorMessage) => {
+      console.warn(`ripple client error: ${errorCode} ${errorMessage}`);
+    });
   } catch (e) {
     console.error(`error creating RippleChain ${e}`);
     throw e;
