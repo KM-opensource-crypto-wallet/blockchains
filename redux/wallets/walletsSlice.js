@@ -73,6 +73,7 @@ import {
   getStakignKey,
   isDexSwap,
   isPlausibleTxHash,
+  isSponsoredQuoteError,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
   MORALIS_CHAIN_TO_CHAIN,
@@ -737,7 +738,7 @@ export const revokeDelegation = createAsyncThunk(
 
 export const fetchTransactionByHash = createAsyncThunk(
   'wallets/fetchTransactionByHash',
-  async ({txHash, currentWallet, currentCoin}, thunkAPI) => {
+  async ({txHash, currentWallet, currentCoin, toAddress}, thunkAPI) => {
     const currentState = thunkAPI.getState();
     const localCurrentWallet =
       currentWallet || selectCurrentWallet(currentState);
@@ -753,6 +754,7 @@ export const fetchTransactionByHash = createAsyncThunk(
       localCurrentCoin,
       localCurrentWallet,
       txHash,
+      toAddress,
     );
 
     return {recentTransaction, coinId: localCurrentCoin._id};
@@ -1330,8 +1332,32 @@ export const sendFunds = createAsyncThunk(
         );
       }
 
-      //
-      const res = txData?.isNFT
+      const isSponsoredGas = !!(
+        transferData?.payGasWithToken && transferData?.sponsoredQuote
+      );
+      // Never silently fall back to a native-gas send when the user asked to pay in their token
+      if (transferData?.payGasWithToken && !isSponsoredGas) {
+        throw new Error('Sponsored gas quote is not ready yet. Please retry.');
+      }
+      const sponsoredCalls = isSponsoredGas
+        ? txData?.isBatchTransaction
+          ? txData?.calls
+          : [
+              await nativeCoin.createTokenCall({
+                contractAddress: txData?.currentCoin?.contractAddress,
+                toAddress: txData.to,
+                amount: txData.amount,
+                decimals: txData?.currentCoin?.decimal,
+              }),
+            ]
+        : null;
+
+      const res = isSponsoredGas
+        ? await nativeCoin.sendSponsoredBatchTransaction({
+            calls: sponsoredCalls,
+            sponsoredQuote: transferData?.sponsoredQuote,
+          })
+        : txData?.isNFT
         ? await nativeCoin?.sendNFT({
             to: txData.to,
             from: txData.from,
@@ -1740,7 +1766,7 @@ export const sendFunds = createAsyncThunk(
           extra: sendAttrs,
         });
       }
-      if (isSwapBlockingError(e?.message)) {
+      if (isSwapBlockingError(e?.message) || isSponsoredQuoteError(e?.code)) {
         // Expired quote caught before anything was signed/broadcast — same
         // handling on every chain: no failed-transaction record, back to the
         // Exchange screen for a fresh quote (the on-chain allowance persists,
