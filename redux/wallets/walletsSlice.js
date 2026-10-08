@@ -86,6 +86,11 @@ import {
   toWalletConnectError,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCoin';
 import {
+  buildEvmWalletConnectTx,
+  getEvmWalletConnectTxDigest,
+} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {clearWalletConnectTransactionData} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
+import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
@@ -1039,6 +1044,8 @@ export const walletConnect = createAsyncThunk(
       walletAddress,
       domain,
       privateKey,
+      reviewedTxDigest,
+      reviewedRequestId,
     } = payload;
     const {
       getWalletConnect,
@@ -1051,10 +1058,64 @@ export const walletConnect = createAsyncThunk(
         response: {id, jsonrpc: '2.0', error},
       });
     };
+    // Whatever happens below, the pending request has been answered (or will
+    // be by the error paths), so drop it; scoped by id so it cannot wipe a
+    // request that arrived later.
+    const clearPending = () =>
+      thunkAPI.dispatch(clearWalletConnectTransactionData({id}));
+
+    // KIML-002: an EVM transaction approval is bound to the request the user
+    // reviewed. Rebuild the canonical tx from the store's pending request (not
+    // from the modal's copy) and refuse unless its digest and id match what
+    // the modal reviewed. The executor then signs only that object.
+    const isEvmTransaction =
+      typeof chainId === 'string' &&
+      chainId.startsWith('eip155:') &&
+      (method === 'eth_sendTransaction' || method === 'eth_signTransaction');
+    let canonicalTx = null;
+    if (isEvmTransaction) {
+      const pending =
+        thunkAPI.getState()?.walletConnect?.transactionRequestData;
+      let digest = null;
+      if (
+        pending &&
+        pending.id === id &&
+        reviewedRequestId === id &&
+        pending.chainId === chainId
+      ) {
+        try {
+          canonicalTx = buildEvmWalletConnectTx(pending.params?.[0], {
+            chainId: pending.chainId,
+          });
+          digest = getEvmWalletConnectTxDigest(canonicalTx);
+        } catch (e) {
+          canonicalTx = null;
+        }
+      }
+      if (!canonicalTx || !reviewedTxDigest || digest !== reviewedTxDigest) {
+        const message = 'Request changed after review';
+        logger.warn('walletconnect.review_mismatch', {
+          method,
+          chain_name,
+          requestId: id,
+          pendingId: pending?.id,
+        });
+        showToast({
+          type: 'errorToast',
+          title: 'Request changed',
+          message:
+            'The request changed after it was reviewed. Ask the dApp to send it again.',
+        });
+        await respondWithError({code: 5000, message});
+        clearPending();
+        return thunkAPI.rejectWithValue('review_mismatch');
+      }
+    }
+    const effectiveSignerAddress = expectedSignerAddress ?? canonicalTx?.from;
     if (
-      expectedSignerAddress &&
+      effectiveSignerAddress &&
       walletAddress &&
-      expectedSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
+      effectiveSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
     ) {
       const message =
         'The dApp requested a signature from a different address than the connected wallet.';
@@ -1072,6 +1133,7 @@ export const walletConnect = createAsyncThunk(
           error: {code: 5000, message},
         },
       });
+      clearPending();
       return thunkAPI.rejectWithValue(message);
     }
 
@@ -1096,8 +1158,9 @@ export const walletConnect = createAsyncThunk(
         currentWallet,
       );
       if (!nativeCoin) {
-        console.error('native coin not found');
-        return null;
+        // Thrown, not returned: the catch answers the dApp and the finally
+        // clears the pending request.
+        throw new Error(`Unable to load the ${chain_name} coin for signing`);
       }
       // eip155 requests on a chain that also has a native namespace (Hedera)
       // run on its EVM executor; everything else on the chain itself.
@@ -1162,7 +1225,9 @@ export const walletConnect = createAsyncThunk(
           throw new Error(`Unsupported WalletConnect method: ${method}`);
         }
         tx = await executor[wcMethod]({
-          payload,
+          payload: canonicalTx
+            ? {...payload, transactionData: canonicalTx}
+            : payload,
           chain_name,
           chainId,
           domain,
@@ -1238,6 +1303,8 @@ export const walletConnect = createAsyncThunk(
         toastId,
       });
       return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
+    } finally {
+      clearPending();
     }
   },
 );

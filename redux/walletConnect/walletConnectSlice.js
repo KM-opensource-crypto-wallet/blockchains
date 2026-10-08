@@ -30,6 +30,15 @@ export const walletConnectSlice = createSlice({
     setWalletConnectTransactionModal(state, {payload}) {
       state.transactionModalVisible = payload;
     },
+    // Drops the pending request once it has been answered (approve / reject /
+    // thunk failure). Scoped by id so a late clear from an old request cannot
+    // wipe a newer one. Deliberately leaves transactionModalVisible alone: the
+    // modal owns that flag and clears it before the thunk reads the request.
+    clearWalletConnectTransactionData(state, {payload}) {
+      if (!payload?.id || state.transactionRequestData?.id === payload.id) {
+        state.transactionRequestData = null;
+      }
+    },
     setReduxStoreLoaded(state, {payload}) {
       state.isReduxStoreLoaded = payload;
     },
@@ -46,6 +55,7 @@ export const {
   setWalletConnectTransactionModal,
   setWalletConnectRequestData,
   setWalletConnectTransactionData,
+  clearWalletConnectTransactionData,
   setWalletConnectTransactionSubmit,
   setWalletConnectRequestModal,
   setReduxStoreLoaded,
