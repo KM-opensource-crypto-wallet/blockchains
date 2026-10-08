@@ -128,7 +128,11 @@ export const buildEvmWalletConnectTx = (params0, {chainId} = {}) => {
   }
   let type;
   if (p.type != null && p.type !== '') {
-    type = Number(BigInt(String(p.type)));
+    try {
+      type = Number(BigInt(String(p.type)));
+    } catch (e) {
+      fail('Invalid transaction type', 'type');
+    }
     if (!SUPPORTED_TYPES.has(type)) {
       fail('Unsupported transaction type', 'type');
     }

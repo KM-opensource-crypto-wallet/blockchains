@@ -1158,8 +1158,9 @@ export const walletConnect = createAsyncThunk(
         currentWallet,
       );
       if (!nativeCoin) {
-        console.error('native coin not found');
-        return null;
+        // Thrown, not returned: the catch answers the dApp and the finally
+        // clears the pending request.
+        throw new Error(`Unable to load the ${chain_name} coin for signing`);
       }
       // eip155 requests on a chain that also has a native namespace (Hedera)
       // run on its EVM executor; everything else on the chain itself.

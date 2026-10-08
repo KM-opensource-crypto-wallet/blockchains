@@ -252,4 +252,28 @@ describe('walletConnect thunk: review binding for EVM transactions', () => {
       response: {id: REQUEST_ID, result: '0xsig', jsonrpc: '2.0'},
     });
   });
+
+  it('answers the dApp with an error and clears the request when the native coin cannot be loaded', async () => {
+    getCoin.mockResolvedValue(null);
+    const {tx, digest} = reviewed();
+    const result = await store.dispatch(
+      walletConnect(
+        basePayload({
+          transactionData: tx,
+          reviewedTxDigest: digest,
+          reviewedRequestId: REQUEST_ID,
+        }),
+      ),
+    );
+    expect(result.type).toBe('wallets/walletConnect/rejected');
+    expect(executor.sendRawTransaction).not.toHaveBeenCalled();
+    expect(connector.respondSessionRequest).toHaveBeenCalledTimes(1);
+    expect(errorReply()).toEqual({
+      code: expect.any(Number),
+      message: 'Unable to load the ethereum coin for signing',
+    });
+    expect(store.getActions().map(a => a.type)).toContain(
+      'walletConnect/clearWalletConnectTransactionData',
+    );
+  });
 });

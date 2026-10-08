@@ -155,6 +155,20 @@ describe('buildEvmWalletConnectTx', () => {
     ).toBe(2);
   });
 
+  it('rejects a malformed type with a typed error instead of a raw BigInt SyntaxError', () => {
+    for (const type of ['abc', '1.5', '0x', {}]) {
+      let caught;
+      try {
+        buildEvmWalletConnectTx(baseParams({type}), {chainId: CHAIN});
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(EvmWalletConnectTxError);
+      expect(caught.field).toBe('type');
+      expect(caught.message).toBe('Invalid transaction type');
+    }
+  });
+
   it('throws when the request chainId disagrees with the session chain', () => {
     expect(() =>
       buildEvmWalletConnectTx(baseParams({chainId: '0x1'}), {chainId: CHAIN}),
