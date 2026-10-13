@@ -2,6 +2,7 @@ import {CoinMarketCapAPI} from 'dok-wallet-blockchain-networks/config/coinMarket
 import dayjs from 'dayjs';
 
 let priceInfo = {};
+let priceChangeInfo = {};
 let lastCallTimeStamp;
 
 export const getPrice = async (symbol, currency) => {
@@ -29,6 +30,10 @@ export const getPrice = async (symbol, currency) => {
         ...priceInfo,
         ...formatCurrencyPrice(resp?.data?.data, currency),
       };
+      priceChangeInfo = {
+        ...priceChangeInfo,
+        ...formatPriceChange(resp?.data?.data, currency),
+      };
     }
     return priceInfo;
   } catch (e) {
@@ -37,12 +42,29 @@ export const getPrice = async (symbol, currency) => {
   }
 };
 
+// 24h price change (%) from the same quotes response getPrice cached, or
+// null when the symbol has no market data. Read it right after getPrice.
+export const getPriceChange24h = symbol => {
+  const value = priceChangeInfo[symbol];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
 const formatCurrencyPrice = (data, currency) => {
   const allKeys = Object.keys(data);
   const finalResp = {};
   allKeys.forEach(key => {
     finalResp[key] =
       Array.isArray(data[key]) && data[key][0]?.quote[currency]?.price;
+  });
+  return finalResp;
+};
+
+const formatPriceChange = (data, currency) => {
+  const finalResp = {};
+  Object.keys(data || {}).forEach(key => {
+    finalResp[key] = Array.isArray(data[key])
+      ? data[key][0]?.quote?.[currency]?.percent_change_24h
+      : undefined;
   });
   return finalResp;
 };

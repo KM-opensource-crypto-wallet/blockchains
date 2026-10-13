@@ -16,7 +16,10 @@ import {
   setPendingTransferSubmitting,
   setUpdateTransactionSubmitting,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
-import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import {
+  getPrice,
+  getPriceChange24h,
+} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
   fetchCoinByChainAPI,
@@ -540,6 +543,7 @@ export const addToken = createAsyncThunk(
       phrase: nativeCoin.phrase,
       totalCourse: calculatePrice(balance, tokenData?.decimal, currentPrice),
       currencyRate: currentPrice,
+      priceChange24h: getPriceChange24h(tokenData?.symbol),
       totalAmount: parseBalance(balance, tokenData?.decimal),
       appVersion: APP_VERSION,
       transactions: [],
