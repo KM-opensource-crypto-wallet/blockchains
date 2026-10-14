@@ -121,12 +121,38 @@ const AUTO_ANSWERED_METHODS = new Set([
   'hedera_getNodeAddresses',
 ]);
 
+// Listeners are registered once per WalletKit client. subscribeWalletConnectEvent
+// is called on every pairing and once per restored session; without this guard
+// each call stacked another handler set and a single session_request was
+// processed N times (the duplicates then busy-rejected the request on screen).
+let subscribedClient = null;
+let subscribedHandlers = null;
+// Request ids already handled for the current client; shared by all callers.
+let requestIds = {};
+
 export const subscribeWalletConnectEvent = () => {
-  let requestIds = {};
   if (!walletConnect) {
     console.warn('No event subscribe because wallet connect null');
     return;
   }
+  if (subscribedClient === walletConnect) {
+    return;
+  }
+  if (subscribedClient && subscribedHandlers) {
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_PROPOSAL,
+      subscribedHandlers.onSessionProposal,
+    );
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_REQUEST,
+      subscribedHandlers.onSessionRequest,
+    );
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_DELETE,
+      subscribedHandlers.onSessionDelete,
+    );
+  }
+  requestIds = {};
   const onSessionProposal = proposal => {
     const {id, params} = proposal;
 
@@ -258,6 +284,36 @@ export const subscribeWalletConnectEvent = () => {
           topic,
           response: {id, jsonrpc: '2.0', result},
         });
+      } else if (
+        store.getState()?.walletConnect?.transactionRequestData?.id === id
+      ) {
+        // Redelivery of the request already on screen (relay reconnect);
+        // the modal is showing it, nothing to do.
+      } else if (store.getState()?.walletConnect?.transactionModalVisible) {
+        // One request on screen at a time. Letting a second one replace the
+        // pending request would let a dApp swap what the user is about to
+        // approve; the approval is bound to the request it was reviewed on.
+        // -32002 (EIP-1474 "resource unavailable") is what wallets answer
+        // when a request is already pending.
+        logWalletConnectEvent('warn', 'session_request.busy_rejected', {
+          method: request?.method,
+          chainId: params?.chainId,
+          topic,
+          requestId: id,
+          peerName: peerMeta?.name,
+        });
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            error: {
+              code: -32002,
+              message: 'A request is already pending in the wallet',
+              data: {method: request?.method, chainId: params?.chainId},
+            },
+          },
+        });
       } else {
         const {pairingTopic} = requestSessionData;
         const sessionId = pairingTopic + '';
@@ -338,4 +394,7 @@ export const subscribeWalletConnectEvent = () => {
   walletConnect.on(WALLETCONNECT_EVENT.SESSION_REQUEST, onSessionRequest);
 
   walletConnect.on(WALLETCONNECT_EVENT.SESSION_DELETE, onSessionDelete);
+
+  subscribedClient = walletConnect;
+  subscribedHandlers = {onSessionProposal, onSessionRequest, onSessionDelete};
 };
