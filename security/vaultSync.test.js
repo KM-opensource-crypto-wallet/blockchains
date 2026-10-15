@@ -71,6 +71,9 @@ const walletsStub = createSlice({
     setWallets: (state, {payload}) => {
       state.allWallets = payload;
     },
+    deleteWallet: (state, {payload}) => {
+      state.allWallets = state.allWallets.filter(w => w.clientId !== payload);
+    },
     touchBalance: state => {
       // Changes allWallets reference without changing any secret.
       state.allWallets = state.allWallets.map(w => ({...w}));
@@ -337,6 +340,61 @@ describe('vaultSync', () => {
     await flushMicrotasks();
     await sync.flush();
     expect(blobWrites()).toBe(before);
+  });
+
+  // Keys may only leave the vault when the user deletes a wallet (or resets).
+  // Any other payload that drops a keyed wallet is a defect, never a write.
+  describe('key-drop guard', () => {
+    it('refuses a write that drops a keyed wallet and reports it', async () => {
+      await vault.createVault('pw');
+      store.dispatch(walletsStub.actions.setWallets([walletA, walletB]));
+      await sync.flush();
+      const before = blobWrites();
+
+      store.dispatch(walletsStub.actions.setWallets([walletA]));
+      await sync.flush();
+
+      expect(blobWrites()).toBe(before);
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Vault write would drop wallet keys',
+        }),
+        expect.objectContaining({
+          tags: expect.objectContaining({op: 'write_refused_key_drop'}),
+          extra: expect.objectContaining({dropped: 1, kept: 1}),
+        }),
+      );
+    });
+
+    it('deleteWallet is allowed to drop that wallet, also through a later debounced write', async () => {
+      await vault.createVault('pw');
+      store.dispatch(walletsStub.actions.setWallets([walletA, walletB]));
+      await sync.flush();
+
+      store.dispatch(walletsStub.actions.deleteWallet('b'));
+      // A balance refresh lands before the debounce fires; the delete's
+      // permission must carry over to the merged snapshot.
+      store.dispatch(walletsStub.actions.touchBalance());
+      await sync.flush();
+
+      expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('checks the vault itself for the first write of a session', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(extractVaultPayload([walletA, walletB]));
+      // No markSynced: lastWritten is unknown, so the stored blob is the reference.
+      store.dispatch(walletsStub.actions.setWallets([walletB]));
+      await sync.flush();
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('resetWallet empties the vault but keeps it (account stays)', async () => {

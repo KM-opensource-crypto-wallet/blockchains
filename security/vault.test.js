@@ -419,6 +419,59 @@ describe('vault', () => {
     expect(await vault.hasVault()).toBe(false);
   });
 
+  // A secure-store write replaces the item (delete, then add). The staged copy
+  // written first means a crash at any point leaves one complete copy.
+  describe('staged writes', () => {
+    it('every blob and envelope write goes to the staged key first and clears it after', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(payload);
+      expect(secureStore.__items.has('vault.blob')).toBe(true);
+      expect(secureStore.__items.has('vault.blob.staged')).toBe(false);
+      expect(secureStore.__items.has('vault.dek.password.staged')).toBe(false);
+    });
+
+    it('a blob missing after a crash is read back from the staged copy', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(payload);
+      // Crash between the live item's delete and add: only the staged copy is left.
+      secureStore.__items.set(
+        'vault.blob.staged',
+        secureStore.__items.get('vault.blob'),
+      );
+      secureStore.__items.delete('vault.blob');
+      vault.lock();
+      expect(await vault.unlockWithPassword('pw')).toEqual(payload);
+      // and the live item is put back
+      expect(secureStore.__items.has('vault.blob')).toBe(true);
+    });
+
+    it('an envelope missing after a crash still unlocks and still counts as a vault', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(payload);
+      secureStore.__items.set(
+        'vault.dek.password.staged',
+        secureStore.__items.get('vault.dek.password'),
+      );
+      secureStore.__items.delete('vault.dek.password');
+      vault.lock();
+      expect(await vault.hasVault()).toBe(true);
+      expect(await vault.unlockWithPassword('pw')).toEqual(payload);
+    });
+
+    it('a failed live write leaves the previous blob readable', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(payload);
+      secureStore.__state.failNextSetKey = 'vault.blob';
+      await expect(
+        vault.saveSecrets({v: 1, wallets: {w2: {phrase: 'other'}}}),
+      ).rejects.toBeTruthy();
+      vault.lock();
+      // The live item still holds the old payload; the staged one the new.
+      // The live item wins, so nothing older than the last good write is lost.
+      expect(await vault.unlockWithPassword('pw')).toEqual(payload);
+    });
+  });
+
   it('needsKdfUpgrade is true for the lowered test iteration count', async () => {
     await vault.createVault('pw');
     expect(await vault.needsKdfUpgrade()).toBe(true);
