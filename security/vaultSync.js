@@ -138,11 +138,22 @@ export const createVaultSync = ({
     // Guard against losing keys: compare with what the vault last held. The
     // last written payload is known after any write or markSynced; before
     // that (first write of a session) the vault itself is read.
-    const previous = lastWritten
-      ? JSON.parse(lastWritten)
-      : vault.isUnlocked()
-      ? await vault.readSecrets().catch(() => null)
-      : null;
+    // A failed read must not skip the guard: the write waits for a retry.
+    let previous = null;
+    if (lastWritten) {
+      previous = JSON.parse(lastWritten);
+    } else if (vault.isUnlocked()) {
+      try {
+        previous = await vault.readSecrets();
+      } catch (error) {
+        onError(error, {
+          tags: {area: 'vault', op: 'read_baseline'},
+          extra: {retryInMs: retryDelayMs},
+        });
+        keepDirty(snapshot);
+        return;
+      }
+    }
     const dropped = previous ? droppedKeyedWallets(previous, payload) : [];
     if (dropped.length && !dropsKeysByDesign(snapshot.action)) {
       onError(new Error('Vault write would drop wallet keys'), {
@@ -178,17 +189,21 @@ export const createVaultSync = ({
         tags: {area: 'vault', op: 'save_secrets'},
         extra: {retryInMs: retryDelayMs},
       });
-      // Stay dirty, unless a newer snapshot (or a reset) was taken meanwhile:
-      // that one supersedes this write and must not be overwritten by a
-      // retry of it. Otherwise retry with backoff; flush() also picks it up.
-      if (snapshot.rev === revision) {
-        pending = snapshot;
-        if (!timer) {
-          armTimer(retryDelayMs);
-        }
-      }
-      retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
+      keepDirty(snapshot);
     }
+  };
+
+  // Stay dirty, unless a newer snapshot (or a reset) was taken meanwhile:
+  // that one supersedes this write and must not be overwritten by a retry of
+  // it. Otherwise retry with backoff; flush() also picks it up.
+  const keepDirty = snapshot => {
+    if (snapshot.rev === revision) {
+      pending = snapshot;
+      if (!timer) {
+        armTimer(retryDelayMs);
+      }
+    }
+    retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
   };
 
   const schedule = (allWallets, action) => {

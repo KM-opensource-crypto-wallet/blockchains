@@ -114,7 +114,19 @@ const writeJson = async (key, value, options) => {
     return;
   }
   await secureStore.set(staged, serialized, options);
-  await secureStore.set(key, serialized, options);
+  try {
+    await secureStore.set(key, serialized, options);
+  } catch (error) {
+    // The caller sees this write as failed, so the staged copy must not
+    // outlive it while the previous live item is intact. If the live item is
+    // gone (the write failed between its delete and add) or cannot be read,
+    // the staged copy is the only one left and stays.
+    const live = await secureStore.get(key).catch(() => null);
+    if (live != null) {
+      await secureStore.remove(staged).catch(() => {});
+    }
+    throw error;
+  }
   // Best effort: a leftover staged copy is harmless (the live item wins when
   // both exist) and is replaced by the next write.
   await secureStore.remove(staged).catch(() => {});

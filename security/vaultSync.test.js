@@ -21,8 +21,9 @@ jest.mock('services/logger', () => ({
 jest.mock('security/secureStore', () => {
   const items = new Map();
   const writes = [];
-  // `failSets`: how many upcoming writes of `failSetKey` should throw.
-  const state = {failSetKey: null, failSets: 0};
+  // `failSets`: how many upcoming writes of `failSetKey` should throw;
+  // `failGets` likewise for reads of `failGetKey`.
+  const state = {failSetKey: null, failSets: 0, failGetKey: null, failGets: 0};
   return {
     capabilities: {biometric: false},
     __items: items,
@@ -33,8 +34,16 @@ jest.mock('security/secureStore', () => {
       writes.length = 0;
       state.failSetKey = null;
       state.failSets = 0;
+      state.failGetKey = null;
+      state.failGets = 0;
     },
-    get: async key => (items.has(key) ? items.get(key) : null),
+    get: async key => {
+      if (state.failGets > 0 && key === state.failGetKey) {
+        state.failGets -= 1;
+        throw new Error('secure store read failed');
+      }
+      return items.has(key) ? items.get(key) : null;
+    },
     set: async (key, value) => {
       if (state.failSets > 0 && key === state.failSetKey) {
         state.failSets -= 1;
@@ -394,6 +403,40 @@ describe('vaultSync', () => {
         extractVaultPayload([walletA, walletB]),
       );
       expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failed baseline read skips the write and keeps it dirty for a guarded retry', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(extractVaultPayload([walletA, walletB]));
+      const before = blobWrites();
+      secureStore.__state.failGetKey = 'vault.blob';
+      secureStore.__state.failGets = 1;
+
+      store.dispatch(walletsStub.actions.setWallets([walletB]));
+      jest.advanceTimersByTime(500);
+      for (let i = 0; i < 1000 && onError.mock.calls.length < 1; i++) {
+        await flushMicrotasks();
+      }
+      expect(blobWrites()).toBe(before);
+      expect(onError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({
+          tags: expect.objectContaining({op: 'read_baseline'}),
+        }),
+      );
+
+      // The retry reads the baseline again and the key-drop guard still holds.
+      await expect(sync.flush()).resolves.toBe(true);
+      expect(blobWrites()).toBe(before);
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          message: 'Vault write would drop wallet keys',
+        }),
+        expect.anything(),
+      );
     });
   });
 

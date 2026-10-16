@@ -24,6 +24,8 @@ jest.mock('security/secureStore', () => {
     sensor: true,
     removes: [],
     failNextSetKey: null,
+    // With failNextSetKey: the failed write already deleted the old item.
+    failNextSetDeletes: false,
   };
   const mock = {
     capabilities: {biometric: true},
@@ -42,6 +44,7 @@ jest.mock('security/secureStore', () => {
       state.sensor = true;
       state.removes.length = 0;
       state.failNextSetKey = null;
+      state.failNextSetDeletes = false;
       mock.capabilities.biometric = true;
     },
     isBiometricAvailable: async () => state.sensor,
@@ -71,6 +74,10 @@ jest.mock('security/secureStore', () => {
       }
       if (state.failNextSetKey === key) {
         state.failNextSetKey = null;
+        if (state.failNextSetDeletes) {
+          state.failNextSetDeletes = false;
+          items.delete(key);
+        }
         const {SecureStoreError, SECURE_STORE_ERROR_CODES} = jest.requireActual(
           'dok-wallet-blockchain-networks/security/errors',
         );
@@ -466,9 +473,23 @@ describe('vault', () => {
         vault.saveSecrets({v: 1, wallets: {w2: {phrase: 'other'}}}),
       ).rejects.toBeTruthy();
       vault.lock();
-      // The live item still holds the old payload; the staged one the new.
-      // The live item wins, so nothing older than the last good write is lost.
+      // The live item still holds the old payload, and the staged copy of the
+      // rejected write is dropped so it can never resurface later.
+      expect(secureStore.__items.has('vault.blob.staged')).toBe(false);
       expect(await vault.unlockWithPassword('pw')).toEqual(payload);
+    });
+
+    it('a live write that fails after deleting the item keeps the staged copy', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(payload);
+      const next = {v: 1, wallets: {w2: {phrase: 'other'}}};
+      secureStore.__state.failNextSetKey = 'vault.blob';
+      secureStore.__state.failNextSetDeletes = true;
+      await expect(vault.saveSecrets(next)).rejects.toBeTruthy();
+      expect(secureStore.__items.has('vault.blob')).toBe(false);
+      expect(secureStore.__items.has('vault.blob.staged')).toBe(true);
+      vault.lock();
+      expect(await vault.unlockWithPassword('pw')).toEqual(next);
     });
   });
 
