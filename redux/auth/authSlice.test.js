@@ -1,6 +1,9 @@
 import {
+  ATTEMPT_WINDOW_MS,
   authSlice,
   changePasswordSuccess,
+  handleAttempts,
+  isRecentAttempt,
   logInSuccess,
   logOutSuccess,
   signUpSuccess,
@@ -14,6 +17,7 @@ import {
 
 // authSlice imports walletsSlice for resetWallet, which drags in every chain
 // implementation; keep those off the table exactly as walletSlice.test.js does.
+jest.mock('utils/toast', () => ({showToast: jest.fn()}));
 jest.mock('dok-wallet-blockchain-networks/cryptoChain', () => ({
   getChain: jest.fn(),
   getCoin: jest.fn(),
@@ -92,5 +96,45 @@ describe('authSlice hasAccount', () => {
     expect(getIsVaultUnlocked({auth: reduce(unlocked, logOutSuccess())})).toBe(
       false,
     );
+  });
+});
+
+describe('failed login attempts', () => {
+  const NOW = 1_800_000_000_000;
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('counts a failure only inside the window and never one from the future', () => {
+    expect(isRecentAttempt(NOW, NOW)).toBe(true);
+    expect(isRecentAttempt(NOW - ATTEMPT_WINDOW_MS + 1, NOW)).toBe(true);
+    expect(isRecentAttempt(NOW - ATTEMPT_WINDOW_MS, NOW)).toBe(false);
+    expect(isRecentAttempt(NOW + 1, NOW)).toBe(false);
+  });
+
+  it('recordFailureAttempts drops future-stamped failures', () => {
+    const state = {...initial, attempts: [NOW + 60000, NOW - 1000]};
+    const next = reduce(state, authSlice.actions.recordFailureAttempts());
+    expect(next.attempts).toEqual([NOW - 1000, NOW]);
+  });
+
+  it('future-stamped failures never trigger the wipe', async () => {
+    const auth = {
+      ...initial,
+      maxAttempt: 3,
+      attempts: [NOW + 60000, NOW + 120000],
+    };
+    const dispatch = jest.fn(action =>
+      typeof action === 'function' ? Promise.resolve() : action,
+    );
+    await handleAttempts()(dispatch, () => ({auth}), undefined);
+    const types = dispatch.mock.calls
+      .map(([action]) => action?.type)
+      .filter(Boolean);
+    expect(types).not.toContain('wallets/resetWallet');
+    expect(types).toContain('auth/recordFailureAttempts');
   });
 });
