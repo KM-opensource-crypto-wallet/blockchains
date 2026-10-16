@@ -135,37 +135,6 @@ export const createVaultSync = ({
     if (serialized === lastWritten) {
       return;
     }
-    // Guard against losing keys: compare with what the vault last held. The
-    // last written payload is known after any write or markSynced; before
-    // that (first write of a session) the vault itself is read.
-    // A failed read must not skip the guard: the write waits for a retry.
-    let previous = null;
-    if (lastWritten) {
-      previous = JSON.parse(lastWritten);
-    } else if (vault.isUnlocked()) {
-      try {
-        previous = await vault.readSecrets();
-      } catch (error) {
-        onError(error, {
-          tags: {area: 'vault', op: 'read_baseline'},
-          extra: {retryInMs: retryDelayMs},
-        });
-        keepDirty(snapshot);
-        return;
-      }
-    }
-    const dropped = previous ? droppedKeyedWallets(previous, payload) : [];
-    if (dropped.length && !dropsKeysByDesign(snapshot.action)) {
-      onError(new Error('Vault write would drop wallet keys'), {
-        tags: {area: 'vault', op: 'write_refused_key_drop'},
-        extra: {
-          action: snapshot.action?.type ?? null,
-          dropped: dropped.length,
-          kept: keyedWalletIds(payload).length,
-        },
-      });
-      return;
-    }
     if (!vault.isUnlocked()) {
       // Before login the wallets slice holds the persisted, secret-stripped
       // wallets, and startup housekeeping (privacy-mode addresses, hidden
