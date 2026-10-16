@@ -135,6 +135,22 @@ export const createVaultSync = ({
     if (serialized === lastWritten) {
       return;
     }
+    if (!vault.isUnlocked()) {
+      // Before login the wallets slice holds the persisted, secret-stripped
+      // wallets, and startup housekeeping (privacy-mode addresses, hidden
+      // wallet reassignment, client ids) touches them. That is expected and
+      // carries nothing to vault. Only actual key material appearing while
+      // locked is a defect worth a report. Checked before the key-drop guard:
+      // a locked vault is never written, and a lock that strips the secrets
+      // from memory (web lockSession, rollbackUnlock) is not a key drop.
+      if (vaultPayloadHasSecrets(payload)) {
+        onError(new Error('Vault write attempted while locked'), {
+          tags: {area: 'vault', op: 'write_while_locked'},
+          extra: {wallets: Object.keys(payload.wallets).length},
+        });
+      }
+      return;
+    }
     // Guard against losing keys: compare with what the vault last held. The
     // last written payload is known after any write or markSynced; before
     // that (first write of a session) the vault itself is read.
@@ -142,7 +158,7 @@ export const createVaultSync = ({
     let previous = null;
     if (lastWritten) {
       previous = JSON.parse(lastWritten);
-    } else if (vault.isUnlocked()) {
+    } else {
       try {
         previous = await vault.readSecrets();
       } catch (error) {
@@ -164,20 +180,6 @@ export const createVaultSync = ({
           kept: keyedWalletIds(payload).length,
         },
       });
-      return;
-    }
-    if (!vault.isUnlocked()) {
-      // Before login the wallets slice holds the persisted, secret-stripped
-      // wallets, and startup housekeeping (privacy-mode addresses, hidden
-      // wallet reassignment, client ids) touches them. That is expected and
-      // carries nothing to vault. Only actual key material appearing while
-      // locked is a defect worth a report.
-      if (vaultPayloadHasSecrets(payload)) {
-        onError(new Error('Vault write attempted while locked'), {
-          tags: {area: 'vault', op: 'write_while_locked'},
-          extra: {wallets: Object.keys(payload.wallets).length},
-        });
-      }
       return;
     }
     try {
