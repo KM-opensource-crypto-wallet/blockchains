@@ -7,6 +7,12 @@ import {showToast} from 'utils/toast';
 
 export const ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
 
+// A failure counts while it is inside the window. One stamped after `now`
+// (the device clock was set back) never counts: it would otherwise stay
+// "recent" until the clock caught up and could trigger the wipe.
+export const isRecentAttempt = (timestamp, now) =>
+  timestamp <= now && now - timestamp < ATTEMPT_WINDOW_MS;
+
 export const handleAttempts = createAsyncThunk(
   'auth/handleAttempts',
   async (payload, thunkAPI) => {
@@ -20,8 +26,8 @@ export const handleAttempts = createAsyncThunk(
       // recordFailureAttempts keeps). Counting stale ones let a single typo,
       // days after earlier failures, wipe every wallet.
       const now = Date.now();
-      const failureCount = attempts.filter(
-        timestamp => now - timestamp < ATTEMPT_WINDOW_MS,
+      const failureCount = attempts.filter(timestamp =>
+        isRecentAttempt(timestamp, now),
       ).length;
       const attemptsLeft = threshold - failureCount;
 
@@ -138,12 +144,11 @@ export const authSlice = createSlice({
       state.lastUpdateCheckTimestamp = payload;
     },
     recordFailureAttempts: state => {
-      const windowMs = ATTEMPT_WINDOW_MS;
       const now = Date.now();
 
       // Keep only recent attempts
-      state.attempts = state.attempts.filter(
-        timestamp => now - timestamp < windowMs,
+      state.attempts = state.attempts.filter(timestamp =>
+        isRecentAttempt(timestamp, now),
       );
 
       // Add new attempt
