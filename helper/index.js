@@ -8,6 +8,8 @@ import {
   SCAN_URL,
   IS_SANDBOX,
   CHAIN_CONFIG,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+  SPONSORED_GAS_TOKENS,
 } from 'dok-wallet-blockchain-networks/config/config';
 
 import bs58 from 'bs58';
@@ -353,6 +355,21 @@ export const SWAP_QUOTE_EXPIRED_ERROR =
 export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
+// The batch nonce moved between signing and broadcast, so nothing executed and
+// the caller should re-quote rather than record a failure.
+export const SPONSORED_BATCH_RETRY_ERROR =
+  'Sponsored transaction was interrupted. Please try again.';
+
+export const isSponsoredRetryError = message =>
+  message === SPONSORED_BATCH_RETRY_ERROR;
+
+export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
+
+const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
+
+// The worker refused the quote before broadcasting, so nothing executed.
+export const isSponsoredQuoteError = code => SPONSOR_QUOTE_CODES.includes(code);
+
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
@@ -376,6 +393,18 @@ export const isUnclaimDepositSupportedChain = chain_name =>
 
 export const isEip7702SupportedChain = chain_name =>
   EIP_7702_SUPPORTED_CHAIN.includes(chain_name);
+
+export const isSponsoredGasChain = chain_name =>
+  !!BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+
+export const getSponsoredGasTokenSymbol = (chain_name, contractAddress) => {
+  if (!contractAddress || !isSponsoredGasChain(chain_name)) {
+    return null;
+  }
+  return (
+    SPONSORED_GAS_TOKENS[chain_name]?.[contractAddress.toLowerCase()] ?? null
+  );
+};
 
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
