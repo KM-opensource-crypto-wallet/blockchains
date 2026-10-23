@@ -326,7 +326,10 @@ export const disableBiometric = async () => {
 /**
  * Login with the OS biometric prompt. Enrollment change → the platform has
  * destroyed the key: the item is removed and BIOMETRIC_INVALIDATED is thrown
- * so the caller falls back to the password and re-enables afterwards.
+ * so the caller falls back to the password and re-enables afterwards. The
+ * same applies when the platform refuses the item as altered: it is only a
+ * copy of the DEK, and kept in place it would fail every attempt and block
+ * re-enrolment.
  */
 export const unlockWithBiometric = async prompt => {
   await assertBiometricAvailable();
@@ -342,6 +345,14 @@ export const unlockWithBiometric = async prompt => {
       throw new VaultError(
         VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
         'Biometric enrollment changed; unlock with your password',
+        error,
+      );
+    }
+    if (error?.code === SECURE_STORE_ERROR_CODES.INTEGRITY_VIOLATION) {
+      await disableBiometric();
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
+        'Biometric unlock data could not be verified; unlock with your password',
         error,
       );
     }

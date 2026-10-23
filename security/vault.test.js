@@ -20,6 +20,7 @@ jest.mock('security/secureStore', () => {
     invalidated: false,
     cancelNext: false,
     lockoutNext: false,
+    integrityNext: false,
     prompts: 0,
     sensor: true,
     removes: [],
@@ -40,6 +41,7 @@ jest.mock('security/secureStore', () => {
       state.invalidated = false;
       state.cancelNext = false;
       state.lockoutNext = false;
+      state.integrityNext = false;
       state.prompts = 0;
       state.sensor = true;
       state.removes.length = 0;
@@ -64,6 +66,12 @@ jest.mock('security/secureStore', () => {
         if (state.lockoutNext) {
           state.lockoutNext = false;
           throw new SecureStoreError(SECURE_STORE_ERROR_CODES.LOCKED_OUT);
+        }
+        if (state.integrityNext) {
+          state.integrityNext = false;
+          throw new SecureStoreError(
+            SECURE_STORE_ERROR_CODES.INTEGRITY_VIOLATION,
+          );
         }
       }
       return items.has(key) ? items.get(key) : null;
@@ -339,6 +347,28 @@ describe('vault', () => {
       await expect(
         vault.unlockWithBiometric({title: 'x'}),
       ).rejects.toMatchObject({code: VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED});
+      expect(secureStore.__items.has('vault.dek.biometric')).toBe(false);
+      expect(await vault.hasBiometric()).toBe(false);
+      expect(vault.isUnlocked()).toBe(false);
+      await vault.unlockWithPassword('pw');
+      expect(vault.isUnlocked()).toBe(true);
+    });
+
+    it('altered biometric item → item removed, BIOMETRIC_INVALIDATED, password still works', async () => {
+      // The platform refuses the biometric DEK copy as altered (RNSI metadata
+      // HMAC). Left in place it would fail every attempt and block
+      // re-enrolment, which only runs while no biometric item exists.
+      await vault.createVault('pw');
+      await vault.enableBiometric({title: 'x'});
+      vault.lock();
+      secureStore.__state.integrityNext = true;
+
+      await expect(
+        vault.unlockWithBiometric({title: 'x'}),
+      ).rejects.toMatchObject({
+        name: 'VaultError',
+        code: VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
+      });
       expect(secureStore.__items.has('vault.dek.biometric')).toBe(false);
       expect(await vault.hasBiometric()).toBe(false);
       expect(vault.isUnlocked()).toBe(false);
