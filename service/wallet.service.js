@@ -1,6 +1,9 @@
 import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {getTransferDataEstimateFee} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
-import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
+import {
+  getPrice,
+  getPriceChange24h,
+} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {
   getPendingTransactions,
   getPendingTransactionsWithKey,
@@ -183,6 +186,9 @@ export const getCoinSnapshot = async (
       ),
       totalBalance: parseBalance(totalBalanceString, coinDef?.decimal),
       currencyRate: currentPrice,
+      // Only alongside a fetched price (skipData passes no prices).
+      priceChange24h:
+        coinDef.symbol in priceObj ? getPriceChange24h(coinDef.symbol) : null,
       transactions: finalTransactions,
       staking: finalStaking,
       stakingInfo,
