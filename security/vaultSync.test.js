@@ -393,6 +393,24 @@ describe('vaultSync', () => {
       expect(onError).not.toHaveBeenCalled();
     });
 
+    it('a lock that strips the secrets is not reported as a key drop', async () => {
+      // Web lockSession / rollbackUnlock: markSynced, then clearWalletSecrets
+      // (a debounced wallets/ change), then the vault locks before it fires.
+      await vault.createVault('pw');
+      sync.markSynced(extractVaultPayload([walletA, walletB]));
+      store.dispatch(
+        walletsStub.actions.setWallets([
+          {clientId: 'a', coins: []},
+          {clientId: 'b', coins: [{chain_name: 'ethereum', symbol: 'ETH'}]},
+        ]),
+      );
+      vault.lock();
+      jest.advanceTimersByTime(500);
+      await flushMicrotasks();
+      await sync.flush();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
     it('checks the vault itself for the first write of a session', async () => {
       await vault.createVault('pw');
       await vault.saveSecrets(extractVaultPayload([walletA, walletB]));
