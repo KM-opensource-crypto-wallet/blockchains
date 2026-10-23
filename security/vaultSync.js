@@ -46,6 +46,41 @@ export const IMMEDIATE_VAULT_WRITE_ACTIONS = Object.freeze([
 const RESET_ACTION = 'wallets/resetWallet';
 const LOGOUT_ACTION = 'auth/logOutSuccess';
 
+// The only actions that may make a wallet's keys disappear from the vault:
+// the user deleting a wallet, and createWallet's `replace` (every other
+// wallet goes). A payload that drops a keyed wallet for any other reason is a
+// defect (a reducer emptying allWallets, a partial hydrate) and must never
+// overwrite the vault: it is reported and skipped.
+export const KEY_DROPPING_ACTIONS = Object.freeze([
+  'wallets/deleteWallet',
+  RESET_ACTION,
+]);
+const dropsKeysByDesign = action =>
+  KEY_DROPPING_ACTIONS.includes(action?.type) ||
+  (action?.type === 'wallets/createWallet/fulfilled' &&
+    Boolean(action?.payload?.replace));
+
+const walletHasKeys = entry =>
+  Boolean(entry?.phrase) ||
+  Boolean(entry?.privateKey) ||
+  Object.values(entry?.coins || {}).some(
+    coin => coin?.privateKey || coin?.extendedPrivateKey,
+  ) ||
+  Object.values(entry?.deriveKeys || {}).some(
+    family => family && Object.keys(family).length > 0,
+  );
+
+const keyedWalletIds = payload =>
+  Object.entries(payload?.wallets || {})
+    .filter(([, entry]) => walletHasKeys(entry))
+    .map(([id]) => id);
+
+/** Wallets that had keys in `previous` and have none (or are gone) in `next`. */
+export const droppedKeyedWallets = (previous, next) => {
+  const stillKeyed = new Set(keyedWalletIds(next));
+  return keyedWalletIds(previous).filter(id => !stillKeyed.has(id));
+};
+
 export const createVaultSync = ({
   debounceMs = VAULT_SYNC_DEBOUNCE_MS,
   onError = captureError,
@@ -63,7 +98,11 @@ export const createVaultSync = ({
   // a reset or a newer write would put old key material back into the vault.
   let revision = 0;
 
-  const takeSnapshot = allWallets => ({wallets: allWallets, rev: ++revision});
+  const takeSnapshot = (allWallets, action) => ({
+    wallets: allWallets,
+    rev: ++revision,
+    action,
+  });
   const takePending = () => {
     const snapshot = pending;
     pending = null;
@@ -101,13 +140,46 @@ export const createVaultSync = ({
       // wallets, and startup housekeeping (privacy-mode addresses, hidden
       // wallet reassignment, client ids) touches them. That is expected and
       // carries nothing to vault. Only actual key material appearing while
-      // locked is a defect worth a report.
+      // locked is a defect worth a report. Checked before the key-drop guard:
+      // a locked vault is never written, and a lock that strips the secrets
+      // from memory (web lockSession, rollbackUnlock) is not a key drop.
       if (vaultPayloadHasSecrets(payload)) {
         onError(new Error('Vault write attempted while locked'), {
           tags: {area: 'vault', op: 'write_while_locked'},
           extra: {wallets: Object.keys(payload.wallets).length},
         });
       }
+      return;
+    }
+    // Guard against losing keys: compare with what the vault last held. The
+    // last written payload is known after any write or markSynced; before
+    // that (first write of a session) the vault itself is read.
+    // A failed read must not skip the guard: the write waits for a retry.
+    let previous = null;
+    if (lastWritten) {
+      previous = JSON.parse(lastWritten);
+    } else {
+      try {
+        previous = await vault.readSecrets();
+      } catch (error) {
+        onError(error, {
+          tags: {area: 'vault', op: 'read_baseline'},
+          extra: {retryInMs: retryDelayMs},
+        });
+        keepDirty(snapshot);
+        return;
+      }
+    }
+    const dropped = previous ? droppedKeyedWallets(previous, payload) : [];
+    if (dropped.length && !dropsKeysByDesign(snapshot.action)) {
+      onError(new Error('Vault write would drop wallet keys'), {
+        tags: {area: 'vault', op: 'write_refused_key_drop'},
+        extra: {
+          action: snapshot.action?.type ?? null,
+          dropped: dropped.length,
+          kept: keyedWalletIds(payload).length,
+        },
+      });
       return;
     }
     try {
@@ -119,21 +191,29 @@ export const createVaultSync = ({
         tags: {area: 'vault', op: 'save_secrets'},
         extra: {retryInMs: retryDelayMs},
       });
-      // Stay dirty, unless a newer snapshot (or a reset) was taken meanwhile:
-      // that one supersedes this write and must not be overwritten by a
-      // retry of it. Otherwise retry with backoff; flush() also picks it up.
-      if (snapshot.rev === revision) {
-        pending = snapshot;
-        if (!timer) {
-          armTimer(retryDelayMs);
-        }
-      }
-      retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
+      keepDirty(snapshot);
     }
   };
 
-  const schedule = allWallets => {
-    pending = takeSnapshot(allWallets);
+  // Stay dirty, unless a newer snapshot (or a reset) was taken meanwhile:
+  // that one supersedes this write and must not be overwritten by a retry of
+  // it. Otherwise retry with backoff; flush() also picks it up.
+  const keepDirty = snapshot => {
+    if (snapshot.rev === revision) {
+      pending = snapshot;
+      if (!timer) {
+        armTimer(retryDelayMs);
+      }
+    }
+    retryDelayMs = Math.min(retryDelayMs * 2, VAULT_SYNC_MAX_RETRY_MS);
+  };
+
+  const schedule = (allWallets, action) => {
+    // A debounced snapshot keeps the first key-dropping action that led to
+    // it, so a deleteWallet followed by a balance refresh is still allowed.
+    const carried =
+      pending && dropsKeysByDesign(pending.action) ? pending.action : action;
+    pending = takeSnapshot(allWallets, carried);
     armTimer(debounceMs);
   };
 
@@ -148,9 +228,9 @@ export const createVaultSync = ({
       if (IMMEDIATE_VAULT_WRITE_ACTIONS.includes(action.type)) {
         cancelTimer();
         pending = null;
-        await enqueue(writeNow(takeSnapshot(allWallets)));
+        await enqueue(writeNow(takeSnapshot(allWallets, action)));
       } else {
-        schedule(allWallets);
+        schedule(allWallets, action);
       }
     },
   });
@@ -165,7 +245,7 @@ export const createVaultSync = ({
       // failure is reported, kept dirty and retried (timer / flush) instead of
       // leaving the old wallets' keys in the blob. Locked → nothing to do,
       // exactly as writeNow decides for a secret-free payload.
-      await enqueue(writeNow(takeSnapshot([])));
+      await enqueue(writeNow(takeSnapshot([], {type: RESET_ACTION})));
     },
   });
 
