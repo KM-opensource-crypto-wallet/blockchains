@@ -416,11 +416,36 @@ describe('Solana fee inputs', () => {
     );
   });
 
-  it('caps a spiking estimate', async () => {
-    quickNodeAnswers({result: {recommended: 50_000_000}});
+  it('trims only the buffer when recommended is just under the cap', async () => {
+    quickNodeAnswers({result: {recommended: 1_900_000}});
 
     await expect(getPriorityFee()).resolves.toBe(
       PRIORITY_FEE_MAX_MICRO_LAMPORTS,
+    );
+  });
+
+  it('refuses, rather than paying below it, when recommended is above the cap', async () => {
+    quickNodeAnswers({result: {recommended: 2_500_000}});
+
+    const refusal = getPriorityFee();
+    await expect(refusal).rejects.toThrow(/^The Solana network is congested/);
+    await expect(refusal).rejects.toThrow(
+      "a priority fee of 2500000 micro-lamports per compute unit, above this wallet's limit of 2000000",
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      'solana.priority_fee_above_cap',
+      2_500_000,
+    );
+  });
+
+  it('fails the fee estimate with that message, so Transfer shows it', async () => {
+    quickNodeAnswers({result: {recommended: 2_500_000}});
+    jest
+      .spyOn(Connection.prototype, 'simulateTransaction')
+      .mockResolvedValue({value: {unitsConsumed: 450, err: null}});
+
+    await expect(estimateSol()).rejects.toThrow(
+      /^The Solana network is congested/,
     );
   });
 

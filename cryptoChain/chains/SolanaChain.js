@@ -2147,8 +2147,20 @@ export const getPriorityFee = async () => {
     console.warn('solana.priority_fee_fallback', e?.message);
     return PRIORITY_FEE_FALLBACK_MICRO_LAMPORTS;
   }
+  // Capping below `recommended` would put the send back on the unstaked path
+  // that drops it, so refuse instead. The message starts with "The" so the
+  // estimate thunk shows it on the Transfer screen.
+  if (recommended > PRIORITY_FEE_MAX_MICRO_LAMPORTS) {
+    console.warn('solana.priority_fee_above_cap', recommended);
+    throw new Error(
+      `The Solana network is congested: a reliable send needs a priority fee of ${Math.ceil(
+        recommended,
+      )} micro-lamports per compute unit, above this wallet's limit of ${PRIORITY_FEE_MAX_MICRO_LAMPORTS}. Please try again in a few minutes.`,
+    );
+  }
   const fee = Math.ceil((recommended * PRIORITY_FEE_BUFFER_PERCENT) / 100);
   if (fee > PRIORITY_FEE_MAX_MICRO_LAMPORTS) {
+    // Only the buffer is trimmed; the fee still meets `recommended`.
     console.warn('solana.priority_fee_capped', fee);
     return PRIORITY_FEE_MAX_MICRO_LAMPORTS;
   }
