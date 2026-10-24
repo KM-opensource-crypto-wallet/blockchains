@@ -75,6 +75,7 @@ import {
   isPlausibleTxHash,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
+  SOLANA_PREFLIGHT_REJECTED_PREFIX,
   MORALIS_CHAIN_TO_CHAIN,
   NFT_SUPPORTED_CHAIN,
   HEDERA_USER_MESSAGES,
@@ -1336,6 +1337,9 @@ const classifySendRejection = message => {
   if (HEDERA_USER_MESSAGES.includes(message)) {
     return 'hedera_precondition';
   }
+  if (message.startsWith(SOLANA_PREFLIGHT_REJECTED_PREFIX)) {
+    return 'solana_preflight';
+  }
   if (
     message === 'could not coalesce error' ||
     message.includes('nonce too low')
@@ -1689,6 +1693,17 @@ export const sendFunds = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
+        } else if (confirmTransaction?.status === 'dropped') {
+          // The chain reported the broadcast transaction can provably never
+          // land (Solana: blockhash expired with no trace of the signature),
+          // so nothing was sent and retrying is safe.
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction not sent',
+            message:
+              'The network did not process this transaction. No funds were sent. Please try again.',
+            toastId,
+          });
         } else if (confirmTransaction?.status === 'failed') {
           // DEX swaps have no provider-side status API (the on-chain result
           // IS the outcome), so the app is the source of truth here. The
@@ -1761,18 +1776,26 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        const isDropped = confirmTransaction?.status === 'dropped';
         const status =
           confirmTransaction === 'pending'
             ? 2
-            : confirmTransaction?.status === 'failed'
+            : confirmTransaction?.status === 'failed' || isDropped
             ? 1
             : 3;
         // Public chain data only: no addresses or amounts next to user.id.
-        logger.info('send.submitted', {
-          ...describeSendForLogs(txData),
-          status,
-          tx_hash,
-        });
+        if (isDropped) {
+          logger.warn('send.dropped', {
+            ...describeSendForLogs(txData),
+            tx_hash,
+          });
+        } else {
+          logger.info('send.submitted', {
+            ...describeSendForLogs(txData),
+            status,
+            tx_hash,
+          });
+        }
         return {tx_hash, status};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
@@ -1889,6 +1912,16 @@ export const sendFunds = createAsyncThunk(
           type: 'errorToast',
           title: 'Hedera',
           message: e.message,
+        });
+        return;
+      }
+      // Every Solana RPC refused the transaction in its preflight check, so
+      // nothing was forwarded; show the network's reason.
+      if (e?.message?.startsWith(SOLANA_PREFLIGHT_REJECTED_PREFIX)) {
+        showToast({
+          type: 'errorToast',
+          title: 'Transaction not sent',
+          message: `${e.message.replace(/\.$/, '')}. No funds were sent.`,
         });
         return;
       }

@@ -353,6 +353,12 @@ export const SWAP_QUOTE_EXPIRED_ERROR =
 export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
+// Prefix of the error SolanaChain throws when every RPC refused a
+// transaction in its preflight check (nothing was forwarded); sendFunds
+// matches on it to show the network's reason instead of a generic error.
+export const SOLANA_PREFLIGHT_REJECTED_PREFIX =
+  'Solana transaction rejected before sending';
+
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
 
