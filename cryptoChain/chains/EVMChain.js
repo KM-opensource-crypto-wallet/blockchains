@@ -2581,6 +2581,31 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
       return 'pending';
     },
+    // wallet_getCallsStatus (EIP-5792): the batch id is the hash of the
+    // execute() transaction, so its receipt is the batch status. First
+    // receipt across every RPC url (a lagging node answers null before the
+    // others); throws only when every url failed.
+    getBatchCallsStatus: async ({txHash}) => {
+      let lastError = null;
+      let answered = false;
+      for (const url of allRpcUrls) {
+        try {
+          const receipt = await createRpcProvider(url).getTransactionReceipt(
+            txHash,
+          );
+          answered = true;
+          if (receipt) {
+            return {receipt};
+          }
+        } catch (e) {
+          lastError = e;
+        }
+      }
+      if (!answered && lastError) {
+        throw lastError;
+      }
+      return {receipt: null};
+    },
     checkDelegation: ({address}) =>
       retryFunc(
         async evmProvider => {

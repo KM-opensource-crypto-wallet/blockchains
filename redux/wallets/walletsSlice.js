@@ -1050,6 +1050,7 @@ export const walletConnect = createAsyncThunk(
     } = payload;
     const {
       getWalletConnect,
+      recordIssuedBatch,
     } = require('dok-wallet-blockchain-networks/service/walletconnect');
     const connector = getWalletConnect();
     let toastId;
@@ -1238,6 +1239,16 @@ export const walletConnect = createAsyncThunk(
       }
 
       if (tx) {
+        if (method === ETH_WALLET_SEND_CALLS) {
+          // Before the reply: the dApp polls wallet_getCallsStatus with this
+          // id as soon as it has it, and only recorded batches are answered.
+          recordIssuedBatch({
+            topic,
+            chainId,
+            id: tx,
+            walletClientId: currentWallet?.clientId,
+          });
+        }
         await connector?.respondSessionRequest({
           topic,
           response: {id, result: tx, jsonrpc: '2.0'},
