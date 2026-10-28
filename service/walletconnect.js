@@ -11,12 +11,19 @@ import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/w
 import {getSdkError} from '@walletconnect/utils';
 import {
   CHAIN_CONFIG,
+  config,
   isSupportedWalletConnectMethod,
 } from 'dok-wallet-blockchain-networks/config/config';
 import {
   answerAddEthereumChain,
   answerSwitchEthereumChain,
+  isWalletSupportedEvmChain,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectEvmChain';
+import {
+  buildCallsStatus,
+  isBatchCallsId,
+  unknownBundleIdError,
+} from 'dok-wallet-blockchain-networks/helper/walletConnectCallsStatus';
 import {showToast} from 'utils/toast';
 import {logWalletConnectEvent} from 'utils/logger';
 
@@ -118,8 +125,39 @@ const supportsAtomicBatch = hexChainId =>
 // else will ever reply, so the dApp would wait for the relay timeout.
 const AUTO_ANSWERED_METHODS = new Set([
   'wallet_getCapabilities',
+  'wallet_getCallsStatus',
   'hedera_getNodeAddresses',
 ]);
+
+// EIP-5792 poll for a wallet_sendCalls batch. The id is the batch
+// transaction's hash (what wallet_sendCalls answered with), read on the
+// session chain the dApp polls from.
+const answerGetCallsStatus = async (params, request) => {
+  const id = request?.params?.[0];
+  if (!isBatchCallsId(id)) {
+    return unknownBundleIdError();
+  }
+  const caipChainId = params?.chainId;
+  if (!isWalletSupportedEvmChain(caipChainId)) {
+    return {
+      error: {
+        code: -32602,
+        message: `Chain ${caipChainId} is not an EVM chain this wallet serves`,
+      },
+    };
+  }
+  const {chain_name} = config.WALLET_CONNECT_SUPPORTED_CHAIN[caipChainId];
+  const {
+    EVMChain,
+  } = require('dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain');
+  const {receipt, known} = await EVMChain(chain_name).getBatchCallsStatus({
+    txHash: id,
+  });
+  if (!receipt && !known) {
+    return unknownBundleIdError();
+  }
+  return {result: buildCallsStatus({id, caipChainId, receipt})};
+};
 
 // Listeners are registered once per WalletKit client. subscribeWalletConnectEvent
 // is called on every pairing and once per restored session; without this guard
@@ -271,6 +309,15 @@ export const subscribeWalletConnectEvent = () => {
         await walletConnect.respondSessionRequest({
           topic,
           response: {id, jsonrpc: '2.0', result: capabilities},
+        });
+      } else if (request?.method === 'wallet_getCallsStatus') {
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            ...(await answerGetCallsStatus(params, request)),
+          },
         });
       } else if (request?.method === 'hedera_getNodeAddresses') {
         // HIP-820 read-only method: no signature, nothing to approve.

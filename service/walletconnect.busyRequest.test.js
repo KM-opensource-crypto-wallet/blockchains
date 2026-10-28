@@ -122,6 +122,19 @@ describe('onSessionRequest: a request arriving while one is on screen', () => {
     expect(response.result).toEqual({'0x1': {atomic: {status: 'supported'}}});
   });
 
+  it('still answers wallet_getCallsStatus while busy', async () => {
+    store.getState.mockImplementation(busy);
+    await handlers.session_request(
+      sessionRequest('wallet_getCallsStatus', ['0x1234'], 'eip155:1'),
+    );
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
+    // Not the -32002 busy reply: a status poll never touches the modal.
+    expect(response.error.code).toBe(5730);
+    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+  });
+
   it('still rejects unsupported methods with -32601 while busy', async () => {
     store.getState.mockImplementation(busy);
     await handlers.session_request(

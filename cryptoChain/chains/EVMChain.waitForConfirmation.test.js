@@ -2,7 +2,8 @@
  * EVMChain.waitForConfirmation: a transient RPC failure while waiting must not
  * be reported as 'pending' (which the send flow shows as "Transaction take too
  * long"). The whole time budget has to be used first, and a bare hash string
- * has to be polled, not looked up once.
+ * has to be polled, not looked up once. Also covers getBatchCallsStatus,
+ * which reads the same receipts for wallet_getCallsStatus.
  *
  * Runner: repo jest.config.js (RN preset):
  *   npx jest dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain.waitForConfirmation.test.js
@@ -338,5 +339,65 @@ describe('EVMChain.waitForConfirmation', () => {
       await expect(waitFor(loadChain(), [HASH])).resolves.toBe('pending');
       expect(Date.now() - started).toBeGreaterThanOrEqual(BUDGET - 1);
     });
+  });
+});
+
+// wallet_getCallsStatus (EIP-5792) reads the batch transaction through the
+// same RPC fallback; "unknown" must only be claimed when an RPC answered.
+describe('EVMChain.getBatchCallsStatus', () => {
+  beforeEach(() => {
+    setProviders();
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns the first receipt any RPC url has', async () => {
+    setProviders({
+      free: {getTransactionReceipt: jest.fn(async () => RECEIPT)},
+    });
+    await expect(
+      loadChain().getBatchCallsStatus({txHash: HASH}),
+    ).resolves.toEqual({receipt: RECEIPT});
+  });
+
+  it('reports a transaction the RPCs know but have not mined as known', async () => {
+    setProviders({
+      free: {getTransaction: jest.fn(async () => ({hash: HASH}))},
+    });
+    await expect(
+      loadChain().getBatchCallsStatus({txHash: HASH}),
+    ).resolves.toEqual({receipt: null, known: true});
+  });
+
+  it('reports unknown when an RPC answered and nobody has the transaction', async () => {
+    setProviders({
+      proxy: {
+        getTransactionReceipt: jest.fn(async () => {
+          throw serverError();
+        }),
+        getTransaction: jest.fn(async () => {
+          throw serverError();
+        }),
+      },
+    });
+    await expect(
+      loadChain().getBatchCallsStatus({txHash: HASH}),
+    ).resolves.toEqual({receipt: null, known: false});
+  });
+
+  it('throws instead of claiming unknown when every RPC url failed', async () => {
+    const failing = {
+      getTransactionReceipt: jest.fn(async () => {
+        throw serverError();
+      }),
+      getTransaction: jest.fn(async () => {
+        throw serverError();
+      }),
+    };
+    setProviders({proxy: failing, free: failing});
+    await expect(
+      loadChain().getBatchCallsStatus({txHash: HASH}),
+    ).rejects.toThrow('bad response');
   });
 });
