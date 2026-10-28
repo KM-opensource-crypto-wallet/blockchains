@@ -2582,37 +2582,29 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       return 'pending';
     },
     // wallet_getCallsStatus (EIP-5792): the batch id is the hash of the
-    // execute() transaction, so its receipt is the batch status. `known`
-    // separates "not mined yet" from "no such transaction"; throws only when
-    // every RPC url failed, so an outage is never reported as unknown.
+    // execute() transaction, so its receipt is the batch status. First
+    // receipt across every RPC url (a lagging node answers null before the
+    // others); throws only when every url failed.
     getBatchCallsStatus: async ({txHash}) => {
-      const firstAnswer = async lookup => {
-        let lastError = null;
-        let answered = false;
-        for (const url of allRpcUrls) {
-          try {
-            const result = await lookup(createRpcProvider(url));
-            answered = true;
-            if (result) {
-              return result;
-            }
-          } catch (e) {
-            lastError = e;
+      let lastError = null;
+      let answered = false;
+      for (const url of allRpcUrls) {
+        try {
+          const receipt = await createRpcProvider(url).getTransactionReceipt(
+            txHash,
+          );
+          answered = true;
+          if (receipt) {
+            return {receipt};
           }
+        } catch (e) {
+          lastError = e;
         }
-        if (!answered && lastError) {
-          throw lastError;
-        }
-        return null;
-      };
-      const receipt = await firstAnswer(provider =>
-        provider.getTransactionReceipt(txHash),
-      );
-      if (receipt) {
-        return {receipt};
       }
-      const tx = await firstAnswer(provider => provider.getTransaction(txHash));
-      return {receipt: null, known: Boolean(tx)};
+      if (!answered && lastError) {
+        throw lastError;
+      }
+      return {receipt: null};
     },
     checkDelegation: ({address}) =>
       retryFunc(

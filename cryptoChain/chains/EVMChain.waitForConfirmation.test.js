@@ -342,8 +342,9 @@ describe('EVMChain.waitForConfirmation', () => {
   });
 });
 
-// wallet_getCallsStatus (EIP-5792) reads the batch transaction through the
-// same RPC fallback; "unknown" must only be claimed when an RPC answered.
+// wallet_getCallsStatus (EIP-5792) reads the batch transaction's receipt
+// through the same RPC fallback. A partial outage must read as "no receipt
+// yet", and only a full outage as an error.
 describe('EVMChain.getBatchCallsStatus', () => {
   beforeEach(() => {
     setProviders();
@@ -361,37 +362,22 @@ describe('EVMChain.getBatchCallsStatus', () => {
     ).resolves.toEqual({receipt: RECEIPT});
   });
 
-  it('reports a transaction the RPCs know but have not mined as known', async () => {
-    setProviders({
-      free: {getTransaction: jest.fn(async () => ({hash: HASH}))},
-    });
-    await expect(
-      loadChain().getBatchCallsStatus({txHash: HASH}),
-    ).resolves.toEqual({receipt: null, known: true});
-  });
-
-  it('reports unknown when an RPC answered and nobody has the transaction', async () => {
+  it('returns no receipt when an RPC answered and none has one, even if another failed', async () => {
     setProviders({
       proxy: {
         getTransactionReceipt: jest.fn(async () => {
-          throw serverError();
-        }),
-        getTransaction: jest.fn(async () => {
           throw serverError();
         }),
       },
     });
     await expect(
       loadChain().getBatchCallsStatus({txHash: HASH}),
-    ).resolves.toEqual({receipt: null, known: false});
+    ).resolves.toEqual({receipt: null});
   });
 
-  it('throws instead of claiming unknown when every RPC url failed', async () => {
+  it('throws when every RPC url failed', async () => {
     const failing = {
       getTransactionReceipt: jest.fn(async () => {
-        throw serverError();
-      }),
-      getTransaction: jest.fn(async () => {
         throw serverError();
       }),
     };

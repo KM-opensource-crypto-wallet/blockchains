@@ -8,7 +8,6 @@
  */
 import {
   buildCallsStatus,
-  isBatchCallsId,
   unknownBundleIdError,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCallsStatus';
 
@@ -33,19 +32,6 @@ const receipt = (overrides = {}) => ({
     },
   ],
   ...overrides,
-});
-
-describe('isBatchCallsId', () => {
-  it('accepts a 32-byte hex transaction hash', () => {
-    expect(isBatchCallsId(HASH)).toBe(true);
-  });
-
-  it('rejects anything wallet_sendCalls could not have returned', () => {
-    expect(isBatchCallsId(undefined)).toBe(false);
-    expect(isBatchCallsId('0x1234')).toBe(false);
-    expect(isBatchCallsId('ab'.repeat(32))).toBe(false);
-    expect(isBatchCallsId({id: HASH})).toBe(false);
-  });
 });
 
 describe('buildCallsStatus', () => {

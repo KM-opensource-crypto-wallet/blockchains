@@ -3,8 +3,8 @@
  * after wallet_sendCalls until the batch settles. wallet_sendCalls returns the
  * hash of the single EIP-7702 execute() transaction that carries every call,
  * so that hash is the batch id: the status is that transaction's receipt and
- * the batch is always atomic. Nothing is stored wallet-side.
- * Pure functions, unit tested.
+ * the batch is always atomic. Which ids a session may poll is tracked in
+ * service/walletconnect.js. Pure functions, unit tested.
  */
 import {toQuantity} from 'ethers';
 
@@ -14,9 +14,6 @@ const CONFIRMED = 200;
 const REVERTED = 500;
 // EIP-5792: "Unknown bundle id".
 const UNKNOWN_BUNDLE_ID_CODE = 5730;
-
-export const isBatchCallsId = id =>
-  typeof id === 'string' && /^0x[0-9a-fA-F]{64}$/.test(id);
 
 export const unknownBundleIdError = () => ({
   error: {code: UNKNOWN_BUNDLE_ID_CODE, message: 'Unknown bundle id'},

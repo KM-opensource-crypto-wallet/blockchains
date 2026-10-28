@@ -15,7 +15,10 @@ import {
   getEvmWalletConnectTxDigest,
 } from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
-import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletconnect';
+import {
+  getWalletConnect,
+  recordIssuedBatch,
+} from 'dok-wallet-blockchain-networks/service/walletconnect';
 import {showToast} from 'utils/toast';
 
 jest.mock('dok-wallet-blockchain-networks/cryptoChain', () => ({
@@ -39,6 +42,7 @@ jest.mock('dok-wallet-blockchain-networks/service/coinMarketCap', () => ({
 }));
 jest.mock('dok-wallet-blockchain-networks/service/walletconnect', () => ({
   getWalletConnect: jest.fn(),
+  recordIssuedBatch: jest.fn(),
 }));
 jest.mock('utils/toast', () => ({showToast: jest.fn()}));
 
@@ -47,6 +51,7 @@ const TO = '0x1111111111111111111111111111111111111111';
 const CHAIN = 'eip155:1';
 const REQUEST_ID = 1001;
 const TOPIC = 'topic-1';
+const BATCH_HASH = '0x' + 'ab'.repeat(32);
 
 const params0 = {
   from: FROM,
@@ -94,6 +99,8 @@ const executor = {
   sendRawTransaction: jest.fn(async () => '0xhash'),
   signRawTransaction: jest.fn(async () => '0xraw'),
   personalSign: jest.fn(async () => '0xsig'),
+  getEstimateFeeForBatchTransaction: jest.fn(async () => ({nonce: 1})),
+  sendBatchTransaction: jest.fn(async () => BATCH_HASH),
 };
 const connector = {respondSessionRequest: jest.fn(async () => {})};
 
@@ -275,5 +282,90 @@ describe('walletConnect thunk: review binding for EVM transactions', () => {
     expect(store.getActions().map(a => a.type)).toContain(
       'walletConnect/clearWalletConnectTransactionData',
     );
+  });
+});
+
+// wallet_getCallsStatus answers only for batch ids recorded here, so the
+// record has to exist before the dApp can receive the id.
+describe('walletConnect thunk: wallet_sendCalls batch record', () => {
+  const sendCalls = () =>
+    walletConnect(
+      basePayload({
+        method: 'wallet_sendCalls',
+        transactionData: {batchCalls: [{to: TO, value: '0x0', data: '0x'}]},
+      }),
+    );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    getWalletConnect.mockReturnValue(connector);
+  });
+  afterEach(() => {
+    console.error.mockRestore();
+  });
+
+  it('records the batch hash for the session, chain and wallet before replying with it', async () => {
+    getCoin.mockResolvedValue({
+      chain: executor,
+      waitForConfirmation: jest.fn(async () => ({status: 1})),
+    });
+    const store = configureMockStore([thunk])(makeState(null));
+
+    await store.dispatch(sendCalls());
+
+    // The signing wallet: its custom RPC (if any) sent the batch, so status
+    // polls must read through it too.
+    expect(recordIssuedBatch).toHaveBeenCalledWith({
+      topic: TOPIC,
+      chainId: CHAIN,
+      id: BATCH_HASH,
+      walletClientId: 'client1',
+    });
+    expect(connector.respondSessionRequest).toHaveBeenCalledWith({
+      topic: TOPIC,
+      response: {id: REQUEST_ID, result: BATCH_HASH, jsonrpc: '2.0'},
+    });
+    expect(recordIssuedBatch.mock.invocationCallOrder[0]).toBeLessThan(
+      connector.respondSessionRequest.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('records nothing when the batch reverted', async () => {
+    getCoin.mockResolvedValue({
+      chain: executor,
+      waitForConfirmation: jest.fn(async () => ({status: 'failed'})),
+    });
+    const store = configureMockStore([thunk])(makeState(null));
+
+    await store.dispatch(sendCalls());
+
+    expect(recordIssuedBatch).not.toHaveBeenCalled();
+    expect(errorReply()).toBeDefined();
+  });
+
+  it('records nothing for other methods', async () => {
+    getCoin.mockResolvedValue({
+      chain: executor,
+      waitForConfirmation: jest.fn(),
+    });
+    const store = configureMockStore([thunk])(
+      makeState(
+        pendingRequest({method: 'personal_sign', params: ['0xdead', FROM]}),
+      ),
+    );
+
+    await store.dispatch(
+      walletConnect(
+        basePayload({
+          method: 'personal_sign',
+          signTypeData: '0xdead',
+          expectedSignerAddress: FROM,
+        }),
+      ),
+    );
+
+    expect(executor.personalSign).toHaveBeenCalledTimes(1);
+    expect(recordIssuedBatch).not.toHaveBeenCalled();
   });
 });

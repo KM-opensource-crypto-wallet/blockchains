@@ -8,6 +8,7 @@ import {
   setWalletConnectTransactionData,
 } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getSdkError} from '@walletconnect/utils';
 import {
   CHAIN_CONFIG,
@@ -17,11 +18,9 @@ import {
 import {
   answerAddEthereumChain,
   answerSwitchEthereumChain,
-  isWalletSupportedEvmChain,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectEvmChain';
 import {
   buildCallsStatus,
-  isBatchCallsId,
   unknownBundleIdError,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCallsStatus';
 import {showToast} from 'utils/toast';
@@ -129,33 +128,49 @@ const AUTO_ANSWERED_METHODS = new Set([
   'hedera_getNodeAddresses',
 ]);
 
-// EIP-5792 poll for a wallet_sendCalls batch. The id is the batch
-// transaction's hash (what wallet_sendCalls answered with), read on the
-// session chain the dApp polls from.
-const answerGetCallsStatus = async (params, request) => {
+// wallet_sendCalls batch ids this wallet issued: session topic -> Map of
+// batch id (the batch transaction's hash) -> {chainId (CAIP-2 chain it was
+// sent on), walletClientId (wallet that signed it)}. Recorded by the
+// walletConnect thunk before the id is answered, dropped with the session.
+// In memory only: the dApp polls right after wallet_sendCalls, and after an
+// app restart older ids answer 5730.
+const issuedBatches = new Map();
+
+export const recordIssuedBatch = ({topic, chainId, id, walletClientId}) => {
+  if (!issuedBatches.has(topic)) {
+    issuedBatches.set(topic, new Map());
+  }
+  issuedBatches.get(topic).set(id.toLowerCase(), {chainId, walletClientId});
+};
+
+// EIP-5792 poll for a wallet_sendCalls batch. Only batches issued to this
+// session are answered, read on the chain they were sent on through the
+// signing wallet's custom RPC when it has one (the send used it too, via
+// getNativeCoin); a recorded batch without a receipt is pending (even when
+// some RPCs failed), never unknown.
+const answerGetCallsStatus = async (topic, request) => {
   const id = request?.params?.[0];
-  if (!isBatchCallsId(id)) {
+  const batch =
+    typeof id === 'string'
+      ? issuedBatches.get(topic)?.get(id.toLowerCase())
+      : undefined;
+  if (!batch) {
     return unknownBundleIdError();
   }
-  const caipChainId = params?.chainId;
-  if (!isWalletSupportedEvmChain(caipChainId)) {
-    return {
-      error: {
-        code: -32602,
-        message: `Chain ${caipChainId} is not an EVM chain this wallet serves`,
-      },
-    };
-  }
+  const caipChainId = batch.chainId;
   const {chain_name} = config.WALLET_CONNECT_SUPPORTED_CHAIN[caipChainId];
+  const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+    chain_name,
+    batch.walletClientId,
+  )(store.getState());
   const {
     EVMChain,
   } = require('dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain');
-  const {receipt, known} = await EVMChain(chain_name).getBatchCallsStatus({
-    txHash: id,
-  });
-  if (!receipt && !known) {
-    return unknownBundleIdError();
-  }
+  const {receipt} = await EVMChain(
+    chain_name,
+    undefined,
+    customRpcUrl,
+  ).getBatchCallsStatus({txHash: id});
   return {result: buildCallsStatus({id, caipChainId, receipt})};
 };
 
@@ -316,7 +331,7 @@ export const subscribeWalletConnectEvent = () => {
           response: {
             id,
             jsonrpc: '2.0',
-            ...(await answerGetCallsStatus(params, request)),
+            ...(await answerGetCallsStatus(topic, request)),
           },
         });
       } else if (request?.method === 'hedera_getNodeAddresses') {
@@ -417,6 +432,7 @@ export const subscribeWalletConnectEvent = () => {
     try {
       const {topic} = proposal;
       logWalletConnectEvent('info', 'session_delete', {topic});
+      issuedBatches.delete(topic);
       const state = store.getState();
       const allWallets = state?.wallets?.allWallets || [];
       allWallets.forEach(currentWallet => {
