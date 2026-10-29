@@ -21,8 +21,9 @@ jest.mock('services/logger', () => ({
 jest.mock('security/secureStore', () => {
   const items = new Map();
   const writes = [];
-  // `failSets`: how many upcoming writes of `failSetKey` should throw.
-  const state = {failSetKey: null, failSets: 0};
+  // `failSets`: how many upcoming writes of `failSetKey` should throw;
+  // `failGets` likewise for reads of `failGetKey`.
+  const state = {failSetKey: null, failSets: 0, failGetKey: null, failGets: 0};
   return {
     capabilities: {biometric: false},
     __items: items,
@@ -33,8 +34,16 @@ jest.mock('security/secureStore', () => {
       writes.length = 0;
       state.failSetKey = null;
       state.failSets = 0;
+      state.failGetKey = null;
+      state.failGets = 0;
     },
-    get: async key => (items.has(key) ? items.get(key) : null),
+    get: async key => {
+      if (state.failGets > 0 && key === state.failGetKey) {
+        state.failGets -= 1;
+        throw new Error('secure store read failed');
+      }
+      return items.has(key) ? items.get(key) : null;
+    },
     set: async (key, value) => {
       if (state.failSets > 0 && key === state.failSetKey) {
         state.failSets -= 1;
@@ -70,6 +79,9 @@ const walletsStub = createSlice({
     resetWallet: () => ({allWallets: [], balance: 0}),
     setWallets: (state, {payload}) => {
       state.allWallets = payload;
+    },
+    deleteWallet: (state, {payload}) => {
+      state.allWallets = state.allWallets.filter(w => w.clientId !== payload);
     },
     touchBalance: state => {
       // Changes allWallets reference without changing any secret.
@@ -337,6 +349,113 @@ describe('vaultSync', () => {
     await flushMicrotasks();
     await sync.flush();
     expect(blobWrites()).toBe(before);
+  });
+
+  // Keys may only leave the vault when the user deletes a wallet (or resets).
+  // Any other payload that drops a keyed wallet is a defect, never a write.
+  describe('key-drop guard', () => {
+    it('refuses a write that drops a keyed wallet and reports it', async () => {
+      await vault.createVault('pw');
+      store.dispatch(walletsStub.actions.setWallets([walletA, walletB]));
+      await sync.flush();
+      const before = blobWrites();
+
+      store.dispatch(walletsStub.actions.setWallets([walletA]));
+      await sync.flush();
+
+      expect(blobWrites()).toBe(before);
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Vault write would drop wallet keys',
+        }),
+        expect.objectContaining({
+          tags: expect.objectContaining({op: 'write_refused_key_drop'}),
+          extra: expect.objectContaining({dropped: 1, kept: 1}),
+        }),
+      );
+    });
+
+    it('deleteWallet is allowed to drop that wallet, also through a later debounced write', async () => {
+      await vault.createVault('pw');
+      store.dispatch(walletsStub.actions.setWallets([walletA, walletB]));
+      await sync.flush();
+
+      store.dispatch(walletsStub.actions.deleteWallet('b'));
+      // A balance refresh lands before the debounce fires; the delete's
+      // permission must carry over to the merged snapshot.
+      store.dispatch(walletsStub.actions.touchBalance());
+      await sync.flush();
+
+      expect(await vault.readSecrets()).toEqual(extractVaultPayload([walletA]));
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('a lock that strips the secrets is not reported as a key drop', async () => {
+      // Web lockSession / rollbackUnlock: markSynced, then clearWalletSecrets
+      // (a debounced wallets/ change), then the vault locks before it fires.
+      await vault.createVault('pw');
+      sync.markSynced(extractVaultPayload([walletA, walletB]));
+      store.dispatch(
+        walletsStub.actions.setWallets([
+          {clientId: 'a', coins: []},
+          {clientId: 'b', coins: [{chain_name: 'ethereum', symbol: 'ETH'}]},
+        ]),
+      );
+      vault.lock();
+      jest.advanceTimersByTime(500);
+      await flushMicrotasks();
+      await sync.flush();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('checks the vault itself for the first write of a session', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(extractVaultPayload([walletA, walletB]));
+      // No markSynced: lastWritten is unknown, so the stored blob is the reference.
+      store.dispatch(walletsStub.actions.setWallets([walletB]));
+      await sync.flush();
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failed baseline read skips the write and keeps it dirty for a guarded retry', async () => {
+      await vault.createVault('pw');
+      await vault.saveSecrets(extractVaultPayload([walletA, walletB]));
+      const before = blobWrites();
+      secureStore.__state.failGetKey = 'vault.blob';
+      secureStore.__state.failGets = 1;
+
+      store.dispatch(walletsStub.actions.setWallets([walletB]));
+      jest.advanceTimersByTime(500);
+      for (let i = 0; i < 1000 && onError.mock.calls.length < 1; i++) {
+        await flushMicrotasks();
+      }
+      expect(blobWrites()).toBe(before);
+      expect(onError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({
+          tags: expect.objectContaining({op: 'read_baseline'}),
+        }),
+      );
+
+      // The retry reads the baseline again and the key-drop guard still holds.
+      await expect(sync.flush()).resolves.toBe(true);
+      expect(blobWrites()).toBe(before);
+      expect(await vault.readSecrets()).toEqual(
+        extractVaultPayload([walletA, walletB]),
+      );
+      expect(onError).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          message: 'Vault write would drop wallet keys',
+        }),
+        expect.anything(),
+      );
+    });
   });
 
   it('resetWallet empties the vault but keeps it (account stays)', async () => {

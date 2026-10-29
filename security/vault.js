@@ -30,6 +30,21 @@ export const VAULT_KEYS = Object.freeze({
   blob: 'vault.blob',
 });
 
+// Staged copies of the two items that hold the wallets' keys. A secure-store
+// write replaces an item (delete, then add on iOS), so a crash in between
+// would leave it missing. Each write goes to the staged key first, then the
+// live key, then the staged copy is removed; a read that finds the live item
+// missing falls back to the staged one. Whatever the moment of a crash, one
+// of the two holds a complete copy.
+export const STAGED_KEYS = Object.freeze({
+  dekPassword: 'vault.dek.password.staged',
+  blob: 'vault.blob.staged',
+});
+const stagedKeyOf = {
+  [VAULT_KEYS.dekPassword]: STAGED_KEYS.dekPassword,
+  [VAULT_KEYS.blob]: STAGED_KEYS.blob,
+};
+
 export const BIOMETRIC_ACCESS_CONTROL = 'biometryCurrentSet';
 
 export const EMPTY_VAULT_PAYLOAD = Object.freeze({v: 1, wallets: {}});
@@ -68,7 +83,15 @@ const setDek = bytes => {
 };
 
 const readJson = async key => {
-  const raw = await secureStore.get(key);
+  let raw = await secureStore.get(key);
+  if (raw == null && stagedKeyOf[key]) {
+    // The live item is missing: a crash between its delete and add left the
+    // staged copy as the only one. Use it and put the live item back.
+    raw = await secureStore.get(stagedKeyOf[key]);
+    if (raw != null) {
+      await secureStore.set(key, raw).catch(() => {});
+    }
+  }
   if (raw == null) {
     return null;
   }
@@ -83,8 +106,31 @@ const readJson = async key => {
   }
 };
 
-const writeJson = (key, value, options) =>
-  secureStore.set(key, JSON.stringify(value), options);
+const writeJson = async (key, value, options) => {
+  const serialized = JSON.stringify(value);
+  const staged = stagedKeyOf[key];
+  if (!staged) {
+    await secureStore.set(key, serialized, options);
+    return;
+  }
+  await secureStore.set(staged, serialized, options);
+  try {
+    await secureStore.set(key, serialized, options);
+  } catch (error) {
+    // The caller sees this write as failed, so the staged copy must not
+    // outlive it while the previous live item is intact. If the live item is
+    // gone (the write failed between its delete and add) or cannot be read,
+    // the staged copy is the only one left and stays.
+    const live = await secureStore.get(key).catch(() => null);
+    if (live != null) {
+      await secureStore.remove(staged).catch(() => {});
+    }
+    throw error;
+  }
+  // Best effort: a leftover staged copy is harmless (the live item wins when
+  // both exist) and is replaced by the next write.
+  await secureStore.remove(staged).catch(() => {});
+};
 
 const readPayload = async currentDek => {
   const blob = await readJson(VAULT_KEYS.blob);
@@ -110,7 +156,8 @@ export const lock = () => {
 };
 
 export const hasVault = async () =>
-  (await secureStore.get(VAULT_KEYS.dekPassword)) != null;
+  (await secureStore.get(VAULT_KEYS.dekPassword)) != null ||
+  (await secureStore.get(STAGED_KEYS.dekPassword)) != null;
 
 /** Registration: new DEK wrapped under the password, empty blob, unlocked. */
 export const createVault = password =>
@@ -279,7 +326,10 @@ export const disableBiometric = async () => {
 /**
  * Login with the OS biometric prompt. Enrollment change → the platform has
  * destroyed the key: the item is removed and BIOMETRIC_INVALIDATED is thrown
- * so the caller falls back to the password and re-enables afterwards.
+ * so the caller falls back to the password and re-enables afterwards. The
+ * same applies when the platform refuses the item as altered: it is only a
+ * copy of the DEK, and kept in place it would fail every attempt and block
+ * re-enrolment.
  */
 export const unlockWithBiometric = async prompt => {
   await assertBiometricAvailable();
@@ -295,6 +345,14 @@ export const unlockWithBiometric = async prompt => {
       throw new VaultError(
         VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
         'Biometric enrollment changed; unlock with your password',
+        error,
+      );
+    }
+    if (error?.code === SECURE_STORE_ERROR_CODES.INTEGRITY_VIOLATION) {
+      await disableBiometric();
+      throw new VaultError(
+        VAULT_ERROR_CODES.BIOMETRIC_INVALIDATED,
+        'Biometric unlock data could not be verified; unlock with your password',
         error,
       );
     }
@@ -386,8 +444,10 @@ export const destroy = () => {
   return withEnvelopeLock(async () => {
     lock();
     await secureStore.remove(VAULT_KEYS.blob);
+    await secureStore.remove(STAGED_KEYS.blob);
     await secureStore.remove(VAULT_KEYS.dekBiometric);
     await secureStore.remove(VAULT_KEYS.dekPassword);
+    await secureStore.remove(STAGED_KEYS.dekPassword);
   });
 };
 

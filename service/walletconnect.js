@@ -8,15 +8,21 @@ import {
   setWalletConnectTransactionData,
 } from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getSdkError} from '@walletconnect/utils';
 import {
   CHAIN_CONFIG,
+  config,
   isSupportedWalletConnectMethod,
 } from 'dok-wallet-blockchain-networks/config/config';
 import {
   answerAddEthereumChain,
   answerSwitchEthereumChain,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectEvmChain';
+import {
+  buildCallsStatus,
+  unknownBundleIdError,
+} from 'dok-wallet-blockchain-networks/helper/walletConnectCallsStatus';
 import {showToast} from 'utils/toast';
 import {logWalletConnectEvent} from 'utils/logger';
 
@@ -118,15 +124,88 @@ const supportsAtomicBatch = hexChainId =>
 // else will ever reply, so the dApp would wait for the relay timeout.
 const AUTO_ANSWERED_METHODS = new Set([
   'wallet_getCapabilities',
+  'wallet_getCallsStatus',
   'hedera_getNodeAddresses',
 ]);
 
+// wallet_sendCalls batch ids this wallet issued: session topic -> Map of
+// batch id (the batch transaction's hash) -> {chainId (CAIP-2 chain it was
+// sent on), walletClientId (wallet that signed it)}. Recorded by the
+// walletConnect thunk before the id is answered, dropped with the session.
+// In memory only: the dApp polls right after wallet_sendCalls, and after an
+// app restart older ids answer 5730.
+const issuedBatches = new Map();
+
+export const recordIssuedBatch = ({topic, chainId, id, walletClientId}) => {
+  if (!issuedBatches.has(topic)) {
+    issuedBatches.set(topic, new Map());
+  }
+  issuedBatches.get(topic).set(id.toLowerCase(), {chainId, walletClientId});
+};
+
+// EIP-5792 poll for a wallet_sendCalls batch. Only batches issued to this
+// session are answered, read on the chain they were sent on through the
+// signing wallet's custom RPC when it has one (the send used it too, via
+// getNativeCoin); a recorded batch without a receipt is pending (even when
+// some RPCs failed), never unknown.
+const answerGetCallsStatus = async (topic, request) => {
+  const id = request?.params?.[0];
+  const batch =
+    typeof id === 'string'
+      ? issuedBatches.get(topic)?.get(id.toLowerCase())
+      : undefined;
+  if (!batch) {
+    return unknownBundleIdError();
+  }
+  const caipChainId = batch.chainId;
+  const {chain_name} = config.WALLET_CONNECT_SUPPORTED_CHAIN[caipChainId];
+  const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+    chain_name,
+    batch.walletClientId,
+  )(store.getState());
+  const {
+    EVMChain,
+  } = require('dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain');
+  const {receipt} = await EVMChain(
+    chain_name,
+    undefined,
+    customRpcUrl,
+  ).getBatchCallsStatus({txHash: id});
+  return {result: buildCallsStatus({id, caipChainId, receipt})};
+};
+
+// Listeners are registered once per WalletKit client. subscribeWalletConnectEvent
+// is called on every pairing and once per restored session; without this guard
+// each call stacked another handler set and a single session_request was
+// processed N times (the duplicates then busy-rejected the request on screen).
+let subscribedClient = null;
+let subscribedHandlers = null;
+// Request ids already handled for the current client; shared by all callers.
+let requestIds = {};
+
 export const subscribeWalletConnectEvent = () => {
-  let requestIds = {};
   if (!walletConnect) {
     console.warn('No event subscribe because wallet connect null');
     return;
   }
+  if (subscribedClient === walletConnect) {
+    return;
+  }
+  if (subscribedClient && subscribedHandlers) {
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_PROPOSAL,
+      subscribedHandlers.onSessionProposal,
+    );
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_REQUEST,
+      subscribedHandlers.onSessionRequest,
+    );
+    subscribedClient.off?.(
+      WALLETCONNECT_EVENT.SESSION_DELETE,
+      subscribedHandlers.onSessionDelete,
+    );
+  }
+  requestIds = {};
   const onSessionProposal = proposal => {
     const {id, params} = proposal;
 
@@ -246,6 +325,15 @@ export const subscribeWalletConnectEvent = () => {
           topic,
           response: {id, jsonrpc: '2.0', result: capabilities},
         });
+      } else if (request?.method === 'wallet_getCallsStatus') {
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            ...(await answerGetCallsStatus(topic, request)),
+          },
+        });
       } else if (request?.method === 'hedera_getNodeAddresses') {
         // HIP-820 read-only method: no signature, nothing to approve.
         const {
@@ -257,6 +345,36 @@ export const subscribeWalletConnectEvent = () => {
         await walletConnect.respondSessionRequest({
           topic,
           response: {id, jsonrpc: '2.0', result},
+        });
+      } else if (
+        store.getState()?.walletConnect?.transactionRequestData?.id === id
+      ) {
+        // Redelivery of the request already on screen (relay reconnect);
+        // the modal is showing it, nothing to do.
+      } else if (store.getState()?.walletConnect?.transactionModalVisible) {
+        // One request on screen at a time. Letting a second one replace the
+        // pending request would let a dApp swap what the user is about to
+        // approve; the approval is bound to the request it was reviewed on.
+        // -32002 (EIP-1474 "resource unavailable") is what wallets answer
+        // when a request is already pending.
+        logWalletConnectEvent('warn', 'session_request.busy_rejected', {
+          method: request?.method,
+          chainId: params?.chainId,
+          topic,
+          requestId: id,
+          peerName: peerMeta?.name,
+        });
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {
+            id,
+            jsonrpc: '2.0',
+            error: {
+              code: -32002,
+              message: 'A request is already pending in the wallet',
+              data: {method: request?.method, chainId: params?.chainId},
+            },
+          },
         });
       } else {
         const {pairingTopic} = requestSessionData;
@@ -314,6 +432,7 @@ export const subscribeWalletConnectEvent = () => {
     try {
       const {topic} = proposal;
       logWalletConnectEvent('info', 'session_delete', {topic});
+      issuedBatches.delete(topic);
       const state = store.getState();
       const allWallets = state?.wallets?.allWallets || [];
       allWallets.forEach(currentWallet => {
@@ -338,4 +457,7 @@ export const subscribeWalletConnectEvent = () => {
   walletConnect.on(WALLETCONNECT_EVENT.SESSION_REQUEST, onSessionRequest);
 
   walletConnect.on(WALLETCONNECT_EVENT.SESSION_DELETE, onSessionDelete);
+
+  subscribedClient = walletConnect;
+  subscribedHandlers = {onSessionProposal, onSessionRequest, onSessionDelete};
 };

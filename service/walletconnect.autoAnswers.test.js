@@ -1,18 +1,21 @@
 /**
  * session_request methods answered by the handler itself, without the
  * transaction modal: hedera_getNodeAddresses (HIP-820, read-only),
- * wallet_switchEthereumChain (EIP-3326), wallet_addEthereumChain (EIP-3085)
- * and wallet_getCapabilities. Same mock scaffold and runner as
+ * wallet_switchEthereumChain (EIP-3326), wallet_addEthereumChain (EIP-3085),
+ * wallet_getCapabilities and wallet_getCallsStatus (EIP-5792). Same mock
+ * scaffold and runner as
  * walletconnect.unsupportedMethod.test.js.
  */
 import {
   initWalletConnect,
+  recordIssuedBatch,
   subscribeWalletConnectEvent,
 } from 'dok-wallet-blockchain-networks/service/walletconnect';
 import {store} from 'redux/store';
 import {setWalletConnectTransactionData} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {showToast} from 'utils/toast';
 import {HederaChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/HederaChain';
+import {EVMChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain';
 import {CHAIN_ID} from 'dok-wallet-blockchain-networks/config/config';
 import {logWalletConnectEvent} from 'utils/logger';
 
@@ -80,6 +83,11 @@ jest.mock(
     HederaChain: jest.fn(() => ({getNodeAddresses: mockGetNodeAddresses})),
   }),
 );
+
+const mockGetBatchCallsStatus = jest.fn();
+jest.mock('dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain', () => ({
+  EVMChain: jest.fn(() => ({getBatchCallsStatus: mockGetBatchCallsStatus})),
+}));
 
 let nextId = 7;
 let lastId;
@@ -322,6 +330,219 @@ describe('onSessionRequest: wallet_getCapabilities', () => {
     // 0x127 = 295, Hedera's relay: no batch contract there.
     expect(response.result['0x127']).toEqual({
       atomic: {status: 'unsupported'},
+    });
+  });
+});
+
+describe('onSessionRequest: wallet_getCallsStatus', () => {
+  // wallet_sendCalls answers with the batch transaction's hash; that hash is
+  // the id the dApp polls with. Each test uses its own id because issued
+  // batches are kept per session for the life of the module.
+  let nextBatch = 1;
+  const newBatchId = () => '0x' + (nextBatch++).toString(16).padStart(64, '0');
+  const ETH_KEY = `eip155:${CHAIN_ID.ethereum}`;
+  const minedReceipt = (id, status) => ({
+    hash: id,
+    blockHash: '0x' + 'cd'.repeat(32),
+    blockNumber: 100,
+    gasUsed: 21000n,
+    status,
+    logs: [],
+  });
+
+  const pollStatus = (id, chainId = ETH_KEY) =>
+    handlers.session_request(
+      sessionRequest('wallet_getCallsStatus', [id], chainId),
+    );
+  const lastResponse = () =>
+    mockWalletKit.respondSessionRequest.mock.calls[0][0].response;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    console.error.mockRestore();
+    store.getState.mockImplementation(() => ({}));
+  });
+
+  it('answers a mined batch with 200 and its receipt, without the modal or a toast', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    mockGetBatchCallsStatus.mockResolvedValueOnce({
+      receipt: minedReceipt(id, 1),
+    });
+
+    await pollStatus(id);
+
+    expect(EVMChain).toHaveBeenCalledWith('ethereum', undefined, null);
+    expect(mockGetBatchCallsStatus).toHaveBeenCalledWith({txHash: id});
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    expect(lastResponse()).toMatchObject({
+      id: lastId,
+      jsonrpc: '2.0',
+      result: {
+        version: '2.0.0',
+        id,
+        chainId: `0x${CHAIN_ID.ethereum.toString(16)}`,
+        atomic: true,
+        status: 200,
+      },
+    });
+    expect(lastResponse().result.receipts).toHaveLength(1);
+    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('answers a reverted batch with 500', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    mockGetBatchCallsStatus.mockResolvedValueOnce({
+      receipt: minedReceipt(id, 0),
+    });
+
+    await pollStatus(id);
+
+    expect(lastResponse().result.status).toBe(500);
+  });
+
+  it('answers 100 for an issued batch no RPC has a receipt for, even when some RPCs failed', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    mockGetBatchCallsStatus.mockResolvedValueOnce({receipt: null});
+
+    await pollStatus(id);
+
+    expect(lastResponse().result).toMatchObject({status: 100});
+    expect(lastResponse().result.receipts).toBeUndefined();
+  });
+
+  it('answers 5730 without an RPC call for an id this wallet never issued', async () => {
+    await pollStatus(newBatchId());
+
+    expect(EVMChain).not.toHaveBeenCalled();
+    expect(lastResponse().error).toEqual({
+      code: 5730,
+      message: 'Unknown bundle id',
+    });
+  });
+
+  it('answers 5730 for a batch issued to another session', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-2',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+
+    await pollStatus(id);
+
+    expect(EVMChain).not.toHaveBeenCalled();
+    expect(lastResponse().error).toMatchObject({code: 5730});
+  });
+
+  it('reads the batch on the chain it was sent on, not the chain the poll arrived on', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: HEDERA_EVM_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    mockGetBatchCallsStatus.mockResolvedValueOnce({
+      receipt: minedReceipt(id, 1),
+    });
+
+    await pollStatus(id, ETH_KEY);
+
+    expect(EVMChain).toHaveBeenCalledWith('hedera', undefined, null);
+    expect(lastResponse().result).toMatchObject({
+      chainId: HEDERA_EVM_HEX,
+      status: 200,
+    });
+  });
+
+  it("reads through the signing wallet's custom RPC for the chain, like the send did", async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    store.getState.mockImplementation(() => ({
+      customRpc: {
+        customRpcList: {
+          ethereum_client1: {customRpcUrl: 'https://rpc.user.test'},
+          ethereum_client2: {customRpcUrl: 'https://rpc.other.test'},
+        },
+      },
+    }));
+    mockGetBatchCallsStatus.mockResolvedValueOnce({
+      receipt: minedReceipt(id, 1),
+    });
+
+    await pollStatus(id);
+
+    expect(EVMChain).toHaveBeenCalledWith(
+      'ethereum',
+      undefined,
+      'https://rpc.user.test',
+    );
+    expect(lastResponse().result.status).toBe(200);
+  });
+
+  it("forgets a session's batches once the session is deleted", async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+
+    handlers.session_delete({topic: 'topic-1'});
+    await pollStatus(id);
+
+    expect(EVMChain).not.toHaveBeenCalled();
+    expect(lastResponse().error).toMatchObject({code: 5730});
+  });
+
+  it('replies -32603 instead of staying silent when every RPC failed', async () => {
+    const id = newBatchId();
+    recordIssuedBatch({
+      topic: 'topic-1',
+      chainId: ETH_KEY,
+      id,
+      walletClientId: 'client1',
+    });
+    mockGetBatchCallsStatus.mockRejectedValueOnce(
+      new Error('bad response (status=502)'),
+    );
+
+    await pollStatus(id);
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    expect(lastResponse().error).toMatchObject({
+      code: -32603,
+      message: 'bad response (status=502)',
     });
   });
 });

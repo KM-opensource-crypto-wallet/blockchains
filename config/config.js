@@ -2067,6 +2067,7 @@ export const WALLET_CONNECT_SPECIAL_METHODS = [
   'wallet_addEthereumChain',
   'wallet_switchEthereumChain',
   'wallet_getCapabilities',
+  'wallet_getCallsStatus',
   'hedera_getNodeAddresses',
 ];
 

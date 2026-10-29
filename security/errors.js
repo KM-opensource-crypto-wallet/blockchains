@@ -39,6 +39,9 @@ export const SECURE_STORE_ERROR_CODES = Object.freeze({
   LOCKED_OUT: 'locked_out',
   // Store cannot be opened at all (no Keystore, no IndexedDB, private window).
   UNAVAILABLE: 'unavailable',
+  // The platform refused a stored item as altered (mobile: RNSI's metadata
+  // HMAC no longer verifies, e.g. after a move to a new iPhone).
+  INTEGRITY_VIOLATION: 'integrity_violation',
   UNKNOWN: 'unknown',
 });
 

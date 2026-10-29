@@ -42,6 +42,7 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
 import {ErrorDecoder} from 'ethers-decode-error';
+import {toEthersTransactionRequest} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 import {
@@ -2081,22 +2082,24 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return [];
       }
     },
+    // WalletConnect eth_signTransaction / eth_sendTransaction. The payload's
+    // transactionData is the canonical allow-listed tx the user reviewed
+    // (helper/evmTxReview, re-derived from the store by the walletConnect
+    // thunk); only its fields reach the signer, with chainId and the EIP-1559
+    // fees carried through. KIML-002.
     signRawTransaction: async ({payload, privateKey}) =>
       retryFunc(async evmProvider => {
         try {
           const walletSigner = new ethers.Wallet(privateKey).connect(
             evmProvider,
           );
-          const transactionData = payload?.transactionData || {};
-          return await walletSigner.signTransaction({
-            from: transactionData.from,
-            to: transactionData.to,
-            data: transactionData.data,
-            nonce: transactionData.nonce,
-            value: transactionData.value,
-            gasLimit: transactionData.gas,
-            gasPrice: transactionData.gasPrice,
-          });
+          // Populate first so the raw tx handed back to the dApp is
+          // broadcastable (nonce / gas / chainId filled in when the request
+          // left them out); explicit fields from the request are kept.
+          const populated = await walletSigner.populateTransaction(
+            toEthersTransactionRequest(payload?.transactionData || {}),
+          );
+          return await walletSigner.signTransaction(populated);
         } catch (e) {
           const {reason} = await errorDecoder.decode(e);
           console.error('Error in sign raw ether transaction', reason);
@@ -2105,17 +2108,16 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }),
     sendRawTransaction: async ({payload, privateKey}) => {
       try {
-        const transactionData = payload?.transactionData || {};
-        const tx = {
-          from: transactionData.from,
-          to: transactionData.to,
-          data: transactionData.data,
-          nonce: transactionData.nonce,
-          value: transactionData.value,
-          gasLimit: transactionData.gas,
-          gasPrice: transactionData.gasPrice,
-        };
-        return await createSendTransaction(new ethers.Wallet(privateKey), tx);
+        const res = await createSendTransaction(
+          new ethers.Wallet(privateKey),
+          toEthersTransactionRequest(payload?.transactionData || {}),
+        );
+        // eth_sendTransaction's JSON-RPC result is the 32-byte tx hash.
+        // createSendTransaction resolves an ethers TransactionResponse on the
+        // broadcast and "already in mempool" paths and a bare hash only on its
+        // fallback path; the dApp (viem/wagmi) dereferences the result as a
+        // hash, so a serialised object makes its receipt wait throw.
+        return typeof res === 'string' ? res : res?.hash;
       } catch (e) {
         const {reason} = await errorDecoder.decode(e);
         console.error('Error in send raw ether transaction', reason);
@@ -2965,6 +2967,31 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       }
 
       return 'pending';
+    },
+    // wallet_getCallsStatus (EIP-5792): the batch id is the hash of the
+    // execute() transaction, so its receipt is the batch status. First
+    // receipt across every RPC url (a lagging node answers null before the
+    // others); throws only when every url failed.
+    getBatchCallsStatus: async ({txHash}) => {
+      let lastError = null;
+      let answered = false;
+      for (const url of allRpcUrls) {
+        try {
+          const receipt = await createRpcProvider(url).getTransactionReceipt(
+            txHash,
+          );
+          answered = true;
+          if (receipt) {
+            return {receipt};
+          }
+        } catch (e) {
+          lastError = e;
+        }
+      }
+      if (!answered && lastError) {
+        throw lastError;
+      }
+      return {receipt: null};
     },
     checkDelegation: ({address}) =>
       retryFunc(

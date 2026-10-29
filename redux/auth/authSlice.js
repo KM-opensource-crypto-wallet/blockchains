@@ -5,6 +5,14 @@ import {resetBatchTransactions} from '../batchTransaction/batchTransactionSlice'
 import {syncScheduledPaymentNotifications} from '../schedulePayment/schedulePaymentSlice';
 import {showToast} from 'utils/toast';
 
+export const ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
+
+// A failure counts while it is inside the window. One stamped after `now`
+// (the device clock was set back) never counts: it would otherwise stay
+// "recent" until the clock caught up and could trigger the wipe.
+export const isRecentAttempt = (timestamp, now) =>
+  timestamp <= now && now - timestamp < ATTEMPT_WINDOW_MS;
+
 export const handleAttempts = createAsyncThunk(
   'auth/handleAttempts',
   async (payload, thunkAPI) => {
@@ -14,7 +22,13 @@ export const handleAttempts = createAsyncThunk(
         auth: {attempts, maxAttempt},
       } = currentState;
       const threshold = maxAttempt - 1;
-      const failureCount = attempts.length;
+      // Only failures inside the 30-minute window count (the same window
+      // recordFailureAttempts keeps). Counting stale ones let a single typo,
+      // days after earlier failures, wipe every wallet.
+      const now = Date.now();
+      const failureCount = attempts.filter(timestamp =>
+        isRecentAttempt(timestamp, now),
+      ).length;
       const attemptsLeft = threshold - failureCount;
 
       const navigation = payload?.navigation;
@@ -95,6 +109,9 @@ export const authSlice = createSlice({
       // Self-heal for accounts persisted before `hasAccount` existed.
       state.hasAccount = true;
       state.isLogin = true;
+      // Any successful login (password or biometric) clears failed attempts.
+      state.attempts = [];
+      state.lastAttempt = false;
     },
     changePasswordSuccess: state => {
       state.hasAccount = true;
@@ -127,12 +144,11 @@ export const authSlice = createSlice({
       state.lastUpdateCheckTimestamp = payload;
     },
     recordFailureAttempts: state => {
-      const windowMs = 1800000; // 30 minute
       const now = Date.now();
 
       // Keep only recent attempts
-      state.attempts = state.attempts.filter(
-        timestamp => now - timestamp < windowMs,
+      state.attempts = state.attempts.filter(timestamp =>
+        isRecentAttempt(timestamp, now),
       );
 
       // Add new attempt

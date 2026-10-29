@@ -29,6 +29,7 @@ import {
   isSwapBlockingError,
   isValidStringWithValue,
   parseBalance,
+  SOLANA_PREFLIGHT_REJECTED_PREFIX,
   SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
 import bs58 from 'bs58';
@@ -47,13 +48,18 @@ import {getStakeActivation} from '@anza-xyz/solana-rpc-get-stake-activation';
 
 const defaultDeductionAmount = 20000n;
 
+// Headroom on the simulated compute units (Helius "Optimizing transactions":
+// ceil(unitsConsumed * 1.1)); a transaction that exceeds its limit fails.
+// Integer percent: 450 * 1.1 is 495.00000000000006 in floating point.
+const COMPUTE_UNIT_MARGIN_PERCENT = 110;
+
 async function getSimulationUnits(
   connection,
   instructions,
   payer,
   lookupTables,
 ) {
-  const gasFee = await getPriorityFee(connection, payer);
+  const gasFee = await getPriorityFee();
   const testInstructions = [
     ComputeBudgetProgram.setComputeUnitPrice({microLamports: gasFee}),
     ComputeBudgetProgram.setComputeUnitLimit({units: 1_400_000}),
@@ -73,7 +79,16 @@ async function getSimulationUnits(
     replaceRecentBlockhash: true,
     sigVerify: false,
   });
-  return {units: simulation?.value?.unitsConsumed || 0, gasFee};
+  const unitsConsumed = simulation?.value?.unitsConsumed || 0;
+  if (!unitsConsumed) {
+    // Without a compute limit the price would apply to the default limit
+    // (200k CU per instruction), a fee the estimate below doesn't show.
+    return {units: 0, gasFee: 0};
+  }
+  return {
+    units: Math.ceil((unitsConsumed * COMPUTE_UNIT_MARGIN_PERCENT) / 100),
+    gasFee,
+  };
 }
 
 // Normalizes the backend's SVM swapData into an ordered list of executable
@@ -174,6 +189,44 @@ const buildSwapVersionedTransaction = async (
 
 const COMPUTE_BUDGET_PROGRAM_ID = 'ComputeBudget111111111111111111111111111111';
 
+// Re-send cadence for a broadcast transaction until it lands or its
+// blockhash expires (150 blocks, ~30 s since 200 ms slots went live on
+// 9 Oct 2026). Solana has no mempool: a copy an RPC failed to forward is
+// simply gone, so the wallet keeps offering the same bytes. The round cap
+// only matters when the block height can't be read.
+const REBROADCAST_INTERVAL_MS = 1000;
+const REBROADCAST_MAX_ROUNDS = 40;
+
+// lastValidBlockHeight of every wallet-built transaction we broadcast, keyed
+// by signature, so waitForConfirmation can tell "still pending" from
+// "provably dropped". Bounded: entries are removed once a verdict is read.
+const MAX_TRACKED_BROADCASTS = 50;
+const broadcastDeadlines = new Map();
+
+const rememberBroadcastDeadline = (signature, lastValidBlockHeight) => {
+  if (!lastValidBlockHeight) {
+    return;
+  }
+  broadcastDeadlines.set(signature, lastValidBlockHeight);
+  if (broadcastDeadlines.size > MAX_TRACKED_BROADCASTS) {
+    broadcastDeadlines.delete(broadcastDeadlines.keys().next().value);
+  }
+};
+
+// A JSON-RPC answer refusing the transaction (web3.js SendTransactionError
+// carries it in transactionMessage). Anything else (network failure,
+// timeout, HTTP error) says nothing about whether the node received it.
+const getRpcRejectionMessage = error =>
+  typeof error?.transactionMessage === 'string'
+    ? error.transactionMessage
+    : null;
+
+const isAlreadyProcessedError = error =>
+  `${error?.message || ''}`.includes('already been processed');
+
+const isBlockhashNotFoundMessage = message =>
+  /blockhash not found/i.test(message || '');
+
 // Reads the compute budget the provider baked into the transaction so the
 // fee estimate covers the priority fee, not just the base signature fee.
 // Instruction layout: [2, u32 units] = setComputeUnitLimit,
@@ -273,34 +326,82 @@ export const SolanaChain = () => {
   // ever retries the broadcast of those bytes — never a rebuild, which
   // would refresh the blockhash, change the signature and double-spend.
 
-  // Sends the SAME bytes to every transaction RPC in turn. "Already
-  // processed" from a node that saw a previous attempt is success.
-  const broadcastRawTransaction = async ({serializedTx, signature}) => {
+  // Sends the SAME bytes to every transaction RPC at once. The RPC that
+  // receives a Solana transaction is its only route to the leader, so one
+  // RPC accepting and then dropping it must not decide the outcome (the
+  // premium RPC did exactly that: accepted, never landed). Any acceptance,
+  // or "already processed" from a node that saw another copy, is success.
+  //
+  // When no RPC accepts:
+  // - every RPC answered with a rejection → nothing was forwarded; throws
+  //   with `preflightRejected` (and `blockhashNotFound` when that was the
+  //   only reason, the one case a caller may re-sign);
+  // - otherwise some request failed in transport and may have reached its
+  //   node → throws with `maybeSent`; the caller must poll, never rebuild.
+  const broadcastRawTransaction = async ({
+    serializedTx,
+    signature,
+    skipPreflight = true,
+  }) => {
     const rpcs = [
-      getPremiumRPCUrl('solana'),
-      ...getFreeRPCUrl('solana'),
-    ].filter(Boolean);
-    let lastError = null;
-    for (let i = 0; i < rpcs.length; i++) {
-      try {
-        const solanaProvider = new Connection(rpcs[i], {
+      ...new Set(
+        [getPremiumRPCUrl('solana'), ...getFreeRPCUrl('solana')].filter(
+          Boolean,
+        ),
+      ),
+    ];
+    const results = await Promise.allSettled(
+      rpcs.map(rpcUrl =>
+        new Connection(rpcUrl, {
           fetch: withRpcSessionFetch(customFetchWithTimeout),
-        });
-        await solanaProvider.sendRawTransaction(serializedTx, {
-          skipPreflight: true,
-          preflightCommitment: 'processed',
-        });
-        return signature;
-      } catch (e) {
-        if (`${e?.message || ''}`.includes('already been processed')) {
-          // A previous attempt landed (or reached the node via gossip).
-          return signature;
-        }
-        console.log('Error broadcasting solana tx on rpc', rpcs[i], e);
-        lastError = e;
-      }
+        }).sendRawTransaction(serializedTx, {
+          skipPreflight,
+          // Same commitment as the blockhash, even when skipping preflight
+          // (solana.com "Transaction confirmation & expiration").
+          preflightCommitment: 'finalized',
+        }),
+      ),
+    );
+    const failures = results
+      .map((result, index) => ({...result, rpcUrl: rpcs[index]}))
+      .filter(
+        result =>
+          result.status === 'rejected' &&
+          !isAlreadyProcessedError(result.reason),
+      );
+    failures.forEach(failure =>
+      console.log(
+        'Error broadcasting solana tx on rpc',
+        failure.rpcUrl,
+        failure.reason,
+      ),
+    );
+    if (failures.length < results.length) {
+      return signature;
     }
-    throw lastError ?? new Error('Failed to broadcast Solana transaction');
+    const rejections = [];
+    let transportError = null;
+    failures.forEach(result => {
+      const rejection = getRpcRejectionMessage(result.reason);
+      if (rejection) {
+        rejections.push(rejection);
+      } else {
+        transportError = transportError ?? result.reason;
+      }
+    });
+    if (transportError || !rejections.length) {
+      const error =
+        transportError ?? new Error('Failed to broadcast Solana transaction');
+      error.maybeSent = true;
+      throw error;
+    }
+    const reason =
+      rejections.find(message => !isBlockhashNotFoundMessage(message)) ??
+      rejections[0];
+    const error = new Error(`${SOLANA_PREFLIGHT_REJECTED_PREFIX}: ${reason}`);
+    error.preflightRejected = true;
+    error.blockhashNotFound = rejections.every(isBlockhashNotFoundMessage);
+    throw error;
   };
 
   // Read-only status probe; a total RPC outage resolves to undefined so it
@@ -356,7 +457,7 @@ export const SolanaChain = () => {
         let blockHeight;
         try {
           blockHeight = await retryFunc(async solanaProvider =>
-            solanaProvider.getBlockHeight('confirmed'),
+            solanaProvider.getBlockHeight('finalized'),
           );
         } catch (e) {
           // Unknown height proves nothing; the check below stays inconclusive.
@@ -382,23 +483,172 @@ export const SolanaChain = () => {
     return 'pending';
   };
 
+  // Keeps offering the same bytes to every RPC until the signature shows up,
+  // its blockhash expires, or the round cap is hit. Fire-and-forget: the
+  // caller already has the signature, and a failed round is just retried.
+  const rebroadcastUntilSettled = async ({
+    serializedTx,
+    signature,
+    lastValidBlockHeight,
+  }) => {
+    try {
+      for (let round = 1; round <= REBROADCAST_MAX_ROUNDS; round++) {
+        await new Promise(resolve =>
+          setTimeout(resolve, REBROADCAST_INTERVAL_MS),
+        );
+        if (await getSignatureStatus(signature)) {
+          console.log('solana.rebroadcast settled', {round, reason: 'seen'});
+          return;
+        }
+        if (lastValidBlockHeight) {
+          let blockHeight;
+          try {
+            blockHeight = await retryFunc(async solanaProvider =>
+              solanaProvider.getBlockHeight('finalized'),
+            );
+          } catch (e) {
+            // Unknown height: keep re-sending until the round cap.
+          }
+          if (
+            typeof blockHeight === 'number' &&
+            blockHeight > lastValidBlockHeight
+          ) {
+            console.log('solana.rebroadcast settled', {
+              round,
+              reason: 'expired',
+            });
+            return;
+          }
+        }
+        try {
+          await broadcastRawTransaction({serializedTx, signature});
+        } catch (e) {
+          // Logged per RPC inside; the next round tries again.
+        }
+      }
+    } catch (e) {
+      console.error('Error in solana rebroadcast', e);
+    }
+  };
+
   // Sign once, then broadcast idempotently. Replaces the old pattern of
   // signing inside the per-RPC retry callback, where each retry re-signed
   // with a fresh blockhash and could double-send.
+  //
+  // The blockhash is refreshed right before signing (the one from prepare* is
+  // several RPC round-trips older, and a blockhash expires ~30 s after it was
+  // issued).
+  // It is read at 'finalized': since Alpenglow (21 Oct 2026) that is the same
+  // state as 'confirmed', which solana.com says will be removed. The first
+  // round runs the RPC's preflight check: a transaction that cannot land is
+  // refused with a reason instead of being accepted and silently dropped.
+  // Only a round every RPC refused for "Blockhash not found" may be re-signed
+  // (once): nothing was forwarded, so the old signature can never land. If
+  // the fresh blockhash is refused the same way, the RPCs are lagging behind
+  // the node that issued it and cannot judge it, while the leader can: that
+  // copy goes out without the check, and 'dropped' reports it if it never
+  // lands.
   const signAndBroadcastMessage = async ({transactionMessage, privateKey}) => {
     const secretKey = bs58.decode(privateKey);
     const fromKeypair = Keypair.fromSecretKey(secretKey, {
       skipValidation: true,
     });
-    const transaction = new VersionedTransaction(
-      transactionMessage.compileToV0Message(),
-    );
-    transaction.sign([fromKeypair]);
-    const signature = bs58.encode(transaction.signatures[0]);
-    return await broadcastRawTransaction({
-      serializedTx: transaction.serialize(),
-      signature,
-    });
+    const signWithFreshBlockhash = async () => {
+      const latest = await retryFunc(async solanaProvider =>
+        solanaProvider.getLatestBlockhash('finalized'),
+      );
+      transactionMessage.recentBlockhash = latest.blockhash;
+      const transaction = new VersionedTransaction(
+        transactionMessage.compileToV0Message(),
+      );
+      transaction.sign([fromKeypair]);
+      return {
+        serializedTx: transaction.serialize(),
+        signature: bs58.encode(transaction.signatures[0]),
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      };
+    };
+    const broadcastSigned = async (signed, skipPreflight) => {
+      try {
+        await broadcastRawTransaction({...signed, skipPreflight});
+      } catch (e) {
+        if (!e?.maybeSent) {
+          if (e?.preflightRejected && !e.blockhashNotFound) {
+            console.warn('solana.preflight_failed', e.message);
+          }
+          throw e;
+        }
+        // Some RPC may have received it: from here it is only polled and
+        // re-sent as these exact bytes, never rebuilt.
+      }
+    };
+
+    let signed = await signWithFreshBlockhash();
+    try {
+      await broadcastSigned(signed, false);
+    } catch (e) {
+      if (!e?.blockhashNotFound) {
+        throw e;
+      }
+      signed = await signWithFreshBlockhash();
+      try {
+        await broadcastSigned(signed, false);
+      } catch (retryError) {
+        if (!retryError?.blockhashNotFound) {
+          throw retryError;
+        }
+        console.warn('solana.preflight_blockhash_unknown');
+        await broadcastSigned(signed, true);
+      }
+    }
+    rememberBroadcastDeadline(signed.signature, signed.lastValidBlockHeight);
+    rebroadcastUntilSettled(signed);
+    return signed.signature;
+  };
+
+  // 'pending' is only honest while the transaction can still land. For a
+  // wallet-built transaction whose deadline we know, ask confirmSignature for
+  // a verdict: 'expired' means it provably never landed and nothing moved.
+  const resolveUnconfirmedBroadcast = async signature => {
+    const lastValidBlockHeight = broadcastDeadlines.get(signature);
+    if (!lastValidBlockHeight) {
+      return 'pending';
+    }
+    let outcome;
+    try {
+      outcome = await confirmSignature({
+        signature,
+        lastValidBlockHeight,
+        maxAttempts: 10,
+      });
+    } catch (e) {
+      broadcastDeadlines.delete(signature);
+      return {status: 'failed', err: e?.message};
+    }
+    if (outcome === 'pending') {
+      return 'pending';
+    }
+    broadcastDeadlines.delete(signature);
+    if (outcome === 'expired') {
+      console.warn('solana.dropped');
+      return {status: 'dropped'};
+    }
+    return {status: 'confirmed'};
+  };
+
+  // True once the cluster is past a tracked send's lastValidBlockHeight, with
+  // the margin confirmSignature uses. An unreadable height proves nothing.
+  const isPastBroadcastDeadline = async (solanaProvider, signature) => {
+    const lastValidBlockHeight = broadcastDeadlines.get(signature);
+    if (!lastValidBlockHeight) {
+      return false;
+    }
+    try {
+      const blockHeight = await solanaProvider.getBlockHeight('finalized');
+      return blockHeight > lastValidBlockHeight + EXPIRY_MARGIN_BLOCKS;
+    } catch (e) {
+      return false;
+    }
   };
 
   return {
@@ -1397,6 +1647,7 @@ export const SolanaChain = () => {
               );
               if (response) {
                 clearInterval(timer);
+                broadcastDeadlines.delete(transactionID);
                 if (
                   response?.meta?.status === 'Ok' ||
                   response?.meta?.err === null
@@ -1412,9 +1663,14 @@ export const SolanaChain = () => {
                     err: response?.meta?.err,
                   });
                 }
-              } else if (numberOfRetries === retries) {
+              } else if (
+                numberOfRetries === retries ||
+                (await isPastBroadcastDeadline(solanaProvider, transactionID))
+              ) {
+                // A wallet-built send whose blockhash has expired gets its
+                // verdict now (~35 s) instead of after the whole poll.
                 clearInterval(timer);
-                resolve('pending');
+                resolve(await resolveUnconfirmedBroadcast(transactionID));
               }
             } catch (e) {
               clearInterval(timer);
@@ -1481,10 +1737,15 @@ export const SolanaChain = () => {
         // no code below may rebuild or re-sign this transaction.
         transaction.sign([keypair]);
         const signature = bs58.encode(transaction.signatures[0]);
-        await broadcastRawTransaction({
-          serializedTx: transaction.serialize(),
-          signature,
-        });
+        const serializedTx = transaction.serialize();
+        await broadcastRawTransaction({serializedTx, signature});
+        if (lastValidBlockHeight) {
+          rebroadcastUntilSettled({
+            serializedTx,
+            signature,
+            lastValidBlockHeight,
+          });
+        }
         // Sequential routes must land in order — verify by signature status
         // before broadcasting the next transaction (never by rebuilding).
         if (legIndex < executables.length - 1) {
@@ -1840,19 +2101,70 @@ const prepareCreateStaking = async ({
   });
 };
 
-const getPriorityFee = async (solanaProvider, fromAddressPubKey) => {
-  const priorityFees = await solanaProvider.getRecentPrioritizationFees({
-    lockedWritableAccounts: [fromAddressPubKey],
+// Compute unit price in micro-lamports. QuickNode forwards a transaction
+// through its staked connection (SWQoS) only when it pays at least the
+// `recommended` fee of qn_estimatePriorityFees; below that it takes the
+// unstaked path, where leaders drop it under load. getRecentPrioritizationFees
+// can't replace it: it returns each slot's MINIMUM landed fee, which is 0 on
+// mainnet, so the old average always fell back to 5,000 (~2 lamports on a
+// SOL transfer). The method needs the Priority Fee API add-on on the premium
+// endpoint; free RPCs don't serve it.
+export const PRIORITY_FEE_FALLBACK_MICRO_LAMPORTS = 100_000;
+export const PRIORITY_FEE_MAX_MICRO_LAMPORTS = 2_000_000;
+// Headroom for the market moving between the estimate and the send.
+const PRIORITY_FEE_BUFFER_PERCENT = 110;
+
+const fetchRecommendedPriorityFee = async () => {
+  const rpcUrl = getPremiumRPCUrl('solana');
+  if (!rpcUrl) {
+    throw new Error('no premium solana rpc');
+  }
+  const response = await withRpcSessionFetch(customFetchWithTimeout)(rpcUrl, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'qn_estimatePriorityFees',
+      params: {last_n_blocks: 100, api_version: 2},
+    }),
   });
-  const nonZeroFees = priorityFees
-    .map(feeObject => feeObject.prioritizationFee)
-    .filter(fee => fee !== 0);
-  // Calculate the average of the non-zero fees
-  return nonZeroFees.length > 0
-    ? Math.floor(
-        nonZeroFees.reduce((acc, fee) => acc + fee, 0) / nonZeroFees.length,
-      )
-    : 5000;
+  const json = await response.json();
+  const recommended = Number(json?.result?.recommended);
+  if (!Number.isFinite(recommended) || recommended <= 0) {
+    throw new Error(
+      json?.error?.message || `unexpected response (HTTP ${response.status})`,
+    );
+  }
+  return recommended;
+};
+
+export const getPriorityFee = async () => {
+  let recommended;
+  try {
+    recommended = await fetchRecommendedPriorityFee();
+  } catch (e) {
+    console.warn('solana.priority_fee_fallback', e?.message);
+    return PRIORITY_FEE_FALLBACK_MICRO_LAMPORTS;
+  }
+  // Capping below `recommended` would put the send back on the unstaked path
+  // that drops it, so refuse instead. The message starts with "The" so the
+  // estimate thunk shows it on the Transfer screen.
+  if (recommended > PRIORITY_FEE_MAX_MICRO_LAMPORTS) {
+    console.warn('solana.priority_fee_above_cap', recommended);
+    throw new Error(
+      `The Solana network is congested: a reliable send needs a priority fee of ${Math.ceil(
+        recommended,
+      )} micro-lamports per compute unit, above this wallet's limit of ${PRIORITY_FEE_MAX_MICRO_LAMPORTS}. Please try again in a few minutes.`,
+    );
+  }
+  const fee = Math.ceil((recommended * PRIORITY_FEE_BUFFER_PERCENT) / 100);
+  if (fee > PRIORITY_FEE_MAX_MICRO_LAMPORTS) {
+    // Only the buffer is trimmed; the fee still meets `recommended`.
+    console.warn('solana.priority_fee_capped', fee);
+    return PRIORITY_FEE_MAX_MICRO_LAMPORTS;
+  }
+  return fee;
 };
 
 const getDeductedAmountForFees = (amount, gasFee, estimateGas) => {

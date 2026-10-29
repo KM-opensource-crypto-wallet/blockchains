@@ -76,6 +76,7 @@ import {
   isSponsoredQuoteError,
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
+  SOLANA_PREFLIGHT_REJECTED_PREFIX,
   MORALIS_CHAIN_TO_CHAIN,
   NFT_SUPPORTED_CHAIN,
   HEDERA_USER_MESSAGES,
@@ -86,6 +87,11 @@ import {
   resolveWalletConnectCoin,
   toWalletConnectError,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCoin';
+import {
+  buildEvmWalletConnectTx,
+  getEvmWalletConnectTxDigest,
+} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {clearWalletConnectTransactionData} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
@@ -1041,9 +1047,12 @@ export const walletConnect = createAsyncThunk(
       walletAddress,
       domain,
       privateKey,
+      reviewedTxDigest,
+      reviewedRequestId,
     } = payload;
     const {
       getWalletConnect,
+      recordIssuedBatch,
     } = require('dok-wallet-blockchain-networks/service/walletconnect');
     const connector = getWalletConnect();
     let toastId;
@@ -1053,10 +1062,64 @@ export const walletConnect = createAsyncThunk(
         response: {id, jsonrpc: '2.0', error},
       });
     };
+    // Whatever happens below, the pending request has been answered (or will
+    // be by the error paths), so drop it; scoped by id so it cannot wipe a
+    // request that arrived later.
+    const clearPending = () =>
+      thunkAPI.dispatch(clearWalletConnectTransactionData({id}));
+
+    // KIML-002: an EVM transaction approval is bound to the request the user
+    // reviewed. Rebuild the canonical tx from the store's pending request (not
+    // from the modal's copy) and refuse unless its digest and id match what
+    // the modal reviewed. The executor then signs only that object.
+    const isEvmTransaction =
+      typeof chainId === 'string' &&
+      chainId.startsWith('eip155:') &&
+      (method === 'eth_sendTransaction' || method === 'eth_signTransaction');
+    let canonicalTx = null;
+    if (isEvmTransaction) {
+      const pending =
+        thunkAPI.getState()?.walletConnect?.transactionRequestData;
+      let digest = null;
+      if (
+        pending &&
+        pending.id === id &&
+        reviewedRequestId === id &&
+        pending.chainId === chainId
+      ) {
+        try {
+          canonicalTx = buildEvmWalletConnectTx(pending.params?.[0], {
+            chainId: pending.chainId,
+          });
+          digest = getEvmWalletConnectTxDigest(canonicalTx);
+        } catch (e) {
+          canonicalTx = null;
+        }
+      }
+      if (!canonicalTx || !reviewedTxDigest || digest !== reviewedTxDigest) {
+        const message = 'Request changed after review';
+        logger.warn('walletconnect.review_mismatch', {
+          method,
+          chain_name,
+          requestId: id,
+          pendingId: pending?.id,
+        });
+        showToast({
+          type: 'errorToast',
+          title: 'Request changed',
+          message:
+            'The request changed after it was reviewed. Ask the dApp to send it again.',
+        });
+        await respondWithError({code: 5000, message});
+        clearPending();
+        return thunkAPI.rejectWithValue('review_mismatch');
+      }
+    }
+    const effectiveSignerAddress = expectedSignerAddress ?? canonicalTx?.from;
     if (
-      expectedSignerAddress &&
+      effectiveSignerAddress &&
       walletAddress &&
-      expectedSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
+      effectiveSignerAddress.toLowerCase() !== walletAddress.toLowerCase()
     ) {
       const message =
         'The dApp requested a signature from a different address than the connected wallet.';
@@ -1074,6 +1137,7 @@ export const walletConnect = createAsyncThunk(
           error: {code: 5000, message},
         },
       });
+      clearPending();
       return thunkAPI.rejectWithValue(message);
     }
 
@@ -1098,8 +1162,9 @@ export const walletConnect = createAsyncThunk(
         currentWallet,
       );
       if (!nativeCoin) {
-        console.error('native coin not found');
-        return null;
+        // Thrown, not returned: the catch answers the dApp and the finally
+        // clears the pending request.
+        throw new Error(`Unable to load the ${chain_name} coin for signing`);
       }
       // eip155 requests on a chain that also has a native namespace (Hedera)
       // run on its EVM executor; everything else on the chain itself.
@@ -1164,7 +1229,9 @@ export const walletConnect = createAsyncThunk(
           throw new Error(`Unsupported WalletConnect method: ${method}`);
         }
         tx = await executor[wcMethod]({
-          payload,
+          payload: canonicalTx
+            ? {...payload, transactionData: canonicalTx}
+            : payload,
           chain_name,
           chainId,
           domain,
@@ -1174,6 +1241,16 @@ export const walletConnect = createAsyncThunk(
       }
 
       if (tx) {
+        if (method === ETH_WALLET_SEND_CALLS) {
+          // Before the reply: the dApp polls wallet_getCallsStatus with this
+          // id as soon as it has it, and only recorded batches are answered.
+          recordIssuedBatch({
+            topic,
+            chainId,
+            id: tx,
+            walletClientId: currentWallet?.clientId,
+          });
+        }
         await connector?.respondSessionRequest({
           topic,
           response: {id, result: tx, jsonrpc: '2.0'},
@@ -1240,6 +1317,8 @@ export const walletConnect = createAsyncThunk(
         toastId,
       });
       return thunkAPI.rejectWithValue(e?.message || 'Unknown error');
+    } finally {
+      clearPending();
     }
   },
 );
@@ -1270,6 +1349,9 @@ const classifySendRejection = message => {
   }
   if (HEDERA_USER_MESSAGES.includes(message)) {
     return 'hedera_precondition';
+  }
+  if (message.startsWith(SOLANA_PREFLIGHT_REJECTED_PREFIX)) {
+    return 'solana_preflight';
   }
   if (
     message === 'could not coalesce error' ||
@@ -1648,6 +1730,17 @@ export const sendFunds = createAsyncThunk(
             message: 'Transaction take too long. Please check again later',
             toastId,
           });
+        } else if (confirmTransaction?.status === 'dropped') {
+          // The chain reported the broadcast transaction can provably never
+          // land (Solana: blockhash expired with no trace of the signature),
+          // so nothing was sent and retrying is safe.
+          showToast({
+            type: 'errorToast',
+            title: 'Transaction not sent',
+            message:
+              'The network did not process this transaction. No funds were sent. Please try again.',
+            toastId,
+          });
         } else if (confirmTransaction?.status === 'failed') {
           // DEX swaps have no provider-side status API (the on-chain result
           // IS the outcome), so the app is the source of truth here. The
@@ -1720,18 +1813,26 @@ export const sendFunds = createAsyncThunk(
           });
         }
         refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        const isDropped = confirmTransaction?.status === 'dropped';
         const status =
           confirmTransaction === 'pending'
             ? 2
-            : confirmTransaction?.status === 'failed'
+            : confirmTransaction?.status === 'failed' || isDropped
             ? 1
             : 3;
         // Public chain data only: no addresses or amounts next to user.id.
-        logger.info('send.submitted', {
-          ...describeSendForLogs(txData),
-          status,
-          tx_hash,
-        });
+        if (isDropped) {
+          logger.warn('send.dropped', {
+            ...describeSendForLogs(txData),
+            tx_hash,
+          });
+        } else {
+          logger.info('send.submitted', {
+            ...describeSendForLogs(txData),
+            status,
+            tx_hash,
+          });
+        }
         return {tx_hash, status};
       } else {
         thunkAPI.dispatch(setCurrentTransferSubmitting(false));
@@ -1848,6 +1949,16 @@ export const sendFunds = createAsyncThunk(
           type: 'errorToast',
           title: 'Hedera',
           message: e.message,
+        });
+        return;
+      }
+      // Every Solana RPC refused the transaction in its preflight check, so
+      // nothing was forwarded; show the network's reason.
+      if (e?.message?.startsWith(SOLANA_PREFLIGHT_REJECTED_PREFIX)) {
+        showToast({
+          type: 'errorToast',
+          title: 'Transaction not sent',
+          message: `${e.message.replace(/\.$/, '')}. No funds were sent.`,
         });
         return;
       }

@@ -361,6 +361,11 @@ const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
 
 // The worker refused the quote before broadcasting, so nothing executed.
 export const isSponsoredQuoteError = code => SPONSOR_QUOTE_CODES.includes(code);
+// Prefix of the error SolanaChain throws when every RPC refused a
+// transaction in its preflight check (nothing was forwarded); sendFunds
+// matches on it to show the network's reason instead of a generic error.
+export const SOLANA_PREFLIGHT_REJECTED_PREFIX =
+  'Solana transaction rejected before sending';
 
 export const isEip1559NotSupported = chain_name =>
   EIP_1559_NOT_SUPPORTED.includes(chain_name);
