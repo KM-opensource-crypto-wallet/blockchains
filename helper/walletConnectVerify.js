@@ -7,7 +7,7 @@
  *
  *   isScam              -> 'scam'      (flagged as malicious)
  *   validation INVALID  -> 'mismatch'  (sent from another domain)
- *   validation VALID    -> 'verified'
+ *   validation VALID    -> 'verified'  (only with an origin to show)
  *   anything else       -> 'unknown'
  */
 export const getWalletConnectVerifyStatus = verifyContext => {
@@ -19,7 +19,9 @@ export const getWalletConnectVerifyStatus = verifyContext => {
   if (verified?.validation === 'INVALID') {
     return {status: 'mismatch', origin};
   }
-  if (verified?.validation === 'VALID') {
+  // Without an origin there is no verified domain to show; the dApp's own
+  // metadata URL is only a claim.
+  if (verified?.validation === 'VALID' && origin) {
     return {status: 'verified', origin};
   }
   return {status: 'unknown', origin};

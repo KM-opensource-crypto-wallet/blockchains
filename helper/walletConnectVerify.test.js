@@ -45,6 +45,21 @@ describe('getWalletConnectVerifyStatus', () => {
       origin: '',
     });
   });
+
+  it('never reports verified without an origin', () => {
+    expect(getWalletConnectVerifyStatus(ctx({validation: 'VALID'}))).toEqual({
+      status: 'unknown',
+      origin: '',
+    });
+    expect(
+      getWalletConnectVerifyStatus(ctx({origin: '', validation: 'VALID'}))
+        .status,
+    ).toBe('unknown');
+    expect(
+      getWalletConnectVerifyStatus(ctx({origin: 42, validation: 'VALID'}))
+        .status,
+    ).toBe('unknown');
+  });
 });
 
 describe('isRiskyVerifyStatus', () => {
