@@ -40,6 +40,32 @@ describe('reviewEvmSignMessage', () => {
     expect(reviewEvmSignMessage('0x09410a42').readable).toBe(true);
   });
 
+  it('treats invisible formatting and bidi characters as unreadable', () => {
+    [
+      'Sign in​to example.com', // zero-width space
+      'Approve ‮txt.exe', // right-to-left override
+      'Pay ⁦100⁩ USDC', // bidi isolate
+      'Sign in‏to example.com', // right-to-left mark
+      '﻿Sign in', // BOM
+      'Sign­in', // soft hyphen
+      'Sign in \u{E0041}', // tag character
+    ].forEach(text => {
+      expect(reviewEvmSignMessage(text).readable).toBe(false);
+      expect(reviewEvmSignMessage(hexOf(text)).readable).toBe(false);
+    });
+  });
+
+  it('keeps non-ASCII text, emoji ZWJ sequences and ZWNJ readable', () => {
+    [
+      'Connexion à example.com',
+      '登录 example.com',
+      'Hi 👨‍👩‍👧',
+      'می‌خواهم',
+    ].forEach(text => {
+      expect(reviewEvmSignMessage(text).readable).toBe(true);
+    });
+  });
+
   it('never throws on malformed hex', () => {
     expect(reviewEvmSignMessage('0xabc')).toEqual({
       digestSized: false,
