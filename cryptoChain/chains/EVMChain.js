@@ -350,6 +350,8 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       return txResponse;
     } catch (e) {
       console.error('Failed to revoke authorization:', e);
+      // Never let a failed revoke read as success.
+      throw e;
     }
   }
 
@@ -2621,16 +2623,31 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             return {isDelegated: false, contractAddress: null};
           } catch (e) {
             console.error('Error checking delegation', e);
-            return {isDelegated: false, contractAddress: null};
+            return {isDelegated: false, contractAddress: null, error: true};
           }
         },
-        {isDelegated: false, contractAddress: null},
+        // `error` tells "could not read" apart from "not delegated".
+        {isDelegated: false, contractAddress: null, error: true},
       ),
     revokeDelegation: ({privateKey}) =>
       retryFunc(async evmProvider => {
         const wallet = new ethers.Wallet(privateKey);
         const walletSigner = wallet.connect(evmProvider);
         return await revokeAuthorization(walletSigner, evmProvider);
+      }),
+    // Network fee of revokeAuthorization's transaction (50000 gas limit).
+    estimateRevokeDelegationFee: ({address}) =>
+      retryFunc(async evmProvider => {
+        const {fee, estimatedFee} = await calculateTotalFees({
+          feesType: 'recommended',
+          evmProvider,
+          fromAddress: address,
+          toAddress: address,
+          estimateGas: 50000n,
+          value: 0n,
+          ignoreFetchingNonce: true,
+        });
+        return {fee, estimatedFee};
       }),
     createStaking: async ({
       from,

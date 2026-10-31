@@ -203,46 +203,9 @@ describe('hedera_signMessage → signMessage', () => {
   });
 });
 
-describe('hedera_signTransaction → signRawTransaction', () => {
-  const bodyBytes = () => {
-    const tx = frozenTransfer();
-    return proto.TransactionBody.encode(
-      tx._makeTransactionBody(tx.nodeAccountIds[0]),
-    ).finish();
-  };
-
-  it('signs the raw TransactionBody bytes and returns a protobuf SignatureMap', async () => {
-    const bytes = bodyBytes();
-    const {signatureMap} = await HederaChain().signRawTransaction({
-      signTypeData: {signerAccountId: SIGNER, transactionBody: b64(bytes)},
-      privateKey,
-    });
-
-    const {sigPair} = decodeSignatureMap(signatureMap);
-    expect(sigPair).toHaveLength(1);
-    expect(key.publicKey.verify(bytes, sigPair[0].ECDSASecp256k1)).toBe(true);
-    expect(executeSpy).not.toHaveBeenCalled();
-  });
-
-  it('rejects the pre-HIP-820 transactionList shape with a pointer to transactionBody', async () => {
-    await expect(
-      HederaChain().signRawTransaction({
-        signTypeData: {
-          signerAccountId: SIGNER,
-          transactionList: b64(unfrozenTransfer().toBytes()),
-        },
-        privateKey,
-      }),
-    ).rejects.toThrow(/transactionBody/);
-  });
-
-  it('rejects bytes that are not a TransactionBody', async () => {
-    await expect(
-      HederaChain().signRawTransaction({
-        signTypeData: {signerAccountId: SIGNER, transactionBody: 'bm9wZQ=='},
-        privateKey,
-      }),
-    ).rejects.toThrow();
+describe('hedera_signTransaction', () => {
+  it('has no HederaChain handler', () => {
+    expect(HederaChain().signRawTransaction).toBeUndefined();
   });
 });
 

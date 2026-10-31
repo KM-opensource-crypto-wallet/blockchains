@@ -9,7 +9,16 @@
  */
 import {thunk} from 'redux-thunk';
 import configureMockStore from 'redux-mock-store';
-import {walletConnect} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {
+  checkBatchDelegation,
+  confirmBatchDelegationRemoved,
+  revokeDelegation,
+  walletConnect,
+} from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import {
+  BATCH_DELEGATION_NOTICE_ADDRESSES,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+} from 'dok-wallet-blockchain-networks/config/config';
 import {
   buildEvmWalletConnectTx,
   getEvmWalletConnectTxDigest,
@@ -367,5 +376,331 @@ describe('walletConnect thunk: wallet_sendCalls batch record', () => {
 
     expect(executor.personalSign).toHaveBeenCalledTimes(1);
     expect(recordIssuedBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkBatchDelegation (Home notice)', () => {
+  const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
+  const OURS = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum;
+  let nextClient = 1;
+  const storeFor = (address, cleared = {}, clientId = `w${nextClient++}`) => {
+    const ethCoin = {
+      _id: 'eth-coin',
+      chain_name: 'ethereum',
+      type: 'coin',
+      address,
+      chain_symbol: 'ETH',
+      currencyRate: '2000',
+    };
+    return configureMockStore([thunk])({
+      ...makeState(null),
+      wallets: {
+        allWallets: [{...wallet, clientId, coins: [ethCoin]}],
+        currentWalletClientId: clientId,
+        batchDelegationCleared: cleared,
+      },
+    });
+  };
+  const chainCoin = delegation => ({
+    checkDelegation: jest.fn(async () => delegation),
+    estimateRevokeDelegationFee: jest.fn(async () => ({
+      fee: '0.0002',
+      estimatedFee: '0.0001',
+    })),
+  });
+  const types = store => store.getActions().map(a => a.type);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    console.warn.mockRestore();
+  });
+
+  it('makes no RPC call for an address that is not listed', async () => {
+    const store = storeFor('0x' + '12'.repeat(20));
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(getCoin).not.toHaveBeenCalled();
+  });
+
+  it('makes no RPC call for a listed address already cleared', async () => {
+    const store = storeFor(LISTED, {[LISTED.toLowerCase()]: true});
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(getCoin).not.toHaveBeenCalled();
+  });
+
+  it('returns the notice for a listed address still delegated to our contract', async () => {
+    getCoin.mockResolvedValue(
+      chainCoin({isDelegated: true, contractAddress: OURS}),
+    );
+    const store = storeFor(LISTED);
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toEqual({
+      coinId: 'eth-coin',
+      address: LISTED.toLowerCase(),
+      chain_symbol: 'ETH',
+      currencyRate: '2000',
+      estimatedFee: '0.0001',
+    });
+  });
+
+  it('checks a wallet at most once per 10 minutes unless forced', async () => {
+    getCoin.mockResolvedValue(
+      chainCoin({isDelegated: true, contractAddress: OURS}),
+    );
+    const store = storeFor(LISTED);
+    await store.dispatch(checkBatchDelegation());
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(getCoin).toHaveBeenCalledTimes(1);
+    await store.dispatch(checkBatchDelegation({force: true}));
+    expect(getCoin).toHaveBeenCalledTimes(2);
+  });
+
+  it('checks another listed address of the same wallet right away', async () => {
+    getCoin.mockResolvedValue(
+      chainCoin({isDelegated: true, contractAddress: OURS}),
+    );
+    const OTHER = BATCH_DELEGATION_NOTICE_ADDRESSES[1];
+    const clientId = `w${nextClient++}`;
+    await storeFor(LISTED, {}, clientId).dispatch(checkBatchDelegation());
+    expect(
+      await storeFor(OTHER, {}, clientId)
+        .dispatch(checkBatchDelegation())
+        .unwrap(),
+    ).toEqual(expect.objectContaining({address: OTHER.toLowerCase()}));
+    expect(getCoin).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks the address cleared once the chain shows it is no longer delegated', async () => {
+    getCoin.mockResolvedValue(
+      chainCoin({isDelegated: false, contractAddress: null}),
+    );
+    const store = storeFor(LISTED);
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(store.getActions()).toContainEqual({
+      type: 'wallets/markBatchDelegationCleared',
+      payload: LISTED.toLowerCase(),
+    });
+  });
+
+  it('marks nothing when the delegation could not be read', async () => {
+    getCoin.mockResolvedValue(
+      chainCoin({isDelegated: false, contractAddress: null, error: true}),
+    );
+    const store = storeFor(LISTED);
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(types(store)).not.toContain('wallets/markBatchDelegationCleared');
+  });
+
+  it('retries right away after a failed read instead of waiting 10 minutes', async () => {
+    getCoin
+      .mockResolvedValueOnce(
+        chainCoin({isDelegated: false, contractAddress: null, error: true}),
+      )
+      .mockRejectedValueOnce(new Error('rpc down'))
+      .mockResolvedValueOnce(
+        chainCoin({isDelegated: true, contractAddress: OURS}),
+      );
+    const store = storeFor(LISTED);
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toBeNull();
+    expect(await store.dispatch(checkBatchDelegation()).unwrap()).toEqual(
+      expect.objectContaining({address: LISTED.toLowerCase()}),
+    );
+    expect(getCoin).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('revokeDelegation', () => {
+  const baseCoin = {...coin, _id: 'other-eth'};
+  const storeWithCoins = () =>
+    configureMockStore([thunk])({
+      ...makeState(null),
+      wallets: {
+        allWallets: [{...wallet, coins: [coin, baseCoin]}],
+        currentWalletClientId: 'client1',
+      },
+    });
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('revokes with the coin given by coinId and reports confirmation', async () => {
+    getCoin.mockResolvedValue({
+      revokeDelegation: jest.fn(async () => ({hash: '0x' + '01'.repeat(32)})),
+      waitForConfirmation: jest.fn(async () => ({status: 1})),
+    });
+    const result = await storeWithCoins()
+      .dispatch(revokeDelegation({coinId: 'other-eth'}))
+      .unwrap();
+    expect(result).toEqual({status: 'confirmed'});
+    expect(getCoin.mock.calls[0][1]).toBe(baseCoin);
+  });
+
+  it('rejects when the transaction failed on the network', async () => {
+    getCoin.mockResolvedValue({
+      revokeDelegation: jest.fn(async () => ({hash: '0x' + '01'.repeat(32)})),
+      waitForConfirmation: jest.fn(async () => ({status: 'failed'})),
+    });
+    await expect(
+      storeWithCoins().dispatch(revokeDelegation()).unwrap(),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        message: 'The transaction failed on the network.',
+      }),
+    );
+  });
+});
+
+describe('walletConnect thunk: 32-byte message from a listed delegated account', () => {
+  const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
+  const HASH = '0x' + '5a'.repeat(32);
+  const storeFor = (address, cleared = {}) =>
+    configureMockStore([thunk])({
+      ...makeState(null),
+      wallets: {
+        allWallets: [{...wallet, coins: [{...coin, address}]}],
+        currentWalletClientId: 'client1',
+        batchDelegationCleared: cleared,
+      },
+    });
+  const personalSign = (address, message) =>
+    walletConnect(
+      basePayload({
+        method: 'personal_sign',
+        signTypeData: message,
+        expectedSignerAddress: address,
+        walletAddress: address,
+      }),
+    );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    getWalletConnect.mockReturnValue(connector);
+    getCoin.mockResolvedValue({
+      chain: executor,
+      waitForConfirmation: jest.fn(),
+    });
+  });
+  afterEach(() => {
+    console.error.mockRestore();
+  });
+
+  it('refuses with 5000 and never reaches the signer', async () => {
+    const store = storeFor(LISTED);
+    await store.dispatch(personalSign(LISTED, HASH));
+
+    expect(executor.personalSign).not.toHaveBeenCalled();
+    expect(errorReply().code).toBe(5000);
+    expect(store.getActions().map(a => a.type)).toContain(
+      'walletConnect/clearWalletConnectTransactionData',
+    );
+  });
+
+  it('signs once the account has been cleared', async () => {
+    const store = storeFor(LISTED, {[LISTED.toLowerCase()]: true});
+    await store.dispatch(personalSign(LISTED, HASH));
+    expect(executor.personalSign).toHaveBeenCalledTimes(1);
+  });
+
+  it('signs for an account that is not listed', async () => {
+    await storeFor(FROM).dispatch(personalSign(FROM, HASH));
+    expect(executor.personalSign).toHaveBeenCalledTimes(1);
+  });
+
+  it('signs a listed account message of another length', async () => {
+    await storeFor(LISTED).dispatch(personalSign(LISTED, '0x48656c6c6f'));
+    expect(executor.personalSign).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('confirmBatchDelegationRemoved', () => {
+  const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
+  const OURS = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum;
+  let nextClient = 1;
+  // A mock store whose state follows markBatchDelegationCleared, so the loop
+  // can see the address become cleared.
+  const liveStore = address => {
+    const clientId = `confirm${nextClient++}`;
+    let state = {
+      ...makeState(null),
+      wallets: {
+        allWallets: [
+          {
+            ...wallet,
+            clientId,
+            coins: [{...coin, _id: 'eth-coin', address}],
+          },
+        ],
+        currentWalletClientId: clientId,
+        batchDelegationCleared: {},
+      },
+    };
+    const applyCleared = () => next => action => {
+      if (action.type === 'wallets/markBatchDelegationCleared') {
+        state = {
+          ...state,
+          wallets: {
+            ...state.wallets,
+            batchDelegationCleared: {
+              ...state.wallets.batchDelegationCleared,
+              [action.payload]: true,
+            },
+          },
+        };
+      }
+      return next(action);
+    };
+    return configureMockStore([thunk, applyCleared])(() => state);
+  };
+  const delegation = isDelegated => ({
+    checkDelegation: jest.fn(async () => ({
+      isDelegated,
+      contractAddress: isDelegated ? OURS : null,
+    })),
+    estimateRevokeDelegationFee: jest.fn(async () => ({estimatedFee: '0'})),
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    console.warn.mockRestore();
+  });
+
+  it('keeps checking until the chain shows the delegation removed', async () => {
+    getCoin
+      .mockResolvedValueOnce(delegation(true))
+      .mockResolvedValueOnce(delegation(true))
+      .mockResolvedValueOnce(delegation(false));
+    const result = await liveStore(LISTED)
+      .dispatch(confirmBatchDelegationRemoved({address: LISTED, intervalMs: 0}))
+      .unwrap();
+    expect(result).toBe(true);
+    expect(getCoin).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after the attempts while the revoke is still pending', async () => {
+    getCoin.mockResolvedValue(delegation(true));
+    const result = await liveStore(LISTED)
+      .dispatch(
+        confirmBatchDelegationRemoved({
+          address: LISTED,
+          attempts: 3,
+          intervalMs: 0,
+        }),
+      )
+      .unwrap();
+    expect(result).toBe(false);
+    expect(getCoin).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops when the current wallet is not that address any more', async () => {
+    const result = await liveStore('0x' + '12'.repeat(20))
+      .dispatch(confirmBatchDelegationRemoved({address: LISTED, intervalMs: 0}))
+      .unwrap();
+    expect(result).toBe(false);
+    expect(getCoin).not.toHaveBeenCalled();
   });
 });

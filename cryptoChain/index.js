@@ -367,6 +367,8 @@ const getBaseCoin = async (chain, wallet, coin, walletData) => {
       await chain.checkDelegation?.({address: wallet.address}),
     revokeDelegation: async () =>
       await chain.revokeDelegation?.({privateKey: wallet.privateKey}),
+    estimateRevokeDelegationFee: async () =>
+      await chain.estimateRevokeDelegationFee?.({address: wallet.address}),
     // A DEX quote must never fall through to a plain transfer — there is no
     // real deposit address behind swapData — so a chain without swap support
     // fails loudly instead of a bare "not a function" TypeError.
