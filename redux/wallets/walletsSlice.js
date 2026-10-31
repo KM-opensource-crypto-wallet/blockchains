@@ -759,8 +759,8 @@ export const revokeDelegation = createAsyncThunk(
 
 // Home check for the listed Ethereum accounts still delegated to the batch
 // contract. No RPC unless the current wallet's Ethereum address is listed and
-// not yet cleared; at most one check per wallet per 10 minutes (in memory, so
-// every app launch checks again) unless `force`. Resolves the notice data, or
+// not yet cleared; at most one check per wallet address per 10 minutes (in
+// memory, so every app launch checks again) unless `force`. Resolves the notice data, or
 // null. An address is marked cleared (persisted) only when the chain shows it
 // is no longer delegated to our contract.
 const BATCH_DELEGATION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
@@ -783,28 +783,40 @@ export const checkBatchDelegation = createAsyncThunk(
       return null;
     }
     const clientId = currentWallet.clientId;
+    // Per address: a wallet can switch its Ethereum coin to another derive
+    // address, which must not wait out the previous address's window.
+    const throttleKey = `${clientId}:${address}`;
     const now = Date.now();
     if (
       !force &&
-      now - (lastBatchDelegationCheck[clientId] || 0) <
+      now - (lastBatchDelegationCheck[throttleKey] || 0) <
         BATCH_DELEGATION_CHECK_INTERVAL_MS
     ) {
       return null;
     }
-    lastBatchDelegationCheck[clientId] = now;
-    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
-      coin.chain_name,
-      clientId,
-    )(currentState);
-    const chainCoin = await getCoin(
-      currentWallet.phrase,
-      coin,
-      null,
-      currentWallet,
-      customRpcUrl,
-    );
-    const delegation = await chainCoin.checkDelegation();
+    lastBatchDelegationCheck[throttleKey] = now;
+    let chainCoin;
+    let delegation;
+    try {
+      const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+        coin.chain_name,
+        clientId,
+      )(currentState);
+      chainCoin = await getCoin(
+        currentWallet.phrase,
+        coin,
+        null,
+        currentWallet,
+        customRpcUrl,
+      );
+      delegation = await chainCoin.checkDelegation();
+    } catch (e) {
+      delegation = null;
+    }
     if (!delegation || delegation.error) {
+      // Could not read the chain: do not use up the 10-minute window, so the
+      // next trigger (foreground, network back) retries.
+      delete lastBatchDelegationCheck[throttleKey];
       return null;
     }
     const ours = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum?.toLowerCase();
@@ -832,6 +844,36 @@ export const checkBatchDelegation = createAsyncThunk(
       currencyRate: coin.currencyRate,
       estimatedFee,
     };
+  },
+);
+
+// After a revoke: re-check until the chain shows the delegation gone (which
+// marks the address cleared) instead of waiting for the next Home check. A
+// pending or just-mined revoke can still read as delegated for a while. Stops
+// early when the user switches to another wallet. Resolves whether the
+// address is now cleared.
+export const confirmBatchDelegationRemoved = createAsyncThunk(
+  'wallets/confirmBatchDelegationRemoved',
+  async ({address, attempts = 8, intervalMs = 15000} = {}, thunkAPI) => {
+    const key = address?.toLowerCase();
+    const isCleared = () =>
+      !!thunkAPI.getState().wallets?.batchDelegationCleared?.[key];
+    const isCurrentWalletAddress = () =>
+      selectCurrentWallet(thunkAPI.getState())
+        ?.coins?.find(
+          item => item?.chain_name === 'ethereum' && item?.type === 'coin',
+        )
+        ?.address?.toLowerCase() === key;
+    for (let i = 0; i < attempts && key && isCurrentWalletAddress(); i++) {
+      if (i > 0) {
+        await delay(intervalMs);
+      }
+      await thunkAPI.dispatch(checkBatchDelegation({force: true}));
+      if (isCleared()) {
+        return true;
+      }
+    }
+    return isCleared();
   },
 );
 
