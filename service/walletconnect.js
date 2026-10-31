@@ -11,7 +11,6 @@ import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/w
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getSdkError} from '@walletconnect/utils';
 import {
-  CHAIN_CONFIG,
   config,
   isSupportedWalletConnectMethod,
 } from 'dok-wallet-blockchain-networks/config/config';
@@ -24,6 +23,10 @@ import {
   unknownBundleIdError,
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCallsStatus';
 import {showToast} from 'utils/toast';
+import {
+  getWalletConnectVerifyStatus,
+  isRiskyVerifyStatus,
+} from 'dok-wallet-blockchain-networks/helper/walletConnectVerify';
 import {logWalletConnectEvent} from 'utils/logger';
 
 let walletConnectSubscribe = false;
@@ -105,20 +108,23 @@ export const getWalletConnect = () => {
   return walletConnect;
 };
 
+// Batch sending is paused (wallet_sendCalls is not accepted, see
+// WALLET_CONNECT_SPECIAL_METHODS), so no chain claims atomic batching.
+const supportsAtomicBatch = () => false;
 // wallet_sendCalls (EIP-5792) is only atomic where a batch contract is
 // deployed. Both environments' chain ids are listed; the session itself only
 // ever contains the current environment's chains.
-const BATCH_CAPABLE_CHAIN_IDS = new Set(
-  Object.values(CHAIN_CONFIG)
-    .filter(cfg => cfg.batch_contract && cfg.chain_id)
-    .flatMap(cfg =>
-      ['sandbox', 'production']
-        .filter(env => cfg.batch_contract[env] && cfg.chain_id[env])
-        .map(env => Number(cfg.chain_id[env])),
-    ),
-);
-const supportsAtomicBatch = hexChainId =>
-  BATCH_CAPABLE_CHAIN_IDS.has(Number.parseInt(hexChainId, 16));
+// const BATCH_CAPABLE_CHAIN_IDS = new Set(
+//   Object.values(CHAIN_CONFIG)
+//     .filter(cfg => cfg.batch_contract && cfg.chain_id)
+//     .flatMap(cfg =>
+//       ['sandbox', 'production']
+//         .filter(env => cfg.batch_contract[env] && cfg.chain_id[env])
+//         .map(env => Number(cfg.chain_id[env])),
+//     ),
+// );
+// const supportsAtomicBatch = hexChainId =>
+//   BATCH_CAPABLE_CHAIN_IDS.has(Number.parseInt(hexChainId, 16));
 
 // Read-only methods the handler answers itself. If one of them throws, nobody
 // else will ever reply, so the dApp would wait for the relay timeout.
@@ -207,7 +213,8 @@ export const subscribeWalletConnectEvent = () => {
   }
   requestIds = {};
   const onSessionProposal = proposal => {
-    const {id, params} = proposal;
+    const {id, params, verifyContext} = proposal;
+    const verify = getWalletConnectVerifyStatus(verifyContext);
 
     const {proposer, pairingTopic} = params;
     const sessionId = pairingTopic + '';
@@ -219,6 +226,8 @@ export const subscribeWalletConnectEvent = () => {
       peerUrl: proposer?.metadata?.url,
       requiredNamespaces: Object.keys(requiredNamespaces || {}),
       optionalNamespaces: Object.keys(optionalNamespaces || {}),
+      verify: verify.status,
+      verifyOrigin: verify.origin,
     });
     store.dispatch(setWalletConnectRequestModal(true));
     store.dispatch(
@@ -229,12 +238,15 @@ export const subscribeWalletConnectEvent = () => {
         optionalNamespaces,
         relays,
         sessionId,
+        // WalletConnect Verify API result, shown as the trust badge.
+        verifyContext,
       }),
     );
   };
   const onSessionRequest = async proposal => {
-    const {topic, params, id} = proposal;
+    const {topic, params, id, verifyContext} = proposal;
     const {request} = params || {};
+    const verify = getWalletConnectVerifyStatus(verifyContext);
     try {
       if (requestIds[id]) {
         return;
@@ -249,7 +261,16 @@ export const subscribeWalletConnectEvent = () => {
         topic,
         requestId: id,
         peerName: peerMeta?.name,
+        verify: verify.status,
       });
+      if (isRiskyVerifyStatus(verify.status)) {
+        logWalletConnectEvent('warn', 'session_request.verify_risky', {
+          method: request?.method,
+          verify: verify.status,
+          verifyOrigin: verify.origin,
+          peerUrl: peerMeta?.url,
+        });
+      }
 
       // Reject methods this wallet cannot answer before any UI opens.
       // JSON-RPC -32601 ("Method not found") is what the WalletKit docs use
@@ -388,6 +409,8 @@ export const subscribeWalletConnectEvent = () => {
             peerMeta,
             id,
             chainId: params?.chainId,
+            // Verified per request: the badge reflects this request's origin.
+            verifyContext,
           }),
         );
       }

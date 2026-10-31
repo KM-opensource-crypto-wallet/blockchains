@@ -18,27 +18,33 @@ const HEDERA_NATIVE_KEY = IS_SANDBOX ? 'hedera:testnet' : 'hedera:mainnet';
 const HEDERA_EVM_CHAIN_ID = IS_SANDBOX ? 296 : 295;
 
 describe('Hedera WalletConnect method routing (HIP-820)', () => {
-  it('routes the five signer-facing hedera_* methods to HederaChain functions', () => {
+  it('routes the four signer-facing hedera_* methods to HederaChain functions', () => {
     expect(WalletConnectMethods).toMatchObject({
       hedera_signAndExecuteTransaction: 'sendRawTransaction',
-      hedera_signTransaction: 'signRawTransaction',
       hedera_signMessage: 'signMessage',
       hedera_executeTransaction: 'executeTransaction',
       hedera_signAndExecuteQuery: 'signAndExecuteQuery',
     });
   });
 
-  it('accepts all six HIP-820 methods as supported', () => {
+  it('accepts five HIP-820 methods as supported', () => {
     [
       'hedera_getNodeAddresses',
       'hedera_executeTransaction',
       'hedera_signMessage',
       'hedera_signAndExecuteQuery',
       'hedera_signAndExecuteTransaction',
-      'hedera_signTransaction',
     ].forEach(method => {
       expect(isSupportedWalletConnectMethod(method)).toBe(true);
     });
+  });
+
+  it('does not support hedera_signTransaction', () => {
+    expect(isSupportedWalletConnectMethod('hedera_signTransaction')).toBe(
+      false,
+    );
+    expect(WalletConnectMethods.hedera_signTransaction).toBeUndefined();
+    expect(NON_EVM_METHOD_HANDLERS.hedera_signTransaction).toBeUndefined();
   });
 
   it('answers hedera_getNodeAddresses outside the transaction modal', () => {
@@ -49,7 +55,6 @@ describe('Hedera WalletConnect method routing (HIP-820)', () => {
     const params = {signerAccountId: `${HEDERA_NATIVE_KEY}:0.0.5`, x: 'y'};
     [
       'hedera_signMessage',
-      'hedera_signTransaction',
       'hedera_signAndExecuteTransaction',
       'hedera_signAndExecuteQuery',
     ].forEach(method => {

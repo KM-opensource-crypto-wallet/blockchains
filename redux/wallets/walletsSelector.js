@@ -7,6 +7,7 @@ import {
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {createSelector} from '@reduxjs/toolkit';
 import dayjs from 'dayjs';
+import {BATCH_DELEGATION_NOTICE_ADDRESSES} from 'dok-wallet-blockchain-networks/config/config';
 
 // Stable fallbacks so selectors don't hand useSelector a fresh []/{} every
 // call. Treat both as read-only - they are shared by every selector below.
@@ -473,4 +474,15 @@ export const selectLivePrivateKey = (
     }
   }
   return undefined;
+};
+
+// True for a listed account (BATCH_DELEGATION_NOTICE_ADDRESSES) that has not
+// yet been seen with its batch delegation removed. No network call.
+export const isBatchDelegationExposed = (state, address) => {
+  const key = typeof address === 'string' ? address.toLowerCase() : '';
+  return (
+    !!key &&
+    BATCH_DELEGATION_NOTICE_ADDRESSES.includes(key) &&
+    !state?.wallets?.batchDelegationCleared?.[key]
+  );
 };

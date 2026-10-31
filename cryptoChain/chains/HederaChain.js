@@ -578,31 +578,6 @@ export const HederaChain = (chain_name = 'hedera', phrase, customRpcUrl) => {
         throw e;
       }
     },
-    // hedera_signTransaction: {signerAccountId, transactionBody} → {signatureMap}
-    // The dApp sends one node's TransactionBody and merges the signature into
-    // its own TransactionList, so only the raw body bytes are signed here.
-    signRawTransaction: async ({signTypeData, privateKey, chainId}) => {
-      try {
-        assertNetwork(chainId);
-        if (
-          signTypeData?.transactionBody === undefined &&
-          signTypeData?.transactionList !== undefined
-        ) {
-          throw new Error(
-            'hedera_signTransaction expects transactionBody (base64 TransactionBody bytes), not transactionList',
-          );
-        }
-        const bodyBytes = fromBase64(
-          requireStringParam('transactionBody', signTypeData?.transactionBody),
-        );
-        proto.TransactionBody.decode(bodyBytes);
-        const key = PrivateKey.fromStringECDSA(privateKey);
-        return {signatureMap: encodeSignatureMap(key, key.sign(bodyBytes))};
-      } catch (e) {
-        console.error('Error in hedera signTransaction', e);
-        throw e;
-      }
-    },
     // hedera_signAndExecuteTransaction: {signerAccountId, transactionList}
     // → TransactionResponse.toJSON(). Incomplete transactions (HIP-745) are
     // frozen with our client first. Returns after precheck like the reference

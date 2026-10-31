@@ -316,7 +316,7 @@ describe('onSessionRequest: EVM chain switching (EIP-3326 / EIP-3085)', () => {
 });
 
 describe('onSessionRequest: wallet_getCapabilities', () => {
-  it('only claims atomic batching for chains that have a batch contract', async () => {
+  it('claims no atomic batching while batch sending is paused', async () => {
     await handlers.session_request(
       sessionRequest(
         'wallet_getCapabilities',
@@ -326,8 +326,8 @@ describe('onSessionRequest: wallet_getCapabilities', () => {
     );
 
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
-    expect(response.result['0x1']).toEqual({atomic: {status: 'supported'}});
-    // 0x127 = 295, Hedera's relay: no batch contract there.
+    // 0x1 has a batch contract; 0x127 = 295 (Hedera's relay) has none.
+    expect(response.result['0x1']).toEqual({atomic: {status: 'unsupported'}});
     expect(response.result['0x127']).toEqual({
       atomic: {status: 'unsupported'},
     });

@@ -47,6 +47,7 @@ import {
   selectIsRefreshingAllWallets,
   selectUserCoins,
   selectVisibleWallets,
+  isBatchDelegationExposed,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {getTransferData} from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSelector';
 import {
@@ -90,12 +91,18 @@ import {
   buildEvmWalletConnectTx,
   getEvmWalletConnectTxDigest,
 } from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {
+  EVM_MESSAGE_SIGN_METHODS,
+  reviewEvmSignMessage,
+} from 'dok-wallet-blockchain-networks/helper/evmSignReview';
 import {clearWalletConnectTransactionData} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {
   fetchEVMNftApi,
   fetchSolanaNftApi,
 } from 'dok-wallet-blockchain-networks/service/moralis';
 import {
+  BATCH_DELEGATION_NOTICE_ADDRESSES,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
   config,
   WalletConnectMethods,
 } from 'dok-wallet-blockchain-networks/config/config';
@@ -714,10 +721,15 @@ export const refreshCurrentCoin = createAsyncThunk(
 
 export const revokeDelegation = createAsyncThunk(
   'wallets/revokeDelegation',
-  async (_, thunkAPI) => {
+  // `coinId` picks a coin of the current wallet (Home); otherwise the coin on
+  // screen. Resolves {status: 'confirmed' | 'pending'}; throws when nothing
+  // was sent or the transaction failed.
+  async ({coinId} = {}, thunkAPI) => {
     const currentState = thunkAPI.getState();
     const currentWallet = selectCurrentWallet(currentState);
-    const currentCoin = selectCurrentCoin(currentState);
+    const currentCoin = coinId
+      ? currentWallet?.coins?.find(item => item?._id === coinId)
+      : selectCurrentCoin(currentState);
     const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
       currentCoin?.chain_name,
       currentWallet?.clientId,
@@ -730,14 +742,96 @@ export const revokeDelegation = createAsyncThunk(
       customRpcUrl,
     );
     const txResponse = await nativeCoin.revokeDelegation();
-    if (txResponse) {
-      await nativeCoin.waitForConfirmation({
-        transaction: txResponse,
-        retries: 10,
-        interval: 3000,
-      });
+    if (!txResponse) {
+      throw new Error('The network did not accept the transaction.');
     }
-    return true;
+    const result = await nativeCoin.waitForConfirmation({
+      transaction: txResponse,
+      retries: 10,
+      interval: 3000,
+    });
+    if (result?.status === 'failed') {
+      throw new Error('The transaction failed on the network.');
+    }
+    return {status: result === 'pending' ? 'pending' : 'confirmed'};
+  },
+);
+
+// Home check for the listed Ethereum accounts still delegated to the batch
+// contract. No RPC unless the current wallet's Ethereum address is listed and
+// not yet cleared; at most one check per wallet per 10 minutes (in memory, so
+// every app launch checks again) unless `force`. Resolves the notice data, or
+// null. An address is marked cleared (persisted) only when the chain shows it
+// is no longer delegated to our contract.
+const BATCH_DELEGATION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const lastBatchDelegationCheck = {};
+
+export const checkBatchDelegation = createAsyncThunk(
+  'wallets/checkBatchDelegation',
+  async ({force} = {}, thunkAPI) => {
+    const currentState = thunkAPI.getState();
+    const currentWallet = selectCurrentWallet(currentState);
+    const coin = currentWallet?.coins?.find(
+      item => item?.chain_name === 'ethereum' && item?.type === 'coin',
+    );
+    const address = coin?.address?.toLowerCase();
+    if (
+      !address ||
+      !BATCH_DELEGATION_NOTICE_ADDRESSES.includes(address) ||
+      currentState.wallets?.batchDelegationCleared?.[address]
+    ) {
+      return null;
+    }
+    const clientId = currentWallet.clientId;
+    const now = Date.now();
+    if (
+      !force &&
+      now - (lastBatchDelegationCheck[clientId] || 0) <
+        BATCH_DELEGATION_CHECK_INTERVAL_MS
+    ) {
+      return null;
+    }
+    lastBatchDelegationCheck[clientId] = now;
+    const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
+      coin.chain_name,
+      clientId,
+    )(currentState);
+    const chainCoin = await getCoin(
+      currentWallet.phrase,
+      coin,
+      null,
+      currentWallet,
+      customRpcUrl,
+    );
+    const delegation = await chainCoin.checkDelegation();
+    if (!delegation || delegation.error) {
+      return null;
+    }
+    const ours = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum?.toLowerCase();
+    if (
+      !delegation.isDelegated ||
+      delegation.contractAddress?.toLowerCase() !== ours
+    ) {
+      thunkAPI.dispatch(markBatchDelegationCleared(address));
+      return null;
+    }
+    let estimatedFee = null;
+    try {
+      ({estimatedFee} = await chainCoin.estimateRevokeDelegationFee());
+    } catch (e) {
+      console.warn('revoke delegation fee estimate failed', e?.message);
+    }
+    captureError(new Error('Batch delegation notice shown'), {
+      level: 'info',
+      tags: {kind: 'batch_delegation_notice'},
+    });
+    return {
+      coinId: coin._id,
+      address,
+      chain_symbol: coin.chain_symbol,
+      currencyRate: coin.currencyRate,
+      estimatedFee,
+    };
   },
 );
 
@@ -1137,6 +1231,35 @@ export const walletConnect = createAsyncThunk(
       });
       clearPending();
       return thunkAPI.rejectWithValue(message);
+    }
+
+    // A 32-byte message from a listed account that still has batch sending
+    // set up is not signed: such a signature is not tied to a chain. The
+    // modal shows the same block; the Home screen offers the fix.
+    if (
+      EVM_MESSAGE_SIGN_METHODS.includes(method) &&
+      reviewEvmSignMessage(signTypeData).digestSized &&
+      isBatchDelegationExposed(
+        thunkAPI.getState(),
+        effectiveSignerAddress || walletAddress,
+      )
+    ) {
+      const message =
+        'This account needs a quick update before it can sign this request.';
+      logger.warn('walletconnect.sign_refused', {
+        method,
+        chain_name,
+        reason: 'batch_delegated',
+      });
+      showToast({
+        type: 'errorToast',
+        title: 'Request not signed',
+        message:
+          'Switch off batch sending from the Home screen, then try again.',
+      });
+      await respondWithError({code: 5000, message});
+      clearPending();
+      return thunkAPI.rejectWithValue('batch_delegated');
     }
 
     try {
@@ -2112,6 +2235,9 @@ export const sendPendingTransactions = createAsyncThunk(
 const initialState = {
   allWallets: [],
   currentWalletClientId: null,
+  // Address (lowercase) -> true once the chain showed its batch delegation
+  // gone; checkBatchDelegation never checks it again.
+  batchDelegationCleared: {},
   pendingTransactions: {},
   masterClientId: null,
   failedTransaction: null,
@@ -2514,6 +2640,12 @@ export const walletsSlice = createSlice({
   name: 'wallets',
   initialState,
   reducers: {
+    markBatchDelegationCleared: (state, {payload}) => {
+      state.batchDelegationCleared = {
+        ...state.batchDelegationCleared,
+        [payload]: true,
+      };
+    },
     setRefreshingWalletClientId: (state, {payload}) => {
       state.refreshingWalletClientId = payload ?? null;
     },
@@ -3790,6 +3922,7 @@ export const walletsSlice = createSlice({
 });
 
 export const {
+  markBatchDelegationCleared,
   setRefreshingWalletClientId,
   setCurrentCoin,
   setWalletChainExistingCoin,
