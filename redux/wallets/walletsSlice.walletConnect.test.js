@@ -14,7 +14,10 @@ import {
   revokeDelegation,
   walletConnect,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
-import {BATCH_TRANSACTION_CONTRACT_ADDRESS} from 'dok-wallet-blockchain-networks/config/config';
+import {
+  BATCH_DELEGATION_NOTICE_ADDRESSES,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+} from 'dok-wallet-blockchain-networks/config/config';
 import {
   buildEvmWalletConnectTx,
   getEvmWalletConnectTxDigest,
@@ -376,7 +379,7 @@ describe('walletConnect thunk: wallet_sendCalls batch record', () => {
 });
 
 describe('checkBatchDelegation (Home notice)', () => {
-  const LISTED = '0xF8eC8f7f7D5Ece27130227Bd7846ef24e86E8091';
+  const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
   const OURS = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum;
   let nextClient = 1;
   const storeFor = (address, cleared = {}) => {
@@ -516,7 +519,7 @@ describe('revokeDelegation', () => {
 });
 
 describe('walletConnect thunk: 32-byte message from a listed delegated account', () => {
-  const LISTED = '0xF8eC8f7f7D5Ece27130227Bd7846ef24e86E8091';
+  const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
   const HASH = '0x' + '5a'.repeat(32);
   const storeFor = (address, cleared = {}) =>
     configureMockStore([thunk])({

@@ -332,14 +332,12 @@ export const subscribeWalletConnectEvent = () => {
         const capabilities = {};
         (chainIds || []).forEach(chainId => {
           // EIP-5792 final: `atomic.status`, not the draft `atomicBatch`.
-          // 'ready' (upgradeable via EIP-7702) never applies here.
-          capabilities[chainId] = {
-            atomic: {
-              status: supportsAtomicBatch(chainId)
-                ? 'supported'
-                : 'unsupported',
-            },
-          };
+          // 'ready' (upgradeable via EIP-7702) never applies here. A chain we
+          // cannot batch on gets no `atomic` key, which the spec reads as "no
+          // batching"; 'unsupported' would promise non-atomic batches.
+          capabilities[chainId] = supportsAtomicBatch(chainId)
+            ? {atomic: {status: 'supported'}}
+            : {};
         });
 
         await walletConnect.respondSessionRequest({

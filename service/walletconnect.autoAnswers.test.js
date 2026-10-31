@@ -327,10 +327,8 @@ describe('onSessionRequest: wallet_getCapabilities', () => {
 
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     // 0x1 has a batch contract; 0x127 = 295 (Hedera's relay) has none.
-    expect(response.result['0x1']).toEqual({atomic: {status: 'unsupported'}});
-    expect(response.result['0x127']).toEqual({
-      atomic: {status: 'unsupported'},
-    });
+    expect(response.result['0x1']).toEqual({});
+    expect(response.result['0x127']).toEqual({});
   });
 });
 

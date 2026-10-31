@@ -150,11 +150,8 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    // Batch sending is paused, so no chain claims atomic batching.
-    expect(response.result).toEqual({
-      '0x1': {atomic: {status: 'unsupported'}},
-      '0xaa36a7': {atomic: {status: 'unsupported'}},
-    });
+    // Batch sending is paused, so no chain offers batching: no `atomic` key.
+    expect(response.result).toEqual({'0x1': {}, '0xaa36a7': {}});
     expect(showToast).not.toHaveBeenCalled();
   });
 

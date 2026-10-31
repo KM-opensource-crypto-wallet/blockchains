@@ -119,9 +119,7 @@ describe('onSessionRequest: a request arriving while one is on screen', () => {
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({
-      '0x1': {atomic: {status: 'unsupported'}},
-    });
+    expect(response.result).toEqual({'0x1': {}});
   });
 
   it('still answers wallet_getCallsStatus while busy', async () => {
