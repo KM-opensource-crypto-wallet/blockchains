@@ -83,6 +83,7 @@ jest.mock('dok-wallet-blockchain-networks/config/config', () => ({
   ...jest.requireActual('dok-wallet-blockchain-networks/config/config'),
   BATCH_TRANSACTION_CONTRACT_ADDRESS: {
     ethereum: '0x03203E5a57f568aca9C83d28a79Af3981BA54434',
+    optimism: '0x03203E5a57f568aca9C83d28a79Af3981BA54434',
   },
   CHAIN_ID: {ethereum: 11155111, base: 84532},
 }));
