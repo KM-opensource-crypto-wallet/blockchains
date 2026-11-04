@@ -150,20 +150,58 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    // Batch sending is paused, so no chain offers batching: no `atomic` key.
-    expect(response.result).toEqual({'0x1': {}, '0xaa36a7': {}});
+    // Only chains with a batch_contract offer batching (Sepolia here).
+    expect(response.result).toEqual({
+      '0x1': {},
+      '0xaa36a7': {atomic: {status: 'supported'}},
+    });
     expect(showToast).not.toHaveBeenCalled();
   });
 
-  it('replies -32601 to wallet_sendCalls while batch sending is paused', async () => {
-    await handlers.session_request(
-      sessionRequest('wallet_sendCalls', [{calls: []}], 'eip155:1'),
-    );
+  describe('wallet_sendCalls', () => {
+    const FROM = '0x2222222222222222222222222222222222222222';
+    const call = {
+      to: '0x1111111111111111111111111111111111111111',
+      value: '0x1',
+    };
+    const sendCalls = (overrides, chainId = 'eip155:11155111') =>
+      sessionRequest(
+        'wallet_sendCalls',
+        [{chainId: '0xaa36a7', from: FROM, calls: [call], ...overrides}],
+        chainId,
+      );
+    const replyCode = () =>
+      mockWalletKit.respondSessionRequest.mock.calls[0][0].response.error.code;
 
-    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
-    const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
-    expect(response.error.code).toBe(-32601);
-    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+    it('opens the review for a valid batch on a batch chain', async () => {
+      await handlers.session_request(sendCalls());
+
+      expect(mockWalletKit.respondSessionRequest).not.toHaveBeenCalled();
+      expect(setWalletConnectTransactionData).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [
+        'a chain without a batch contract',
+        sendCalls({chainId: '0x1'}, 'eip155:1'),
+        5710,
+      ],
+      ['a chain id other than the session', sendCalls({chainId: '0x1'}), 5710],
+      [
+        'a required capability',
+        sendCalls({capabilities: {paymasterService: {}}}),
+        5700,
+      ],
+      ['more than 32 calls', sendCalls({calls: Array(33).fill(call)}), 5740],
+      ['no calls', sendCalls({calls: []}), -32602],
+      ['a call without to', sendCalls({calls: [{value: '0x1'}]}), -32602],
+    ])('rejects %s before any UI opens', async (_label, request, code) => {
+      await handlers.session_request(request);
+
+      expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+      expect(replyCode()).toBe(code);
+      expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+    });
   });
 
   it('replies -32601 to hedera_signTransaction without opening the modal', async () => {

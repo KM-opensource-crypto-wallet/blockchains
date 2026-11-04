@@ -14,16 +14,33 @@ import {ethers} from 'ethers';
 import {decodeEvmCalldata, UNDECODABLE_CALLDATA_WARNING} from './evmCalldata';
 
 export class EvmWalletConnectTxError extends Error {
-  constructor(message, field) {
+  constructor(message, field, code = -32602) {
     super(message);
     this.name = 'EvmWalletConnectTxError';
     this.field = field;
+    this.code = code;
   }
 }
 
-const fail = (message, field) => {
-  throw new EvmWalletConnectTxError(message, field);
+const fail = (message, field, code) => {
+  throw new EvmWalletConnectTxError(message, field, code);
 };
+
+// EIP-5792 wallet_sendCalls error codes.
+const UNSUPPORTED_CAPABILITY = 5700;
+export const UNSUPPORTED_CHAIN = 5710;
+const BATCH_TOO_LARGE = 5740;
+// The batch contract's MAX_CALLS: a larger batch would only revert on-chain.
+export const MAX_WALLET_SEND_CALLS = 32;
+// Nested call keys too: a replacer array filters keys at every level.
+const WALLET_SEND_CALLS_DIGEST_KEYS = [
+  'calls',
+  'chainId',
+  'data',
+  'from',
+  'to',
+  'value',
+];
 
 /** 'eip155:137' | '0x89' | '137' | 137 | 137n -> 137; anything else -> null */
 export const parseEip155ChainId = chainId => {
@@ -343,6 +360,16 @@ export const classifyEvmTxRisk = ({tx, decoded}) => {
   return result;
 };
 
+const toReviewError = e =>
+  e instanceof EvmWalletConnectTxError
+    ? e
+    : new EvmWalletConnectTxError(e?.message || 'Invalid transaction');
+
+const reviewCall = tx => {
+  const decoded = decodeEvmCalldata(tx.data);
+  return {decoded, risk: classifyEvmTxRisk({tx, decoded})};
+};
+
 /**
  * Everything the approval modal needs. Never throws: a malformed request comes
  * back as {tx:null, error, risk:{level:'danger', kind:'malformed'}} so the UI
@@ -351,19 +378,14 @@ export const classifyEvmTxRisk = ({tx, decoded}) => {
 export const reviewEvmWalletConnectTx = (params0, {chainId} = {}) => {
   try {
     const tx = buildEvmWalletConnectTx(params0, {chainId});
-    const decoded = decodeEvmCalldata(tx.data);
     return {
       tx,
       digest: getEvmWalletConnectTxDigest(tx),
-      decoded,
-      risk: classifyEvmTxRisk({tx, decoded}),
+      ...reviewCall(tx),
       error: null,
     };
   } catch (e) {
-    const error =
-      e instanceof EvmWalletConnectTxError
-        ? e
-        : new EvmWalletConnectTxError(e?.message || 'Invalid transaction');
+    const error = toReviewError(e);
     return {
       tx: null,
       digest: null,
@@ -375,6 +397,97 @@ export const reviewEvmWalletConnectTx = (params0, {chainId} = {}) => {
         reasons: [error.message],
         rows: [],
       },
+    };
+  }
+};
+
+const hasRequiredCapability = capabilities =>
+  !!capabilities &&
+  typeof capabilities === 'object' &&
+  Object.values(capabilities).some(c => c?.optional !== true);
+
+/** Canonical EIP-5792 batch; throws with the JSON-RPC error `code` to answer. */
+export const buildWalletSendCallsBatch = (params0, {chainId, account} = {}) => {
+  const p = params0 && typeof params0 === 'object' ? params0 : {};
+  const sessionChainId = parseEip155ChainId(chainId);
+  if (
+    sessionChainId == null ||
+    parseEip155ChainId(p.chainId) !== sessionChainId
+  ) {
+    fail(
+      `Request chainId ${String(p.chainId)} does not match session chain`,
+      'chainId',
+      UNSUPPORTED_CHAIN,
+    );
+  }
+  const calls = Array.isArray(p.calls) ? p.calls : [];
+  if (
+    hasRequiredCapability(p.capabilities) ||
+    calls.some(call => hasRequiredCapability(call?.capabilities))
+  ) {
+    fail('Unsupported capability', 'capabilities', UNSUPPORTED_CAPABILITY);
+  }
+  if (!calls.length) {
+    fail('No calls supplied', 'calls');
+  }
+  if (calls.length > MAX_WALLET_SEND_CALLS) {
+    fail(`More than ${MAX_WALLET_SEND_CALLS} calls`, 'calls', BATCH_TOO_LARGE);
+  }
+  const from = toAddress(
+    p.from == null || p.from === '' ? account : p.from,
+    'from',
+  );
+  const batch = {
+    from,
+    chainId: sessionChainId,
+    calls: calls.map(call => ({
+      to: toAddress(call?.to, 'to'),
+      value: toQuantity(call?.value, 'value') ?? '0x0',
+      data: toData(call?.data),
+    })),
+  };
+  // The batch contract reverts a call to the account itself or to address 0.
+  if (
+    batch.calls.some(call => call.to === from || call.to === ethers.ZeroAddress)
+  ) {
+    fail('Invalid call target', 'to');
+  }
+  return batch;
+};
+
+/** keccak256 of the canonical batch JSON. */
+export const getWalletSendCallsDigest = batch =>
+  ethers.keccak256(
+    ethers.toUtf8Bytes(JSON.stringify(batch, WALLET_SEND_CALLS_DIGEST_KEYS)),
+  );
+
+/** reviewEvmWalletConnectTx per call; `level` is the highest call level. */
+export const reviewWalletSendCalls = (params0, {chainId, account} = {}) => {
+  try {
+    const batch = buildWalletSendCallsBatch(params0, {chainId, account});
+    const calls = batch.calls.map(call => {
+      const tx = {...call, from: batch.from};
+      return {tx, ...reviewCall(tx)};
+    });
+    const level = calls.reduce(
+      (max, call) =>
+        LEVEL_RANK[call.risk.level] > LEVEL_RANK[max] ? call.risk.level : max,
+      'none',
+    );
+    return {
+      batch,
+      digest: getWalletSendCallsDigest(batch),
+      calls,
+      level,
+      error: null,
+    };
+  } catch (e) {
+    return {
+      batch: null,
+      digest: null,
+      calls: [],
+      level: 'danger',
+      error: toReviewError(e),
     };
   }
 };
