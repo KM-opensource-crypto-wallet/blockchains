@@ -29,9 +29,6 @@ const fail = (message, field, code) => {
 // EIP-5792 wallet_sendCalls error codes.
 const UNSUPPORTED_CAPABILITY = 5700;
 export const UNSUPPORTED_CHAIN = 5710;
-const BATCH_TOO_LARGE = 5740;
-// The batch contract's MAX_CALLS: a larger batch would only revert on-chain.
-export const MAX_WALLET_SEND_CALLS = 32;
 // Nested call keys too: a replacer array filters keys at every level.
 const WALLET_SEND_CALLS_DIGEST_KEYS = [
   'calls',
@@ -429,9 +426,6 @@ export const buildWalletSendCallsBatch = (params0, {chainId, account} = {}) => {
   }
   if (!calls.length) {
     fail('No calls supplied', 'calls');
-  }
-  if (calls.length > MAX_WALLET_SEND_CALLS) {
-    fail(`More than ${MAX_WALLET_SEND_CALLS} calls`, 'calls', BATCH_TOO_LARGE);
   }
   const from = toAddress(
     p.from == null || p.from === '' ? account : p.from,

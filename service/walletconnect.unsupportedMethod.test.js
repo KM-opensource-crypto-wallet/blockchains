@@ -192,7 +192,6 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
         sendCalls({capabilities: {paymasterService: {}}}),
         5700,
       ],
-      ['more than 32 calls', sendCalls({calls: Array(33).fill(call)}), 5740],
       ['no calls', sendCalls({calls: []}), -32602],
       ['a call without to', sendCalls({calls: [{value: '0x1'}]}), -32602],
     ])('rejects %s before any UI opens', async (_label, request, code) => {
