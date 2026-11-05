@@ -8,11 +8,17 @@ import {
   SCAN_URL,
   IS_SANDBOX,
   CHAIN_CONFIG,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+  SPONSORED_GAS_TOKENS,
 } from 'dok-wallet-blockchain-networks/config/config';
 
 import bs58 from 'bs58';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {
+  decodeBatchExecuteCalls,
+  decodeEvmCalldata,
+} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
 import axios from 'axios';
 dayjs.extend(duration);
 
@@ -353,6 +359,12 @@ export const SWAP_QUOTE_EXPIRED_ERROR =
 export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
+export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
+
+const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
+
+// The worker refused the quote before broadcasting, so nothing executed.
+export const isSponsoredQuoteError = code => SPONSOR_QUOTE_CODES.includes(code);
 // Prefix of the error SolanaChain throws when every RPC refused a
 // transaction in its preflight check (nothing was forwarded); sendFunds
 // matches on it to show the network's reason instead of a generic error.
@@ -382,6 +394,60 @@ export const isUnclaimDepositSupportedChain = chain_name =>
 
 export const isEip7702SupportedChain = chain_name =>
   EIP_7702_SUPPORTED_CHAIN.includes(chain_name);
+
+export const isSponsoredGasChain = chain_name =>
+  !!BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+
+export const getSponsoredGasTokenSymbol = (chain_name, contractAddress) => {
+  if (!contractAddress || !isSponsoredGasChain(chain_name)) {
+    return null;
+  }
+  return (
+    SPONSORED_GAS_TOKENS[chain_name]?.[contractAddress.toLowerCase()] ?? null
+  );
+};
+
+export const getSponsoredGasCoins = (chain_name, coins) =>
+  (coins ?? [])
+    .filter(
+      coin =>
+        coin?.chain_name === chain_name &&
+        Number(coin?.totalAmount) > 0 &&
+        getSponsoredGasTokenSymbol(chain_name, coin?.contractAddress),
+    )
+    .map(coin => ({
+      symbol: getSponsoredGasTokenSymbol(chain_name, coin?.contractAddress),
+      contractAddress: coin?.contractAddress,
+    }));
+export const isBatchSupportedChain = chain_name =>
+  !!BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+
+// Rows for a batch read back from the chain, which has no transactionsData.
+export const getBatchTransferItems = (input, {coins = [], nativeSymbol}) =>
+  decodeBatchExecuteCalls(input).map(call => {
+    const decoded = decodeEvmCalldata(call.data);
+    const token =
+      decoded.method === 'transfer' &&
+      coins.find(
+        coin => coin?.contractAddress?.toLowerCase() === call.to.toLowerCase(),
+      );
+    if (token) {
+      return {
+        coinInfo: token,
+        transferData: {
+          amount: parseBalance(decoded.args._value, token.decimal),
+          to: decoded.args._to,
+        },
+      };
+    }
+    return {
+      coinInfo: {
+        name: decoded.kind === 'decoded' ? decoded.method : undefined,
+        symbol: nativeSymbol,
+      },
+      transferData: {amount: parseBalance(call.value, 18), to: call.to},
+    };
+  });
 
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);
