@@ -1118,6 +1118,20 @@ export const TronChain = () => {
             },
             new BigNumber(0),
           );
+          // Unstaked TRX stays locked for 14 days before it can be withdrawn;
+          // it's neither in `balance` nor `frozenV2` meanwhile.
+          let pendingUnstakeAmount = new BigNumber(0);
+          let nextUnlockTime = null;
+          unfrozenV2.forEach(({unfreeze_amount, unfreeze_expire_time}) => {
+            if (!dayjs(unfreeze_expire_time).isBefore(dayjs())) {
+              pendingUnstakeAmount = pendingUnstakeAmount.plus(
+                new BigNumber(unfreeze_amount || 0),
+              );
+              if (!nextUnlockTime || unfreeze_expire_time < nextUnlockTime) {
+                nextUnlockTime = unfreeze_expire_time;
+              }
+            }
+          });
           const stakingInfo = [
             {
               label: 'Stake',
@@ -1130,6 +1144,16 @@ export const TronChain = () => {
                 .integerValue(BigNumber.ROUND_FLOOR)} TRX`,
             },
           ];
+          if (pendingUnstakeAmount.gt(new BigNumber(0))) {
+            stakingInfo.push({
+              label: 'Unstaking',
+              value: `${tronWeb.fromSun(
+                pendingUnstakeAmount.toString(),
+              )} TRX (available ${dayjs(nextUnlockTime).format(
+                'MMM D, YYYY HH:mm',
+              )})`,
+            });
+          }
           if (totalWithdrawAmount.gt(new BigNumber(0))) {
             const withdrawTrx = tronWeb.fromSun(
               totalWithdrawAmount?.toString(),
