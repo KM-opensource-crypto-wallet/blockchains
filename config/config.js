@@ -1902,6 +1902,16 @@ export const SPONSORED_GAS_TOKENS = Object.fromEntries(
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.sponsored_gas_tokens)]),
 );
 
+// Ethereum accounts that set up batch sending (EIP-7702 delegation to the
+// ethereum batch_contract) before in-app batching was paused. Home asks these
+// accounts to switch it off; no other address is checked.
+export const BATCH_DELEGATION_NOTICE_ADDRESSES = [
+  '0xbe087db45fceb1b10f9c25249694945c68c3df87',
+  '0x8ee0c45568895eecfe106da868a93ec09c6d7e6d',
+  '0x980abb9a22485303056f6ab1eea3c79f6fe25430',
+  '0x82e4df0e3963a1076c0465066f003a10a76d66fc',
+  '0x896f54f95a65aaaa2c406a1efe5ae485813268e5',
+];
 let moralisChain;
 export const config = {
   BLOCK_CYPHER_BASE_URL: 'https://api.blockcypher.com',
@@ -2040,7 +2050,6 @@ export const WalletConnectMethods = {
   // HIP-820. hedera_getNodeAddresses is read-only and answered in
   // service/walletconnect.js without opening the modal.
   hedera_signAndExecuteTransaction: 'sendRawTransaction',
-  hedera_signTransaction: 'signRawTransaction',
   hedera_signMessage: 'signMessage',
   hedera_executeTransaction: 'executeTransaction',
   hedera_signAndExecuteQuery: 'signAndExecuteQuery',
@@ -2063,7 +2072,9 @@ export const WalletConnectMethods = {
 // redux/wallets/walletsSlice.js; the others are auto-answered in
 // service/walletconnect.js without user interaction.
 export const WALLET_CONNECT_SPECIAL_METHODS = [
-  'wallet_sendCalls',
+  // Batch sending is paused: wallet_sendCalls is rejected as unsupported, and
+  // wallet_getCapabilities answers atomic: unsupported (service/walletconnect.js).
+  // 'wallet_sendCalls',
   'wallet_addEthereumChain',
   'wallet_switchEthereumChain',
   'wallet_getCapabilities',
@@ -2156,11 +2167,6 @@ export const NON_EVM_METHOD_HANDLERS = {
   }),
   // HIP-820 params carry `signerAccountId` as `hedera:<net>:0.0.N`; the
   // session account for the hedera namespace is `0.0.N`, so compare on that.
-  hedera_signTransaction: params => ({
-    finaltransactionData: params,
-    signTypeData: params,
-    expectedSignerAddress: hederaSignerAccountId(params),
-  }),
   hedera_signAndExecuteTransaction: params => ({
     finaltransactionData: params,
     signTypeData: params,

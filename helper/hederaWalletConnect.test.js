@@ -1,16 +1,13 @@
 /**
  * Human-readable summary of a HIP-820 request for the transaction modal.
- * Runner: node-env jest config (real Hedera SDK + proto).
+ * Runner: node-env jest config (real Hedera SDK).
  */
 import {
   AccountBalanceQuery,
-  AccountId,
-  Client,
   Hbar,
   TransactionId,
   TransferTransaction,
 } from '@hiero-ledger/sdk';
-import {proto} from '@hiero-ledger/proto';
 import {Buffer} from 'buffer';
 import {describeHederaRequest} from 'dok-wallet-blockchain-networks/helper/hederaWalletConnect';
 
@@ -56,34 +53,6 @@ describe('describeHederaRequest', () => {
     expect(summary.signer).toBeUndefined();
   });
 
-  it('decodes a signTransaction TransactionBody (payer, node, memo, fee, transfers)', () => {
-    const client = Client.forName('testnet');
-    const tx = transfer().freezeWith(client);
-    const node = tx.nodeAccountIds[0];
-    const body = proto.TransactionBody.encode(
-      tx._makeTransactionBody(node),
-    ).finish();
-    client.close();
-
-    const summary = describeHederaRequest('hedera_signTransaction', {
-      signerAccountId: SIGNER,
-      transactionBody: b64(body),
-    });
-
-    expect(summary).toEqual({
-      type: 'cryptoTransfer',
-      signer: '0.0.1234',
-      payer: '0.0.1234',
-      nodeAccountId: node.toString(),
-      memo: 'coffee',
-      maxFee: '1 ℏ',
-      hbarTransfers: [
-        {account: '0.0.1234', amount: '-2 ℏ'},
-        {account: '0.0.3', amount: '2 ℏ'},
-      ],
-    });
-  });
-
   it('summarises a query by type and target account', () => {
     const summary = describeHederaRequest('hedera_signAndExecuteQuery', {
       signerAccountId: SIGNER,
@@ -104,32 +73,5 @@ describe('describeHederaRequest', () => {
     expect(describeHederaRequest('hedera_unknown', {a: 1})).toEqual({
       raw: {a: 1},
     });
-  });
-
-  it('keeps AccountId formatting for the payer of a body without transfers', () => {
-    const body = proto.TransactionBody.encode({
-      transactionID: {
-        accountID: {shardNum: 0, realmNum: 0, accountNum: 42},
-        transactionValidStart: {seconds: 1, nanos: 0},
-      },
-      nodeAccountID: {shardNum: 0, realmNum: 0, accountNum: 3},
-      transactionFee: 250000000,
-      memo: '',
-      consensusCreateTopic: {},
-    }).finish();
-    expect(
-      describeHederaRequest('hedera_signTransaction', {
-        signerAccountId: SIGNER,
-        transactionBody: b64(body),
-      }),
-    ).toEqual({
-      type: 'consensusCreateTopic',
-      signer: '0.0.1234',
-      payer: '0.0.42',
-      nodeAccountId: '0.0.3',
-      memo: '',
-      maxFee: '2.5 ℏ',
-    });
-    expect(new AccountId(3).toString()).toBe('0.0.3');
   });
 });

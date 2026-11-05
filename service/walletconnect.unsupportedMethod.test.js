@@ -150,11 +150,31 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({
-      '0x1': {atomic: {status: 'supported'}},
-      '0xaa36a7': {atomic: {status: 'supported'}},
-    });
+    // Batch sending is paused, so no chain offers batching: no `atomic` key.
+    expect(response.result).toEqual({'0x1': {}, '0xaa36a7': {}});
     expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('replies -32601 to wallet_sendCalls while batch sending is paused', async () => {
+    await handlers.session_request(
+      sessionRequest('wallet_sendCalls', [{calls: []}], 'eip155:1'),
+    );
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
+    expect(response.error.code).toBe(-32601);
+    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+  });
+
+  it('replies -32601 to hedera_signTransaction without opening the modal', async () => {
+    await handlers.session_request(
+      sessionRequest('hedera_signTransaction', [{}], 'hedera:testnet'),
+    );
+
+    expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+    const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
+    expect(response.error.code).toBe(-32601);
+    expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
   });
 
   it('does not throw when the error reply itself fails, and logs it', async () => {
