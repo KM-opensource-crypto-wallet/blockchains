@@ -43,6 +43,7 @@ import {
 import axios from 'axios';
 import {ErrorDecoder} from 'ethers-decode-error';
 import {toEthersTransactionRequest} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {decodeBatchExecuteCalls} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 import {
@@ -349,17 +350,9 @@ function batchCallsFrom(decoded) {
 }
 
 function decodeBatchTotalAmount(input) {
-  try {
-    const decoded = batchContractInterface.parseTransaction({data: input});
-    const calls = batchCallsFrom(decoded);
-    if (calls) {
-      const total = calls.reduce((sum, call) => sum + BigInt(call[1]), 0n);
-      return total.toString();
-    }
-  } catch (e) {
-    // ignore decode failures
-  }
-  return '0';
+  return decodeBatchExecuteCalls(input)
+    .reduce((sum, call) => sum + BigInt(call.value), 0n)
+    .toString();
 }
 
 // The selector alone proves nothing: anyone can send calldata shaped like this to a
@@ -392,18 +385,14 @@ function decodeBatchTokenTransfer(input, contractAddress, counterparty) {
     if (!contractAddress || !counterparty) {
       return null;
     }
-    const decoded = batchContractInterface.parseTransaction({data: input});
-    const calls = batchCallsFrom(decoded);
-    if (!calls) {
-      return null;
-    }
+    const calls = decodeBatchExecuteCalls(input);
     const target = contractAddress.toLowerCase();
     const match = counterparty.toLowerCase();
     let total = 0n;
     let found = false;
     for (const call of calls) {
-      const to = call?.[0]?.toLowerCase();
-      const data = call?.[2];
+      const to = call.to.toLowerCase();
+      const {data} = call;
       if (
         to === target &&
         typeof data === 'string' &&
@@ -446,9 +435,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const extraEstimate = CHAIN_CONFIG[chain_name]?.additional_estimate_gas || 0n;
 
   async function createAuthorization(wallet, nonce, delegationContractAddress) {
+    const batchContract = BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+    const isAllowedTarget =
+      delegationContractAddress === ethers.ZeroAddress ||
+      (!!batchContract &&
+        delegationContractAddress?.toLowerCase() ===
+          batchContract.toLowerCase());
+    if (!chainId || !isAllowedTarget) {
+      throw new Error('Refusing to sign this delegation');
+    }
     return await wallet.authorize({
       address: delegationContractAddress,
-      nonce: nonce,
+      nonce,
+      chainId,
     });
   }
 
@@ -547,10 +546,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       const currentNonce = await evmProvider.getTransactionCount(
         walletSigner.address,
       );
-      const revokeAuth = await walletSigner.authorize({
-        address: ethers.ZeroAddress,
-        nonce: currentNonce + 1,
-      });
+      const revokeAuth = await createAuthorization(
+        walletSigner,
+        currentNonce + 1,
+        ethers.ZeroAddress,
+      );
       const {gasPrice: finalGasPrice, maxPriorityFeePerGas} =
         await getEtherGasPrice('recommended', evmProvider);
       const revokeTx = {
@@ -1903,6 +1903,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               : null,
             blockTimestamp,
             confirmations,
+            input: tx.data,
             gasPrice: tx.gasPrice ? `0x${tx.gasPrice.toString(16)}` : null,
             gasUsed: receipt?.gasUsed
               ? `0x${receipt.gasUsed.toString(16)}`
@@ -2361,18 +2362,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             walletSigner,
           );
 
+          // Create authorization with incremented nonce for same-wallet transactions
+          const auth = await createAuthorization(
+            walletSigner,
+            Number(nonce) + 1,
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+          );
+          const tempOptions = {
+            type: 4,
+            authorizationList: [auth],
+          };
           let finalEstimateGas = estimateGas;
           if (typeof finalEstimateGas !== 'bigint') {
-            // Create authorization for gas estimation consistency
-            const tempAuth = await createAuthorization(
-              walletSigner,
-              Number(nonce) + 1,
-              BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-            );
-            const tempOptions = {
-              type: 4,
-              authorizationList: [tempAuth],
-            };
             finalEstimateGas = await delegatedContract[
               'execute((address,uint256,bytes)[])'
             ].estimateGas(calls, tempOptions);
@@ -2385,12 +2386,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
           }
 
-          // Create authorization with incremented nonce for same-wallet transactions
-          const auth = await createAuthorization(
-            walletSigner,
-            Number(nonce) + 1,
-            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-          );
           const options = {
             type: 4,
             gasLimit: finalEstimateGas + extraEstimate,
