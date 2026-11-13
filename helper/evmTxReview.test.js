@@ -6,7 +6,10 @@ import {
   getEvmTxMaxFeeWei,
   getEvmWalletConnectTxDigest,
   parseEip155ChainId,
+  buildWalletSendCallsBatch,
+  getWalletSendCallsDigest,
   reviewEvmWalletConnectTx,
+  reviewWalletSendCalls,
   toEthersTransactionRequest,
 } from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {decodeEvmCalldata} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
@@ -400,5 +403,147 @@ describe('reviewEvmWalletConnectTx', () => {
     expect(review.risk.level).toBe('danger');
     expect(review.risk.kind).toBe('malformed');
     expect(review.risk.reasons).toEqual([review.error.message]);
+  });
+});
+
+describe('wallet_sendCalls batch review', () => {
+  const sendCalls = overrides => ({
+    version: '2.0.0',
+    chainId: '0x89',
+    from: FROM,
+    calls: [
+      {to: TO, value: '0x10', data: '0x'},
+      {
+        to: SPENDER,
+        data: erc20.encodeFunctionData('transfer', [TO, 5n]),
+      },
+    ],
+    ...overrides,
+  });
+  const codeOf = fn => {
+    try {
+      fn();
+    } catch (e) {
+      return e.code;
+    }
+    return null;
+  };
+
+  it('builds the canonical batch from the request', () => {
+    expect(buildWalletSendCallsBatch(sendCalls(), {chainId: CHAIN})).toEqual({
+      from: FROM,
+      chainId: 137,
+      calls: [
+        {to: TO, value: '0x10', data: '0x'},
+        {
+          to: SPENDER,
+          value: '0x0',
+          data: erc20.encodeFunctionData('transfer', [TO, 5n]),
+        },
+      ],
+    });
+  });
+
+  it('uses the account when the request has no from', () => {
+    const batch = buildWalletSendCallsBatch(sendCalls({from: undefined}), {
+      chainId: CHAIN,
+      account: FROM,
+    });
+    expect(batch.from).toBe(FROM);
+  });
+
+  it('answers with the EIP-5792 error codes', () => {
+    const build = params0 => () =>
+      buildWalletSendCallsBatch(params0, {chainId: CHAIN});
+    expect(codeOf(build(sendCalls({chainId: '0x1'})))).toBe(5710);
+    expect(codeOf(build(sendCalls({chainId: undefined})))).toBe(5710);
+    expect(
+      codeOf(build(sendCalls({capabilities: {paymasterService: {url: 'x'}}}))),
+    ).toBe(5700);
+    expect(
+      codeOf(
+        build(
+          sendCalls({calls: [{to: TO, capabilities: {auxiliaryFunds: {}}}]}),
+        ),
+      ),
+    ).toBe(5700);
+    expect(codeOf(build(sendCalls({calls: []})))).toBe(-32602);
+    expect(codeOf(build(sendCalls({calls: [{value: '0x1'}]})))).toBe(-32602);
+    expect(codeOf(build(sendCalls({calls: [{to: TO, value: '-1'}]})))).toBe(
+      -32602,
+    );
+    expect(codeOf(build(sendCalls({calls: [{to: TO, data: 'zz'}]})))).toBe(
+      -32602,
+    );
+  });
+
+  it('accepts optional capabilities', () => {
+    const batch = buildWalletSendCallsBatch(
+      sendCalls({capabilities: {paymasterService: {optional: true}}}),
+      {chainId: CHAIN},
+    );
+    expect(batch.calls).toHaveLength(2);
+  });
+
+  it('digest covers every call field and the call order', () => {
+    const batch = buildWalletSendCallsBatch(sendCalls(), {chainId: CHAIN});
+    const digest = getWalletSendCallsDigest(batch);
+    const changedValue = {
+      ...batch,
+      calls: [{...batch.calls[0], value: '0x11'}, batch.calls[1]],
+    };
+    const reordered = {...batch, calls: [batch.calls[1], batch.calls[0]]};
+    expect(getWalletSendCallsDigest(changedValue)).not.toBe(digest);
+    expect(getWalletSendCallsDigest(reordered)).not.toBe(digest);
+    expect(
+      getWalletSendCallsDigest(
+        buildWalletSendCallsBatch(sendCalls(), {chainId: CHAIN}),
+      ),
+    ).toBe(digest);
+  });
+
+  it('reviews every call and takes the highest level', () => {
+    const plain = reviewWalletSendCalls(sendCalls(), {chainId: CHAIN});
+    expect(plain.error).toBeNull();
+    expect(plain.level).toBe('none');
+    expect(plain.calls.map(c => c.risk.kind)).toEqual([
+      'nativeTransfer',
+      'erc20Transfer',
+    ]);
+
+    const unlimited = reviewWalletSendCalls(
+      sendCalls({
+        calls: [
+          {to: TO, value: '0x1'},
+          {
+            to: SPENDER,
+            data: erc20.encodeFunctionData('approve', [
+              SPENDER,
+              ethers.MaxUint256,
+            ]),
+          },
+        ],
+      }),
+      {chainId: CHAIN},
+    );
+    expect(unlimited.level).toBe('danger');
+  });
+
+  it('rejects a call to the account itself or the zero address', () => {
+    for (const to of [FROM, ethers.ZeroAddress]) {
+      const review = reviewWalletSendCalls(
+        sendCalls({calls: [{to, data: '0x3f707e6b'}]}),
+        {chainId: CHAIN},
+      );
+      expect(review.error?.code).toBe(-32602);
+      expect(review.batch).toBeNull();
+    }
+  });
+
+  it('never throws on a malformed batch', () => {
+    const review = reviewWalletSendCalls({chainId: '0x89'}, {chainId: CHAIN});
+    expect(review.batch).toBeNull();
+    expect(review.level).toBe('danger');
+    expect(review.error).toBeInstanceOf(EvmWalletConnectTxError);
   });
 });

@@ -1,5 +1,8 @@
 import {ethers} from 'ethers';
-import {decodeEvmCalldata} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
+import {
+  decodeBatchExecuteCalls,
+  decodeEvmCalldata,
+} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import erc1155Abi from 'dok-wallet-blockchain-networks/abis/erc1155.json';
 
@@ -60,5 +63,34 @@ describe('decodeEvmCalldata', () => {
       kind: 'unknown',
       data: 'not hex',
     });
+  });
+});
+
+describe('decodeBatchExecuteCalls', () => {
+  const batch = new ethers.Interface([
+    'function execute((address to,uint256 value,bytes data)[] calls)',
+  ]);
+  const transfer = new ethers.Interface(erc20Abi).encodeFunctionData(
+    'transfer',
+    [TO, 5n],
+  );
+
+  it('returns every call of an execute transaction', () => {
+    const data = batch.encodeFunctionData('execute', [
+      [
+        {to: TO, value: 7n, data: '0x'},
+        {to: FROM, value: 0n, data: transfer},
+      ],
+    ]);
+    expect(decodeBatchExecuteCalls(data)).toEqual([
+      {to: ethers.getAddress(TO), value: '7', data: '0x'},
+      {to: ethers.getAddress(FROM), value: '0', data: transfer},
+    ]);
+  });
+
+  it('returns no calls for other calldata', () => {
+    expect(decodeBatchExecuteCalls(transfer)).toEqual([]);
+    expect(decodeBatchExecuteCalls('0x')).toEqual([]);
+    expect(decodeBatchExecuteCalls(undefined)).toEqual([]);
   });
 });

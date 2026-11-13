@@ -87,6 +87,9 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x687389E68e700ee03b91Ab99fa40692a82096551',
+    },
+    old_batch_contract: {
       sandbox: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
       production: '0xDA1333D76a1B9883022513c089a0ca84043cF079',
     },
@@ -259,6 +262,9 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+    },
+    old_batch_contract: {
       sandbox: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
@@ -316,6 +322,9 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+    },
+    old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/optimism.png'),
@@ -371,6 +380,9 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+    },
+    old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/arbitrum.png'),
@@ -564,7 +576,7 @@ export const CHAIN_CONFIG = {
       chain_display_name: 'Gnosis',
       symbol: 'XDAI',
     },
-    batch_contract: {
+    old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/gnosis.png'),
@@ -888,6 +900,9 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
+      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+    },
+    old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/ink.png'),
@@ -1825,9 +1840,16 @@ export const BATCH_TRANSACTION_CONTRACT_ADDRESS = Object.fromEntries(
     .filter(([, cfg]) => cfg.batch_contract && forEnv(cfg.batch_contract))
     .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.batch_contract)]),
 );
-// Ethereum accounts that set up batch sending (EIP-7702 delegation to the
-// ethereum batch_contract) before in-app batching was paused. Home asks these
-// accounts to switch it off; no other address is checked.
+// Previous batch contract accounts still delegated to it get the revoke notice.
+export const OLD_BATCH_CONTRACT_ADDRESS = Object.fromEntries(
+  Object.entries(CHAIN_CONFIG)
+    .filter(
+      ([, cfg]) => cfg.old_batch_contract && forEnv(cfg.old_batch_contract),
+    )
+    .map(([chain_name, cfg]) => [chain_name, forEnv(cfg.old_batch_contract)]),
+);
+// Ethereum accounts still delegated to the ethereum old_batch_contract. Home
+// asks these accounts to switch it off; no other address is checked.
 export const BATCH_DELEGATION_NOTICE_ADDRESSES = [
   '0xbe087db45fceb1b10f9c25249694945c68c3df87',
   '0x8ee0c45568895eecfe106da868a93ec09c6d7e6d',
@@ -1995,9 +2017,7 @@ export const WalletConnectMethods = {
 // redux/wallets/walletsSlice.js; the others are auto-answered in
 // service/walletconnect.js without user interaction.
 export const WALLET_CONNECT_SPECIAL_METHODS = [
-  // Batch sending is paused: wallet_sendCalls is rejected as unsupported, and
-  // wallet_getCapabilities answers atomic: unsupported (service/walletconnect.js).
-  // 'wallet_sendCalls',
+  'wallet_sendCalls',
   'wallet_addEthereumChain',
   'wallet_switchEthereumChain',
   'wallet_getCapabilities',

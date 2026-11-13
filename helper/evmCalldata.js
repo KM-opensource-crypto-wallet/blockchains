@@ -8,6 +8,7 @@ import {ethers} from 'ethers';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import erc721Abi from 'dok-wallet-blockchain-networks/abis/erc721.json';
 import erc1155Abi from 'dok-wallet-blockchain-networks/abis/erc1155.json';
+import batchAbi from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 
 export const UNDECODABLE_CALLDATA_WARNING =
   'This call could not be decoded. Review the full calldata below before approving.';
@@ -18,6 +19,7 @@ const KNOWN_INTERFACES = [
   {standard: 'ERC-1155', abi: erc1155Abi},
 ];
 let interfaces;
+let batchInterface;
 
 const isEmptyCalldata = data =>
   data == null || data === '' || data === '0x' || data === '0x0';
@@ -72,4 +74,21 @@ export const decodeEvmCalldata = data => {
     }
   }
   return {kind: 'unknown', selector, data};
+};
+
+/** Calls of an `execute((address,uint256,bytes)[])` batch; [] for other data. */
+export const decodeBatchExecuteCalls = data => {
+  try {
+    batchInterface ??= new ethers.Interface(batchAbi);
+    const calls = batchInterface.parseTransaction({data})?.args?.[0];
+    return Array.isArray(calls)
+      ? calls.map(call => ({
+          to: call[0],
+          value: call[1].toString(),
+          data: call[2],
+        }))
+      : [];
+  } catch (e) {
+    return [];
+  }
 };
