@@ -17,11 +17,12 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {
   BATCH_DELEGATION_NOTICE_ADDRESSES,
-  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+  OLD_BATCH_CONTRACT_ADDRESS,
 } from 'dok-wallet-blockchain-networks/config/config';
 import {
   buildEvmWalletConnectTx,
   getEvmWalletConnectTxDigest,
+  reviewWalletSendCalls,
 } from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
 import {
@@ -297,11 +298,23 @@ describe('walletConnect thunk: review binding for EVM transactions', () => {
 // wallet_getCallsStatus answers only for batch ids recorded here, so the
 // record has to exist before the dApp can receive the id.
 describe('walletConnect thunk: wallet_sendCalls batch record', () => {
-  const sendCalls = () =>
+  const batchParams0 = {
+    chainId: '0x1',
+    from: FROM,
+    calls: [{to: TO, value: '0x5', data: '0x'}],
+  };
+  const pendingBatch = () =>
+    pendingRequest({method: 'wallet_sendCalls', params: [batchParams0]});
+  const sendCalls = (
+    digest = reviewWalletSendCalls(batchParams0, {chainId: CHAIN}).digest,
+  ) =>
     walletConnect(
       basePayload({
         method: 'wallet_sendCalls',
-        transactionData: {batchCalls: [{to: TO, value: '0x0', data: '0x'}]},
+        // The modal's copy is ignored: only the store's request is sent.
+        transactionData: {batchCalls: [{to: FROM, value: '0xffff'}]},
+        reviewedTxDigest: digest,
+        reviewedRequestId: REQUEST_ID,
       }),
     );
 
@@ -319,9 +332,13 @@ describe('walletConnect thunk: wallet_sendCalls batch record', () => {
       chain: executor,
       waitForConfirmation: jest.fn(async () => ({status: 1})),
     });
-    const store = configureMockStore([thunk])(makeState(null));
+    const store = configureMockStore([thunk])(makeState(pendingBatch()));
 
     await store.dispatch(sendCalls());
+
+    expect(executor.sendBatchTransaction.mock.calls[0][0].calls).toEqual([
+      {to: TO, value: 5n, data: '0x'},
+    ]);
 
     // The signing wallet: its custom RPC (if any) sent the batch, so status
     // polls must read through it too.
@@ -345,12 +362,32 @@ describe('walletConnect thunk: wallet_sendCalls batch record', () => {
       chain: executor,
       waitForConfirmation: jest.fn(async () => ({status: 'failed'})),
     });
-    const store = configureMockStore([thunk])(makeState(null));
+    const store = configureMockStore([thunk])(makeState(pendingBatch()));
 
     await store.dispatch(sendCalls());
 
     expect(recordIssuedBatch).not.toHaveBeenCalled();
     expect(errorReply()).toBeDefined();
+  });
+
+  it('refuses and replies 5000 when the batch changed after review', async () => {
+    getCoin.mockResolvedValue({
+      chain: executor,
+      waitForConfirmation: jest.fn(),
+    });
+    const store = configureMockStore([thunk])(makeState(pendingBatch()));
+    const changed = reviewWalletSendCalls(
+      {...batchParams0, calls: [{to: TO, value: '0x6'}]},
+      {chainId: CHAIN},
+    ).digest;
+
+    await store.dispatch(sendCalls(changed));
+
+    expect(executor.sendBatchTransaction).not.toHaveBeenCalled();
+    expect(errorReply()).toEqual({
+      code: 5000,
+      message: 'Request changed after review',
+    });
   });
 
   it('records nothing for other methods', async () => {
@@ -381,7 +418,7 @@ describe('walletConnect thunk: wallet_sendCalls batch record', () => {
 
 describe('checkBatchDelegation (Home notice)', () => {
   const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
-  const OURS = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum;
+  const OURS = OLD_BATCH_CONTRACT_ADDRESS.ethereum;
   let nextClient = 1;
   const storeFor = (address, cleared = {}, clientId = `w${nextClient++}`) => {
     const ethCoin = {
@@ -616,7 +653,7 @@ describe('walletConnect thunk: 32-byte message from a listed delegated account',
 
 describe('confirmBatchDelegationRemoved', () => {
   const LISTED = BATCH_DELEGATION_NOTICE_ADDRESSES[0];
-  const OURS = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum;
+  const OURS = OLD_BATCH_CONTRACT_ADDRESS.ethereum;
   let nextClient = 1;
   // A mock store whose state follows markBatchDelegationCleared, so the loop
   // can see the address become cleared.

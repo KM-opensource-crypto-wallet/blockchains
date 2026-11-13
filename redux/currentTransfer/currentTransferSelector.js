@@ -19,6 +19,8 @@ export const getTransferDataFeeSuccess = state =>
   state.currentTransfer?.transferData?.success;
 export const getTransferDataCustomError = state =>
   state.currentTransfer?.transferData?.customError;
+export const getTransferDataCustomErrorCode = state =>
+  state.currentTransfer?.transferData?.customErrorCode;
 
 export const getPendingTransferData = state =>
   state.currentTransfer.pendingTransferData;
