@@ -23,7 +23,10 @@ import {
   parseBalance,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
-import {getPrivateKeyForCoinAddress} from 'dok-wallet-blockchain-networks/helper/coinKeyPair';
+import {
+  getPrivateKeyForCoinAddress,
+  isPrivateKeyForAddress,
+} from 'dok-wallet-blockchain-networks/helper/coinKeyPair';
 import BigNumber from 'bignumber.js';
 import {APP_VERSION} from 'utils/common';
 
@@ -340,12 +343,21 @@ const updateDeriveAddressesInCoin = (parentCoin, newCoin) => {
     // key for that address too: its own key came from chain_existing_coin or
     // the default derivation and signs for a different account whenever the
     // parent sits on another derive address ("transaction from mismatch").
-    const privateKey = getPrivateKeyForCoinAddress({
+    let privateKey = getPrivateKeyForCoinAddress({
       chain_name: parentCoin?.chain_name,
       address,
       deriveAddresses,
       privateKey: parentCoin?.privateKey,
     });
+    // EVM: that is only the parent's unchecked key when the derive entry has
+    // none, so copy a key only once ethers proves it signs for the address;
+    // otherwise the new coin keeps its own key. Other chains can't be checked
+    // here and take the parent's key.
+    if (isEVMChain(parentCoin?.chain_name)) {
+      privateKey = [privateKey, newCoin?.privateKey].find(key =>
+        isPrivateKeyForAddress(key, address),
+      );
+    }
     return {
       ...newCoin,
       deriveAddresses,

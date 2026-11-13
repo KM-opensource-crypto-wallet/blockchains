@@ -81,6 +81,34 @@ describe('addExistingDeriveAddress', () => {
     expectConsistent(result);
   });
 
+  it('keeps the new coin’s matching key when the parent’s key is unproven', () => {
+    // Parent split on the default address A with B's key, and A's derive
+    // entry has no key to check against: the new coin's own key A is right.
+    const parent = {
+      ...ethereumCoin,
+      address: ADDRESS_A,
+      privateKey: KEY_B,
+      deriveAddresses: [{address: ADDRESS_A}, deriveAddresses[1]],
+    };
+    const result = addExistingDeriveAddress({coins: [parent]}, freshCoin());
+    expect(result.address).toBe(ADDRESS_A);
+    expect(result.privateKey).toBe(KEY_A);
+    expectConsistent(result);
+  });
+
+  it('does not copy a parent key that signs for another address', () => {
+    // Neither key is provable for B: the new coin keeps its own key rather
+    // than taking an unchecked one.
+    const parent = {
+      ...ethereumCoin,
+      privateKey: `0x${'33'.repeat(32)}`,
+      deriveAddresses: [deriveAddresses[0], {address: ADDRESS_B}],
+    };
+    const result = addExistingDeriveAddress({coins: [parent]}, freshCoin());
+    expect(result.address).toBe(ADDRESS_B);
+    expect(result.privateKey).toBe(KEY_A);
+  });
+
   it('leaves the coin alone when the parent has no derive addresses', () => {
     const parent = {...ethereumCoin, deriveAddresses: undefined};
     const coin = freshCoin();

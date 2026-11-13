@@ -35,6 +35,10 @@ const addressOfPrivateKey = privateKey => {
   }
 };
 
+/** True when ethers derives `address` from `privateKey` (EVM keys only). */
+export const isPrivateKeyForAddress = (privateKey, address) =>
+  isSameAddress(addressOfPrivateKey(privateKey), address);
+
 /**
  * The private key that signs for `coin.address`. Returns `coin.privateKey`
  * unchanged unless the coin is on an EVM chain and its `deriveAddresses`
