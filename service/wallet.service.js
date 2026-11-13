@@ -23,6 +23,7 @@ import {
   parseBalance,
   validateSupportedChain,
 } from 'dok-wallet-blockchain-networks/helper';
+import {getPrivateKeyForCoinAddress} from 'dok-wallet-blockchain-networks/helper/coinKeyPair';
 import BigNumber from 'bignumber.js';
 import {APP_VERSION} from 'utils/common';
 
@@ -335,10 +336,21 @@ const updateDeriveAddressesInCoin = (parentCoin, newCoin) => {
   const deriveAddresses = parentCoin?.deriveAddresses;
   const address = parentCoin?.address;
   if (Array.isArray(deriveAddresses) && deriveAddresses?.length) {
+    // The new coin takes the parent's selected address, so it must take the
+    // key for that address too: its own key came from chain_existing_coin or
+    // the default derivation and signs for a different account whenever the
+    // parent sits on another derive address ("transaction from mismatch").
+    const privateKey = getPrivateKeyForCoinAddress({
+      chain_name: parentCoin?.chain_name,
+      address,
+      deriveAddresses,
+      privateKey: parentCoin?.privateKey,
+    });
     return {
       ...newCoin,
       deriveAddresses,
       address,
+      ...(privateKey ? {privateKey} : {}),
       // The parent's list is already legacy-resolved; carry the marker so
       // the re-added coin doesn't regenerate/rescan the legacy window.
       ...(parentCoin?.isLegacyScanDone ? {isLegacyScanDone: true} : {}),
