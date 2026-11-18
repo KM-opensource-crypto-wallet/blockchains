@@ -76,11 +76,21 @@ export const decodeEvmCalldata = data => {
   return {kind: 'unknown', selector, data};
 };
 
-/** Calls of an `execute((address,uint256,bytes)[])` batch; [] for other data. */
+// executeSponsored carries the calls in its batch struct, and the legacy 7-arg
+// execute(feeToken, feeRecipient, feeAmount, calls, ...) at index 3.
+const batchCallsOf = decoded => {
+  const args = decoded?.args;
+  if (decoded?.fragment?.name === 'executeSponsored') {
+    return args?.[0]?.[0];
+  }
+  return args?.length === 7 ? args[3] : args?.[0];
+};
+
+/** Calls of a batch `execute` (in-app or sponsored, any version); [] for other data. */
 export const decodeBatchExecuteCalls = data => {
   try {
     batchInterface ??= new ethers.Interface(batchAbi);
-    const calls = batchInterface.parseTransaction({data})?.args?.[0];
+    const calls = batchCallsOf(batchInterface.parseTransaction({data}));
     return Array.isArray(calls)
       ? calls.map(call => ({
           to: call[0],

@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -87,7 +87,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x687389E68e700ee03b91Ab99fa40692a82096551',
+      sandbox: '0x6bC2bb0534A644fd4F6057DD0E19491f64BCBA6d',
     },
     old_batch_contract: {
       sandbox: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
@@ -272,7 +272,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+      sandbox: '0x91bc5a0850Ded64fED1B0f7B8c5C42d5C508089A',
     },
     old_batch_contract: {
       sandbox: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
@@ -342,7 +342,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+      sandbox: '0x91bc5a0850Ded64fED1B0f7B8c5C42d5C508089A',
     },
     old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
@@ -410,7 +410,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+      sandbox: '0x6bC2bb0534A644fd4F6057DD0E19491f64BCBA6d',
     },
     old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
@@ -615,6 +615,9 @@ export const CHAIN_CONFIG = {
     wallet_connect: {
       chain_display_name: 'Gnosis',
       symbol: 'XDAI',
+    },
+    batch_contract: {
+      sandbox: '0x6bC2bb0534A644fd4F6057DD0E19491f64BCBA6d',
     },
     old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
@@ -950,7 +953,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
+      sandbox: '0x91bc5a0850Ded64fED1B0f7B8c5C42d5C508089A',
     },
     old_batch_contract: {
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',

@@ -6,6 +6,7 @@ import {
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
   selectCurrentCoin,
+  selectCoinsForCurrentWallet,
   selectCurrentWallet,
   selectUserCoins,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
@@ -141,7 +142,7 @@ export const calculateEstimateFee = createAsyncThunk(
 
       const nativeCoin = await getNativeCoin(
         currentState,
-        selectedCoin,
+        selectedCoin || currentCoin,
         selectedWallet,
       );
       if (!nativeCoin) {
@@ -186,9 +187,29 @@ export const calculateEstimateFee = createAsyncThunk(
                 decimals: transfer?.currentCoin?.decimal,
               }),
             ];
+        // The app's own prices, to check the rate the worker quotes before signing it.
+        const userCoins = selectUserCoins(currentState);
+        const nativeRate = userCoins.find(
+          item =>
+            item?.symbol === transfer?.currentCoin?.chain_symbol &&
+            item?.chain_name === chain_name,
+        )?.currencyRate;
+        // The fee picker offers hidden coins too, so look in the whole wallet.
+        const feeTokenCoin = selectCoinsForCurrentWallet(currentState).find(
+          item =>
+            item?.chain_name === chain_name &&
+            item?.contractAddress?.toLowerCase() ===
+              transfer?.gasTokenContractAddress?.toLowerCase(),
+        );
+        const feeTokenRate = feeTokenCoin?.currencyRate;
         respData = await nativeCoin?.getSponsoredGasFees({
           calls: sponsoredCalls,
           feeTokenAddress: transfer?.gasTokenContractAddress,
+          feeTokenDecimals: feeTokenCoin?.decimal,
+          tokenPerNative:
+            Number(nativeRate) > 0 && Number(feeTokenRate) > 0
+              ? Number(nativeRate) / Number(feeTokenRate)
+              : null,
         });
       } else if (payload?.isBatchTransaction) {
         respData = await nativeCoin?.getEstimateFeeForBatchTransaction(payload);

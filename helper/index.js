@@ -361,7 +361,7 @@ export const isSwapBlockingError = message =>
 
 export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
 
-const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED'];
+const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED', 'TX_PENDING'];
 
 // The worker refused the quote before broadcasting, so nothing executed.
 export const isSponsoredQuoteError = code => SPONSOR_QUOTE_CODES.includes(code);

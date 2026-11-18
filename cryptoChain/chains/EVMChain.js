@@ -88,6 +88,10 @@ const PLACEHOLDER_MAX_TIP = '1';
 const PLACEHOLDER_PRE_GAS = '150000';
 const PLACEHOLDER_L1_TX_SIZE = '2000';
 const PLACEHOLDER_FEE_BPS = 300;
+// Bounds the app enforces on worker-supplied fee terms before signing them.
+const SPONSORED_MAX_FEE_BPS = 1000;
+const SPONSORED_MAX_DEADLINE_SECONDS = 600;
+const SPONSORED_RATE_TOLERANCE = 0.05;
 
 const SPONSOR_CALL_TYPE = [
   {name: 'to', type: 'address'},
@@ -160,6 +164,46 @@ const serializeCalls = calls =>
     value: (value ?? 0).toString(),
     data: data || '0x',
   }));
+
+const sameAddress = (a, b) =>
+  typeof a === 'string' && a.toLowerCase() === String(b).toLowerCase();
+
+// Rejects a quote that would redirect, switch or inflate the fee before it is signed.
+const isTrustedSponsorQuote = (
+  quote,
+  {feeTokenAddress, feeTokenDecimals, batchContract, tokenPerNative},
+) => {
+  const fee = quote?.fee;
+  if (
+    !quote?.quoteToken ||
+    !fee?.maxFee ||
+    // The shown fee is scaled by these decimals, so they must be the app's own.
+    quote?.feeToken?.decimals !== Number(feeTokenDecimals) ||
+    !sameAddress(fee.recipient, SPONSOR_TREASURY_ADDRESS) ||
+    !sameAddress(fee.token, feeTokenAddress) ||
+    !sameAddress(quote.batchContract, batchContract) ||
+    Number(fee.feeBps) > SPONSORED_MAX_FEE_BPS ||
+    Number(fee.deadline) >
+      Math.floor(Date.now() / 1000) + SPONSORED_MAX_DEADLINE_SECONDS
+  ) {
+    return false;
+  }
+  if (!tokenPerNative) {
+    return true;
+  }
+  const quoted =
+    Number(fee.tokenPerEth) / 10 ** Number(quote.feeToken.decimals);
+  return Math.abs(quoted / tokenPerNative - 1) <= SPONSORED_RATE_TOLERANCE;
+};
+
+// A dApp signature on the signer's own account as domain could be relayed to its EIP-7702 delegate.
+const isOwnAccountDomain = (domain, address) => {
+  try {
+    return BigInt(domain?.verifyingContract) === BigInt(address);
+  } catch (e) {
+    return false;
+  }
+};
 
 const serializeAuthorization = authorization =>
   authorization && {
@@ -334,21 +378,6 @@ const batchContractInterface = {
     (batchIface ??= new ethers.Interface(contractABI)).parseTransaction(tx),
 };
 
-function batchCallsFrom(decoded) {
-  const args = decoded?.args;
-  if (!args) {
-    return null;
-  }
-  // Legacy 7-arg execute(feeToken, feeRecipient, feeAmount, calls, ...) carries calls at index 3.
-  const candidate =
-    decoded?.fragment?.name === 'executeSponsored'
-      ? args[0]?.[0]
-      : args.length === 7
-      ? args[3]
-      : args[0];
-  return Array.isArray(candidate) ? candidate : null;
-}
-
 function decodeBatchTotalAmount(input) {
   return decodeBatchExecuteCalls(input)
     .reduce((sum, call) => sum + BigInt(call.value), 0n)
@@ -458,11 +487,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     if (currentNonce == null || isNaN(Number(currentNonce))) {
       throw new Error('Cannot authorize sponsored batch without a nonce');
     }
-    return await wallet.authorize({
-      address: BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-      nonce: Number(currentNonce),
-      chainId,
-    });
+    return await createAuthorization(
+      wallet,
+      Number(currentNonce),
+      BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+    );
   }
 
   const getBatchContractNonce = async address => {
@@ -477,29 +506,23 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     return raw === '0x' ? 0 : Number(BigInt(raw));
   };
 
-  // verifyingContract is the user's own account: under EIP-7702 the delegate runs
-  // inside it, so address(this) is the EOA. Types come from the quote.
   const isOpStackSponsor = () => !!GAS_ORACLE_CONTRACT_ADDRESS[chain_name];
 
-  // verifyingContract is the user's own account: under EIP-7702 the delegate runs
-  // inside it, so address(this) is the EOA. Types and salt come from the quote.
+  // Under EIP-7702 the delegate runs in the EOA, so the domain's verifyingContract is the user's account.
   const signBatchForSponsor = async (wallet, calls, params) => {
-    const {batchNonce, fee, eip712} = params ?? {};
+    const {batchNonce, fee} = params ?? {};
     if (batchNonce == null || isNaN(Number(batchNonce))) {
       throw new Error('Cannot sign sponsored batch without a batch nonce');
     }
     if (!fee?.deadline) {
       throw new Error('Cannot sign sponsored batch without fee terms');
     }
-    if (!eip712?.types || !eip712?.name || !eip712?.version || !eip712?.salt) {
-      throw new Error('Sponsored gas quote is missing its EIP-712 definition');
-    }
     const domain = {
-      name: eip712.name,
-      version: eip712.version,
-      chainId: Number(eip712.chainId ?? chainId),
+      name: 'BatchCallAndSponsor',
+      version: '4',
+      chainId,
       verifyingContract: ethers.getAddress(wallet.address),
-      salt: eip712.salt,
+      salt: delegationSalt(BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name]),
     };
     const message = {
       nonce: BigInt(batchNonce),
@@ -510,7 +533,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       })),
       fee,
     };
-    return await wallet.signTypedData(domain, eip712.types, message);
+    return await wallet.signTypedData(
+      domain,
+      sponsoredExecuteTypes(isOpStackSponsor()),
+      message,
+    );
   };
 
   // Stand-in terms for the gas estimate only. The worker prices the real ones; the
@@ -530,13 +557,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         ...(opStack ? {l1TxSize: PLACEHOLDER_L1_TX_SIZE} : {}),
         feeBps: PLACEHOLDER_FEE_BPS,
         deadline: Math.floor(Date.now() / 1000) + 300,
-      },
-      eip712: {
-        name: 'BatchCallAndSponsor',
-        version: '3',
-        chainId,
-        salt: delegationSalt(BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name]),
-        types: sponsoredExecuteTypes(opStack),
       },
     };
   };
@@ -2157,6 +2177,14 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw new Error('Invalid private key length for sign typed data');
         }
         const parseData = JSON.parse(signTypeData);
+        if (
+          isOwnAccountDomain(
+            parseData?.domain,
+            new ethers.Wallet(privateKey).address,
+          )
+        ) {
+          throw new Error('Refusing to sign this request');
+        }
         let version = 'v1';
         if (
           typeof parseData === 'object' &&
@@ -2415,7 +2443,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         throw new Error(reason);
       }
     },
-    getSponsoredGasFees: async ({calls, privateKey, feeTokenAddress}) => {
+    getSponsoredGasFees: async ({
+      calls,
+      privateKey,
+      feeTokenAddress,
+      feeTokenDecimals,
+      tokenPerNative,
+    }) => {
       try {
         const wallet = new ethers.Wallet(privateKey);
         if (!SPONSOR_TREASURY_ADDRESS) {
@@ -2444,25 +2478,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           provisionalTerms.fee,
           provisionalSignature,
         ]);
+        const quoteAuthorization = isDelegated
+          ? null
+          : await createSponsorAuthorization(wallet, currentNonce);
         const estimatedGas = await retryFunc(async evmProvider => {
-          const walletSigner = wallet.connect(evmProvider);
           const {gasPrice: maxFeePerGas, maxPriorityFeePerGas} =
             await getEtherGasPrice('recommended', evmProvider);
           return await evmProvider.estimateGas({
             from: provisionalTerms.sponsor,
-            to: walletSigner.address,
+            to: wallet.address,
             data: probeCalldata,
             value: 0n,
             maxFeePerGas,
             ...(maxPriorityFeePerGas ? {maxPriorityFeePerGas} : {}),
-            ...(isDelegated
-              ? {}
-              : {
-                  type: 4,
-                  authorizationList: [
-                    await createSponsorAuthorization(wallet, currentNonce),
-                  ],
-                }),
+            ...(quoteAuthorization
+              ? {type: 4, authorizationList: [quoteAuthorization]}
+              : {}),
           });
         }, null);
         // retryFunc resolves null once every RPC has failed, and the worker
@@ -2470,9 +2501,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         if (estimatedGas == null) {
           throw new Error('Could not estimate the sponsored batch');
         }
-        const quoteAuthorization = isDelegated
-          ? null
-          : await createSponsorAuthorization(wallet, currentNonce);
         const quote = await fetchSponsoredGasQuote({
           chain_name,
           is_sandbox: IS_SANDBOX,
@@ -2483,9 +2511,12 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           feeTokenAddress,
         });
         if (
-          !quote?.quoteToken ||
-          !quote?.fee?.maxFee ||
-          !Number.isInteger(quote?.feeToken?.decimals)
+          !isTrustedSponsorQuote(quote, {
+            feeTokenAddress,
+            feeTokenDecimals,
+            batchContract: BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+            tokenPerNative,
+          })
         ) {
           throw new Error('Sponsored gas is unavailable right now');
         }
@@ -2500,7 +2531,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error('Error in getSponsoredGasFees', e);
         const {code, error} = e?.response?.data ?? {};
-        if (!code || !error) {
+        if (!error) {
           throw e;
         }
         const workerError = new Error(error);
@@ -2533,7 +2564,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         const signature = await signBatchForSponsor(wallet, calls, {
           batchNonce: sponsoredQuote.batchNonce,
           fee: sponsoredQuote.fee,
-          eip712: sponsoredQuote.eip712,
         });
         const authorization = isDelegated
           ? null
@@ -2553,7 +2583,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       } catch (e) {
         console.error('Error in send sponsored batch transaction', e);
         const {code, error} = e?.response?.data ?? {};
-        if (!code || !error) {
+        if (!error) {
           throw e;
         }
         const workerError = new Error(error);
