@@ -66,6 +66,16 @@ const coinRepair = coin =>
       )
     : null;
 
+// True when `incoming` (a refresh result) was built from the coin before it
+// was repaired: it still carries a known-bad contract while the stored coin
+// with the same id no longer does. The refresh reducers then keep the stored
+// coin; every other result is applied as before.
+export const isStaleBeforeRepair = (incoming, stored) =>
+  !!stored &&
+  stored?._id === incoming?._id &&
+  !!coinRepair(incoming) &&
+  !coinRepair(stored);
+
 const paymentRepair = payment =>
   repairedContractAddress(
     payment?.chain,

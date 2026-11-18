@@ -129,10 +129,10 @@ export const submitScheduledPayment = createAsyncThunk(
     // schedule, and persisting now would resurrect a payment for a wallet
     // that no longer exists. The reminder just armed is then an orphan —
     // reconcile against the fresh state cancels it.
-    const walletStillExists = (selectAllWallets(getState()) || []).some(
+    const liveWallet = (selectAllWallets(getState()) || []).find(
       wallet => wallet?.clientId === walletClientId,
     );
-    if (!walletStillExists) {
+    if (!liveWallet) {
       await reconcileScheduledPaymentNotifications(getState);
       return rejectWithValue({type: 'walletGone'});
     }
@@ -152,12 +152,23 @@ export const submitScheduledPayment = createAsyncThunk(
         }),
       );
     } else {
+      // The coin's contract can change during the awaits above (an unlock runs
+      // repairKnownBadContracts): store the contract the coin has now, or the
+      // payment would no longer match its coin (chain|symbol|contractAddress).
+      const liveCoin = liveWallet.coins?.find(
+        coin => coin?._id === currentCoin?._id,
+      );
       dispatch(
         addScheduledPayment({
           id,
           walletClientId,
           chain: currentCoin?.chain_name,
-          asset,
+          asset: {
+            ...asset,
+            contractAddress: liveCoin
+              ? liveCoin.contractAddress
+              : asset.contractAddress,
+          },
           senderAddress: currentCoin?.address,
           recipientAddress,
           amount: values.amount,

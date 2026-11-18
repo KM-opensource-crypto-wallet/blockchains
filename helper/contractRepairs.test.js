@@ -1,6 +1,7 @@
 import {
   KNOWN_BAD_CONTRACT_REPAIRS,
   countContractRepairs,
+  isStaleBeforeRepair,
   repairScheduledPaymentsContracts,
   repairWalletsContracts,
   repairedContractAddress,
@@ -178,5 +179,28 @@ describe('scheduled payments', () => {
       total: 4,
     });
     expect(countContractRepairs(undefined, undefined).total).toBe(0);
+  });
+});
+
+describe('isStaleBeforeRepair', () => {
+  const repaired = token('ethereum', 'USDT', USDT_ETH);
+  const stale = token('ethereum', 'USDT', BAD_ETH, {balance: '0'});
+
+  test('a pre-repair snapshot of a repaired coin is stale', () => {
+    expect(isStaleBeforeRepair(stale, repaired)).toBe(true);
+  });
+
+  test.each([
+    ['the stored coin is still unrepaired', stale, stale],
+    ['the snapshot already has the right contract', repaired, repaired],
+    ['there is no stored coin', stale, undefined],
+    ['the ids differ', stale, {...repaired, _id: 'other'}],
+    [
+      'the coin is not affected at all',
+      token('ethereum', 'LINK', '0x514910771AF9Ca656af840dff83E8264EcF986CA'),
+      token('ethereum', 'LINK', '0x514910771AF9Ca656af840dff83E8264EcF986CA'),
+    ],
+  ])('not stale when %s', (_, incoming, stored) => {
+    expect(isStaleBeforeRepair(incoming, stored)).toBe(false);
   });
 });

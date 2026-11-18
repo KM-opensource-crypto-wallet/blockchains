@@ -12,6 +12,8 @@ import configureMockStore from 'redux-mock-store';
 import {
   checkBatchDelegation,
   confirmBatchDelegationRemoved,
+  refreshCoins,
+  refreshCurrentCoin,
   repairKnownBadContracts,
   repairWalletContracts,
   revokeDelegation,
@@ -799,5 +801,83 @@ describe('repairWalletContracts', () => {
       contractAddress: USDT_ETH,
       decimals: 6,
     });
+  });
+});
+
+// A refresh that started before the repair must not undo it.
+describe('refresh results captured before repairKnownBadContracts', () => {
+  const BAD_ETH = '0x1796F4516d6e70bfCC8CEF9d40251F590ff4810b';
+  const USDT_ETH = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+  const usdt = (contractAddress, extra = {}) => ({
+    _id: 'usdt',
+    type: 'token',
+    chain_name: 'ethereum',
+    symbol: 'USDT',
+    contractAddress,
+    ...extra,
+  });
+  const eth = extra => ({
+    _id: 'eth',
+    type: 'coin',
+    chain_name: 'ethereum',
+    symbol: 'ETH',
+    ...extra,
+  });
+  const stateWith = coins => ({
+    allWallets: [{clientId: 'w1', coins, chain_existing_coin: {}}],
+    currentWalletClientId: 'w1',
+  });
+  const coinsOf = state => state.allWallets[0].coins;
+  const refreshCoinsDone = coinData =>
+    refreshCoins.fulfilled({coinData, currentWalletClientId: 'w1'}, 'req-1');
+
+  it('refreshCoins keeps the repaired coin and applies the rest', () => {
+    // Refresh started while USDT still had the bad contract; repair ran since.
+    const repaired = walletsSlice.reducer(
+      stateWith([usdt(BAD_ETH, {balance: '5'}), eth({balance: '1'})]),
+      repairKnownBadContracts(),
+    );
+    const next = walletsSlice.reducer(
+      repaired,
+      refreshCoinsDone([usdt(BAD_ETH, {balance: '0'}), eth({balance: '2'})]),
+    );
+    expect(coinsOf(next)[0]).toMatchObject({contractAddress: USDT_ETH});
+    expect(coinsOf(next)[1]).toMatchObject({balance: '2'});
+  });
+
+  it('refreshCoins is unchanged when no repair happened', () => {
+    const next = walletsSlice.reducer(
+      stateWith([usdt(BAD_ETH, {balance: '5'})]),
+      refreshCoinsDone([usdt(BAD_ETH, {balance: '0'})]),
+    );
+    expect(coinsOf(next)[0]).toMatchObject({
+      contractAddress: BAD_ETH,
+      balance: '0',
+    });
+    const good = walletsSlice.reducer(
+      stateWith([usdt(USDT_ETH, {balance: '5'})]),
+      refreshCoinsDone([usdt(USDT_ETH, {balance: '7'})]),
+    );
+    expect(coinsOf(good)[0]).toMatchObject({balance: '7'});
+  });
+
+  it('refreshCurrentCoin keeps the repaired coin but still updates its native coin', () => {
+    const repaired = walletsSlice.reducer(
+      stateWith([usdt(BAD_ETH), eth({balance: '1'})]),
+      repairKnownBadContracts(),
+    );
+    const next = walletsSlice.reducer(
+      repaired,
+      refreshCurrentCoin.fulfilled(
+        {
+          updatedCurrentCoin: usdt(BAD_ETH, {balance: '0'}),
+          updatedNativeCoin: eth({balance: '3'}),
+          walletClientId: 'w1',
+        },
+        'req-2',
+      ),
+    );
+    expect(coinsOf(next)[0]).toMatchObject({contractAddress: USDT_ETH});
+    expect(coinsOf(next)[1]).toMatchObject({balance: '3'});
   });
 });

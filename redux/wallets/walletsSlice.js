@@ -20,6 +20,7 @@ import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
   countContractRepairs,
+  isStaleBeforeRepair,
   repairWalletsContracts,
 } from 'dok-wallet-blockchain-networks/helper/contractRepairs';
 import {
@@ -3629,14 +3630,24 @@ export const walletsSlice = createSlice({
       }
       const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
-        currentWallet.coins = coinData;
+        // A refresh that started before repairKnownBadContracts (e.g. an
+        // interval running behind the lock screen) returns snapshots with the
+        // bad contract; keep the repaired coin instead of undoing the repair.
+        const storedById = new Map(
+          (currentWallet.coins || []).map(coin => [coin?._id, coin]),
+        );
+        const coins = coinData.map(coin => {
+          const stored = storedById.get(coin?._id);
+          return isStaleBeforeRepair(coin, stored) ? stored : coin;
+        });
+        currentWallet.coins = coins;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
           currentWallet.chain_existing_coin,
-          coinData,
+          coins,
         );
         // extractChainExistingCoins never overwrites an entry; mirror the
         // Hedera legacy-address migration and the later-assigned account id.
-        const hederaCoin = coinData.find(
+        const hederaCoin = coins.find(
           item => item?.chain_name === 'hedera' && item?.type === 'coin',
         );
         const hederaExisting = currentWallet.chain_existing_coin?.hedera;
@@ -3692,7 +3703,11 @@ export const walletsSlice = createSlice({
           item => item?._id === updatedCurrentCoin?._id,
         );
         if (foundIndex !== -1) {
-          allCoins[foundIndex] = updatedCurrentCoin;
+          // Same guard as refreshCoins.fulfilled: a snapshot taken before the
+          // coin's contract was repaired must not overwrite the repaired coin.
+          if (!isStaleBeforeRepair(updatedCurrentCoin, allCoins[foundIndex])) {
+            allCoins[foundIndex] = updatedCurrentCoin;
+          }
           if (updatedNativeCoin) {
             const foundNativeCoinIndex = allCoins.findIndex(
               item => item?._id === updatedNativeCoin?._id,
