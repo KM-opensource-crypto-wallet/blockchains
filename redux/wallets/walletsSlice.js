@@ -19,6 +19,10 @@ import {
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
+  countContractRepairs,
+  repairWalletsContracts,
+} from 'dok-wallet-blockchain-networks/helper/contractRepairs';
+import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
   registerUserAPI,
@@ -765,6 +769,30 @@ export const revokeDelegation = createAsyncThunk(
 // is no longer delegated to our contract.
 const BATCH_DELEGATION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const lastBatchDelegationCheck = {};
+
+// Fixes coins that stored a contract address from the tampered catalog
+// (helper/contractRepairs.js). Runs after every unlock in both apps; does
+// nothing once repaired. Scheduled payments follow through their slice's
+// extraReducer on repairKnownBadContracts. Logs counts only, no addresses.
+export const repairWalletContracts = () => (dispatch, getState) => {
+  const state = getState();
+  const counts = countContractRepairs(
+    state?.wallets?.allWallets,
+    state?.schedulePayment?.scheduledPayments,
+  );
+  if (!counts.total) {
+    return 0;
+  }
+  dispatch(walletsSlice.actions.repairKnownBadContracts());
+  logger.info('wallet.contract_repair', {
+    coins: counts.coinTotal,
+    scheduled_payments: counts.scheduled,
+    tokens: Object.entries(counts.coins)
+      .map(([key, count]) => `${key}:${count}`)
+      .join(','),
+  });
+  return counts.total;
+};
 
 export const checkBatchDelegation = createAsyncThunk(
   'wallets/checkBatchDelegation',
@@ -2776,6 +2804,9 @@ export const walletsSlice = createSlice({
       }
       currentWallet.selectedCoin = id;
     },
+    repairKnownBadContracts: state => {
+      repairWalletsContracts(state.allWallets);
+    },
     updateContractAddress: (state, action) => {
       const payload = action?.payload;
       const chain_name = payload?.chain_name;
@@ -3994,6 +4025,7 @@ export const {
   deleteMultipleDeriveAddressesInCurrentCoin,
   setSelectedDeriveAddress,
   updateContractAddress,
+  repairKnownBadContracts,
   setWalletPosition,
   rearrangeWallet,
   addPendingTransactions,

@@ -10,9 +10,11 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSelector';
 import {
   deleteWallet,
+  repairKnownBadContracts,
   resetWallet,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {resolveRecipientAddress} from 'dok-wallet-blockchain-networks/helper/recipientAddress';
+import {repairScheduledPaymentsContracts} from 'dok-wallet-blockchain-networks/helper/contractRepairs';
 import {
   getCustomRPCWithData,
   selectAllCustomRpc,
@@ -392,6 +394,11 @@ export const schedulePaymentSlice = createSlice({
       })
       .addCase(deleteWallet, (state, action) => {
         delete state.scheduledPayments[action.payload];
+      })
+      .addCase(repairKnownBadContracts, state => {
+        // Keep scheduled payments matched to their coin when the coin's
+        // tampered contract address is repaired (helper/contractRepairs.js).
+        repairScheduledPaymentsContracts(state.scheduledPayments);
       })
       .addCase(resetWallet, state => {
         state.scheduledPayments = {};

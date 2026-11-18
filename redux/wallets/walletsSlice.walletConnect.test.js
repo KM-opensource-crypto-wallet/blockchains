@@ -12,9 +12,14 @@ import configureMockStore from 'redux-mock-store';
 import {
   checkBatchDelegation,
   confirmBatchDelegationRemoved,
+  repairKnownBadContracts,
+  repairWalletContracts,
   revokeDelegation,
   walletConnect,
+  walletsSlice,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
+import schedulePaymentReducer from 'dok-wallet-blockchain-networks/redux/schedulePayment/schedulePaymentSlice';
+import {logger} from 'services/logger';
 import {
   BATCH_DELEGATION_NOTICE_ADDRESSES,
   BATCH_TRANSACTION_CONTRACT_ADDRESS,
@@ -54,6 +59,13 @@ jest.mock('dok-wallet-blockchain-networks/service/walletconnect', () => ({
   recordIssuedBatch: jest.fn(),
 }));
 jest.mock('utils/toast', () => ({showToast: jest.fn()}));
+// schedulePaymentSlice (repair test below) imports the notifee-backed reminders.
+jest.mock('utils/scheduledPaymentNotifications', () => ({
+  requestLocalNotificationPermission: jest.fn(),
+  createScheduledPaymentNotification: jest.fn(),
+  getPaymentIdsWithDisplayedReminders: jest.fn(),
+  reconcileScheduledPaymentNotifications: jest.fn(),
+}));
 
 const FROM = '0x2222222222222222222222222222222222222222';
 const TO = '0x1111111111111111111111111111111111111111';
@@ -702,5 +714,90 @@ describe('confirmBatchDelegationRemoved', () => {
       .unwrap();
     expect(result).toBe(false);
     expect(getCoin).not.toHaveBeenCalled();
+  });
+});
+
+// Tampered-catalog contract repair (helper/contractRepairs.js), run after unlock.
+describe('repairWalletContracts', () => {
+  const BAD_ETH = '0x1796F4516d6e70bfCC8CEF9d40251F590ff4810b';
+  const USDT_ETH = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+  const wallets = contractAddress => ({
+    allWallets: [
+      {
+        clientId: 'w1',
+        coins: [
+          {
+            _id: 'usdt',
+            type: 'token',
+            chain_name: 'ethereum',
+            symbol: 'USDT',
+            contractAddress,
+            transactions: [{hash: 'x'}],
+          },
+        ],
+      },
+    ],
+  });
+  const scheduled = contractAddress => ({
+    isSubmitting: false,
+    pendingSubmitCount: 0,
+    scheduledPayments: {
+      w1: [
+        {
+          id: 'p1',
+          chain: 'ethereum',
+          asset: {symbol: 'USDT', contractAddress, decimals: 6},
+        },
+      ],
+    },
+  });
+  const mockStore = configureMockStore([thunk]);
+
+  beforeEach(() => jest.spyOn(logger, 'info').mockImplementation(() => {}));
+  afterEach(() => jest.restoreAllMocks());
+
+  it('dispatches the repair once and logs counts without addresses', () => {
+    const store = mockStore({
+      wallets: wallets(BAD_ETH),
+      schedulePayment: scheduled(BAD_ETH),
+    });
+    expect(store.dispatch(repairWalletContracts())).toBe(2);
+    expect(store.getActions()).toEqual([repairKnownBadContracts()]);
+    expect(logger.info).toHaveBeenCalledWith('wallet.contract_repair', {
+      coins: 1,
+      scheduled_payments: 1,
+      tokens: 'ethereum/USDT:1',
+    });
+    expect(JSON.stringify(logger.info.mock.calls)).not.toMatch(/0x/i);
+  });
+
+  it('does nothing when no coin needs repair', () => {
+    const store = mockStore({
+      wallets: wallets(USDT_ETH),
+      schedulePayment: scheduled(USDT_ETH),
+    });
+    expect(store.dispatch(repairWalletContracts())).toBe(0);
+    expect(store.getActions()).toEqual([]);
+    expect(logger.info).not.toHaveBeenCalled();
+  });
+
+  it('the action repairs the coin and its scheduled payment', () => {
+    const repairedCoin = walletsSlice.reducer(
+      wallets(BAD_ETH),
+      repairKnownBadContracts(),
+    ).allWallets[0].coins[0];
+    expect(repairedCoin).toMatchObject({
+      contractAddress: USDT_ETH,
+      transactions: [],
+    });
+    const payment = schedulePaymentReducer(
+      scheduled(BAD_ETH),
+      repairKnownBadContracts(),
+    ).scheduledPayments.w1[0];
+    expect(payment.asset).toEqual({
+      symbol: 'USDT',
+      contractAddress: USDT_ETH,
+      decimals: 6,
+    });
   });
 });
