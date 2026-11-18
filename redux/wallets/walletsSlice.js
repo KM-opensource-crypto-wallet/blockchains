@@ -19,6 +19,11 @@ import {
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
+  countContractRepairs,
+  isStaleBeforeRepair,
+  repairWalletsContracts,
+} from 'dok-wallet-blockchain-networks/helper/contractRepairs';
+import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
   registerUserAPI,
@@ -765,6 +770,30 @@ export const revokeDelegation = createAsyncThunk(
 // is no longer delegated to our contract.
 const BATCH_DELEGATION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const lastBatchDelegationCheck = {};
+
+// Fixes coins that stored a contract address from the tampered catalog
+// (helper/contractRepairs.js). Runs after every unlock in both apps; does
+// nothing once repaired. Scheduled payments follow through their slice's
+// extraReducer on repairKnownBadContracts. Logs counts only, no addresses.
+export const repairWalletContracts = () => (dispatch, getState) => {
+  const state = getState();
+  const counts = countContractRepairs(
+    state?.wallets?.allWallets,
+    state?.schedulePayment?.scheduledPayments,
+  );
+  if (!counts.total) {
+    return 0;
+  }
+  dispatch(walletsSlice.actions.repairKnownBadContracts());
+  logger.info('wallet.contract_repair', {
+    coins: counts.coinTotal,
+    scheduled_payments: counts.scheduled,
+    tokens: Object.entries(counts.coins)
+      .map(([key, count]) => `${key}:${count}`)
+      .join(','),
+  });
+  return counts.total;
+};
 
 export const checkBatchDelegation = createAsyncThunk(
   'wallets/checkBatchDelegation',
@@ -2776,6 +2805,9 @@ export const walletsSlice = createSlice({
       }
       currentWallet.selectedCoin = id;
     },
+    repairKnownBadContracts: state => {
+      repairWalletsContracts(state.allWallets);
+    },
     updateContractAddress: (state, action) => {
       const payload = action?.payload;
       const chain_name = payload?.chain_name;
@@ -3598,14 +3630,24 @@ export const walletsSlice = createSlice({
       }
       const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
-        currentWallet.coins = coinData;
+        // A refresh that started before repairKnownBadContracts (e.g. an
+        // interval running behind the lock screen) returns snapshots with the
+        // bad contract; keep the repaired coin instead of undoing the repair.
+        const storedById = new Map(
+          (currentWallet.coins || []).map(coin => [coin?._id, coin]),
+        );
+        const coins = coinData.map(coin => {
+          const stored = storedById.get(coin?._id);
+          return isStaleBeforeRepair(coin, stored) ? stored : coin;
+        });
+        currentWallet.coins = coins;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
           currentWallet.chain_existing_coin,
-          coinData,
+          coins,
         );
         // extractChainExistingCoins never overwrites an entry; mirror the
         // Hedera legacy-address migration and the later-assigned account id.
-        const hederaCoin = coinData.find(
+        const hederaCoin = coins.find(
           item => item?.chain_name === 'hedera' && item?.type === 'coin',
         );
         const hederaExisting = currentWallet.chain_existing_coin?.hedera;
@@ -3661,7 +3703,11 @@ export const walletsSlice = createSlice({
           item => item?._id === updatedCurrentCoin?._id,
         );
         if (foundIndex !== -1) {
-          allCoins[foundIndex] = updatedCurrentCoin;
+          // Same guard as refreshCoins.fulfilled: a snapshot taken before the
+          // coin's contract was repaired must not overwrite the repaired coin.
+          if (!isStaleBeforeRepair(updatedCurrentCoin, allCoins[foundIndex])) {
+            allCoins[foundIndex] = updatedCurrentCoin;
+          }
           if (updatedNativeCoin) {
             const foundNativeCoinIndex = allCoins.findIndex(
               item => item?._id === updatedNativeCoin?._id,
@@ -3994,6 +4040,7 @@ export const {
   deleteMultipleDeriveAddressesInCurrentCoin,
   setSelectedDeriveAddress,
   updateContractAddress,
+  repairKnownBadContracts,
   setWalletPosition,
   rearrangeWallet,
   addPendingTransactions,
