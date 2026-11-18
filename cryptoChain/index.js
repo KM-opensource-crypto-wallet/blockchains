@@ -8,8 +8,27 @@ import {
   CHAIN_CONFIG,
   IS_SANDBOX,
 } from 'dok-wallet-blockchain-networks/config/config';
+import {getPrivateKeyForCoinAddress} from 'dok-wallet-blockchain-networks/helper/coinKeyPair';
 import {createWallet} from 'myWallet/wallet.service';
 import {APP_VERSION} from 'utils/common';
+import {logger} from 'services/logger';
+
+// A coin whose stored key belonged to another address (see helper/coinKeyPair)
+// is repaired on every resolve until a refresh writes the right key back;
+// report each coin once per session. Public chain data only.
+const reportedKeyPairRepairs = new Set();
+const reportKeyPairRepaired = coin => {
+  const key = `${coin?.chain_name}_${coin?.symbol}`;
+  if (reportedKeyPairRepairs.has(key)) {
+    return;
+  }
+  reportedKeyPairRepairs.add(key);
+  logger.warn('coin.key_pair_repaired', {
+    chain: coin?.chain_name,
+    symbol: coin?.symbol,
+    is_token: coin?.type === 'token',
+  });
+};
 
 const loadEVMChain = () => require('./chains/EVMChain').EVMChain;
 const loadBitcoinChain = () => require('./chains/BitcoinChain').BitcoinChain;
@@ -79,8 +98,12 @@ const resolveWallet = async ({phrase, walletData, coin, customRpcUrl}) => {
   const chain_existing_coin =
     walletData?.chain_existing_coin?.[chainNameForNative];
   if (isAddressOrPrivateKeyExists(coin)) {
+    const privateKey = getPrivateKeyForCoinAddress(coin);
+    if (privateKey !== coin?.privateKey) {
+      reportKeyPairRepaired(coin);
+    }
     wallet = {
-      privateKey: coin?.privateKey,
+      privateKey,
       address: coin?.address,
       accountId: coin?.accountId,
       publicKey: coin?.publicKey,
