@@ -2,7 +2,9 @@ import {ethers} from 'ethers';
 import {
   decodeBatchExecuteCalls,
   decodeEvmCalldata,
+  describeBatchExecuteError,
 } from 'dok-wallet-blockchain-networks/helper/evmCalldata';
+import batchAbi from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import erc20Abi from 'dok-wallet-blockchain-networks/abis/erc20.json';
 import erc1155Abi from 'dok-wallet-blockchain-networks/abis/erc1155.json';
 
@@ -92,5 +94,71 @@ describe('decodeBatchExecuteCalls', () => {
     expect(decodeBatchExecuteCalls(transfer)).toEqual([]);
     expect(decodeBatchExecuteCalls('0x')).toEqual([]);
     expect(decodeBatchExecuteCalls(undefined)).toEqual([]);
+  });
+});
+
+describe('describeBatchExecuteError', () => {
+  const batch = new ethers.Interface(batchAbi);
+  const revert = (name, args) => ({
+    code: 'CALL_EXCEPTION',
+    data: batch.encodeErrorResult(name, args),
+  });
+  const errorString = message =>
+    new ethers.Interface(['error Error(string)']).encodeErrorResult('Error', [
+      message,
+    ]);
+
+  it('explains a batch over the contract limit', () => {
+    expect(describeBatchExecuteError(revert('TooManyCalls', [33, 32]))).toBe(
+      'The batch has 33 calls; at most 32 can be sent together. Remove some and try again.',
+    );
+  });
+
+  it('names the failing call and its revert reason', () => {
+    expect(
+      describeBatchExecuteError(
+        revert('CallFailed', [
+          1,
+          errorString('ERC20: transfer amount exceeds balance'),
+        ]),
+      ),
+    ).toBe(
+      "The batch's call 2 would fail: ERC20: transfer amount exceeds balance.",
+    );
+    expect(describeBatchExecuteError(revert('CallFailed', [0, '0x']))).toBe(
+      "The batch's call 1 would fail.",
+    );
+  });
+
+  it('explains the other batch contract errors', () => {
+    expect(describeBatchExecuteError(revert('EmptyBatch', []))).toBe(
+      'The batch has no calls.',
+    );
+    expect(describeBatchExecuteError(revert('InvalidTarget', [2, TO]))).toBe(
+      "The batch's call 3 goes to an address that cannot receive it.",
+    );
+    expect(
+      describeBatchExecuteError(revert('TokenCallReturnedFalse', [0, TO])),
+    ).toBe("The batch's call 1 was refused by the token contract.");
+    expect(describeBatchExecuteError(revert('Unauthorized', []))).toBe(
+      'The batch can only be sent by the account itself.',
+    );
+  });
+
+  it('finds the revert data where the RPC error nests it', () => {
+    const data = batch.encodeErrorResult('EmptyBatch', []);
+    expect(describeBatchExecuteError({info: {error: {data}}})).toBe(
+      'The batch has no calls.',
+    );
+    expect(describeBatchExecuteError({error: {data}})).toBe(
+      'The batch has no calls.',
+    );
+  });
+
+  it('leaves every other error alone', () => {
+    expect(describeBatchExecuteError({data: errorString('nope')})).toBeNull();
+    expect(describeBatchExecuteError({data: '0xdeadbeef'})).toBeNull();
+    expect(describeBatchExecuteError(new Error('timeout'))).toBeNull();
+    expect(describeBatchExecuteError(undefined)).toBeNull();
   });
 });

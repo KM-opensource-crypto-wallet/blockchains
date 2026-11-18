@@ -1,6 +1,7 @@
 /**
  * EIP-7702 authorizations: EVMChain signs them only with the chain's own id
- * (never 0) and only to the chain's batch contract or the zero address.
+ * (never 0) and only to the chain's batch contract or the zero address. The
+ * fee estimate signs nothing with the user's key.
  *
  *   npx jest dok-wallet-blockchain-networks/cryptoChain/chains/EVMChain.batchAuthorization.test.js
  */
@@ -11,9 +12,11 @@ const TO = '0x1111111111111111111111111111111111111111';
 const BATCH = '0x03203E5a57f568aca9C83d28a79Af3981BA54434';
 const ZERO = '0x0000000000000000000000000000000000000000';
 const CHAIN_ID = 11155111;
+const THROWAWAY = '0x3333333333333333333333333333333333333333';
 
 const provider = {};
 const authorizeCalls = [];
+const authorizeSigners = [];
 const contractCalls = {estimate: [], populate: []};
 
 jest.mock('ethers', () => {
@@ -28,8 +31,11 @@ jest.mock('ethers', () => {
     }
   }
   class Wallet {
-    constructor() {
-      this.address = '0x2222222222222222222222222222222222222222';
+    constructor(key) {
+      this.address =
+        key === '0xthrowawaykey'
+          ? '0x3333333333333333333333333333333333333333'
+          : '0x2222222222222222222222222222222222222222';
     }
     connect(p) {
       this.provider = p;
@@ -37,7 +43,8 @@ jest.mock('ethers', () => {
     }
     async authorize(auth) {
       authorizeCalls.push(auth);
-      return {...auth, signature: '0xsig'};
+      authorizeSigners.push(this.address);
+      return {...auth, signature: {yParity: 1, r: '0xr', s: '0xs'}};
     }
     async populateTransaction(tx) {
       return tx;
@@ -63,11 +70,20 @@ jest.mock('ethers', () => {
       };
     }
   }
+  class Interface {
+    encodeFunctionData(name, [batchCalls]) {
+      return `0x${name}:${batchCalls.length}`;
+    }
+  }
   return {
     ethers: {
       Wallet,
       Contract,
+      Interface,
       ZeroAddress: '0x0000000000000000000000000000000000000000',
+      randomBytes: () => new Uint8Array(32),
+      hexlify: () => '0xthrowawaykey',
+      toQuantity: value => `0x${BigInt(value).toString(16)}`,
     },
     FetchRequest,
     JsonRpcProvider,
@@ -136,10 +152,12 @@ const sendBatch = chain =>
 describe('EVMChain EIP-7702 authorizations', () => {
   beforeEach(() => {
     authorizeCalls.length = 0;
+    authorizeSigners.length = 0;
     contractCalls.estimate.length = 0;
     contractCalls.populate.length = 0;
     Object.assign(provider, {
       getTransactionCount: jest.fn(async () => 7),
+      send: jest.fn(async () => '0x186a0'),
       broadcastTransaction: jest.fn(async () => ({
         hash: '0x' + 'ab'.repeat(32),
       })),
@@ -178,8 +196,8 @@ describe('EVMChain EIP-7702 authorizations', () => {
     );
   });
 
-  // Fee calculation is not stubbed here; only the estimate options matter.
-  it('estimates with an authorization to the batch contract', async () => {
+  // Fee calculation is not stubbed here; only the estimate request matters.
+  it('estimates without signing anything with the user key', async () => {
     await loadChain('ethereum')
       .getEstimateFeeForBatchTransaction({
         calls,
@@ -188,10 +206,60 @@ describe('EVMChain EIP-7702 authorizations', () => {
       })
       .catch(() => {});
 
+    expect(authorizeSigners).toEqual([THROWAWAY]);
     expect(authorizeCalls).toEqual([
-      {address: BATCH, nonce: 8, chainId: CHAIN_ID},
+      {address: BATCH, nonce: 0, chainId: CHAIN_ID},
     ]);
-    expect(contractCalls.estimate[0]).toMatchObject({type: 4});
+    expect(contractCalls.estimate).toHaveLength(0);
+    expect(provider.send).toHaveBeenCalledWith('eth_estimateGas', [
+      {
+        type: '0x4',
+        from: FROM,
+        to: FROM,
+        data: '0xexecute:1',
+        authorizationList: [
+          {
+            chainId: '0xaa36a7',
+            address: BATCH,
+            nonce: '0x0',
+            yParity: '0x1',
+            r: '0xr',
+            s: '0xs',
+          },
+        ],
+      },
+      'latest',
+      {
+        [FROM]: {code: '0xef0100' + BATCH.slice(2)},
+        [THROWAWAY]: {balance: '0x1'},
+      },
+    ]);
+  });
+
+  it('refuses a batch over the contract limit before any RPC call', async () => {
+    await expect(
+      loadChain('ethereum').getEstimateFeeForBatchTransaction({
+        calls: Array(33).fill(calls[0]),
+        privateKey: '0xkey',
+        existingNonce: 7,
+      }),
+    ).rejects.toThrow(
+      'The batch has 33 calls; at most 32 can be sent together. Remove some and try again.',
+    );
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(authorizeCalls).toHaveLength(0);
+  });
+
+  it('does not estimate on a chain without a batch contract', async () => {
+    await expect(
+      loadChain('base').getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      }),
+    ).rejects.toThrow('Batch sending is not available on this chain');
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(authorizeCalls).toHaveLength(0);
   });
 
   it('refuses to sign on a chain without a batch contract', async () => {
