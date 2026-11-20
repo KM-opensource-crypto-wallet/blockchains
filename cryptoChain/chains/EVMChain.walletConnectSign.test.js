@@ -240,4 +240,45 @@ describe('EVMChain WalletConnect signers', () => {
       expect(res).toBe(HASH);
     });
   });
+
+  describe('signTypedData (eth_signTypedData_v4)', () => {
+    const KEY = '0x' + '11'.repeat(32);
+    const typedData = verifyingContract =>
+      JSON.stringify({
+        types: {
+          EIP712Domain: [{name: 'verifyingContract', type: 'address'}],
+          Mail: [{name: 'body', type: 'string'}],
+        },
+        primaryType: 'Mail',
+        domain: {verifyingContract},
+        message: {body: 'hi'},
+      });
+
+    // The signer hashes all of these to the same address as the account itself.
+    it.each([
+      ['lowercase', FROM],
+      ['upper case', '0x' + FROM.slice(2).toUpperCase()],
+      ['zero-padded to 32 bytes', '0x' + FROM.slice(2).padStart(64, '0')],
+      ['decimal', BigInt(FROM).toString()],
+    ])(
+      'refuses a domain bound to the signer account (%s)',
+      async (_label, verifyingContract) => {
+        await expect(
+          loadChain().signTypedData({
+            privateKey: KEY,
+            signTypeData: typedData(verifyingContract),
+          }),
+        ).rejects.toBe('Refusing to sign this request');
+      },
+    );
+
+    it('signs a domain bound to another contract', async () => {
+      await expect(
+        loadChain().signTypedData({
+          privateKey: KEY,
+          signTypeData: typedData(TO),
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
 });

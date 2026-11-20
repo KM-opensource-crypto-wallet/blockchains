@@ -233,7 +233,13 @@ export const getCoinSnapshot = async (
   }
 };
 
-export const getSingleTransaction = async (state, coinDef, wallet, txHash) => {
+export const getSingleTransaction = async (
+  state,
+  coinDef,
+  wallet,
+  txHash,
+  toAddress,
+) => {
   const customRpcUrl = selectCustomRpcUrlByChainAndWallet(
     coinDef?.chain_name,
     wallet?.clientId,
@@ -250,6 +256,7 @@ export const getSingleTransaction = async (state, coinDef, wallet, txHash) => {
     txHash,
     contractAddress:
       coinDef?.type === 'token' ? coinDef?.contractAddress : null,
+    toAddress,
   });
   if (trx) {
     const amount = trx?.data?.amount;
@@ -257,8 +264,11 @@ export const getSingleTransaction = async (state, coinDef, wallet, txHash) => {
       ...trx,
       data: {
         ...trx.data,
-        totalCourse: calculatePrice(amount, coinDef?.decimal, currentPrice),
-        amount: parseBalance(amount, coinDef?.decimal),
+        totalCourse:
+          amount == null
+            ? null
+            : calculatePrice(amount, coinDef?.decimal, currentPrice),
+        amount: amount == null ? null : parseBalance(amount, coinDef?.decimal),
       },
     };
   }
