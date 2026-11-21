@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = false;
+export const IS_SANDBOX = true;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -87,7 +87,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x687389E68e700ee03b91Ab99fa40692a82096551',
+      sandbox: '0xcCa6c90e26e0C8050B7293413B623725b7eCA735',
     },
     old_batch_contract: {
       sandbox: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
@@ -262,11 +262,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
-    },
-    old_batch_contract: {
-      sandbox: '0x1A26f0b16172784Db9C71a220893fB5EA859e3fb',
-      production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+      sandbox: '0xA88A9b313e6a2018b620348C58929C0c8E146A5E',
     },
     logo: require('assets/chain_logo/base.png'),
     add_token: {
@@ -322,10 +318,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
-    },
-    old_batch_contract: {
-      production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+      sandbox: '0xe452873d96952CB06c751DF7B9eFdcB94Fc9733a',
     },
     logo: require('assets/chain_logo/optimism.png'),
     add_token: {
@@ -380,10 +373,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
-    },
-    old_batch_contract: {
-      production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
+      sandbox: '0x5e6b29160937A1324d144715D1b8Ed55B75Bf276',
     },
     logo: require('assets/chain_logo/arbitrum.png'),
     add_token: {
@@ -576,9 +566,11 @@ export const CHAIN_CONFIG = {
       chain_display_name: 'Gnosis',
       symbol: 'XDAI',
     },
-    old_batch_contract: {
+    batch_contract: {
+      sandbox: '0xe043382036673063D679CBcd8e002063B1E74394',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
+
     logo: require('assets/chain_logo/gnosis.png'),
     add_token: {
       label: 'Gnosis',
@@ -900,9 +892,7 @@ export const CHAIN_CONFIG = {
       symbol: 'ETH',
     },
     batch_contract: {
-      sandbox: '0x9435C689e47397Aa3ecAd5AA331894c1816f1867',
-    },
-    old_batch_contract: {
+      sandbox: '0x478B9e8E6b99b364c8535F3f8ED435d44DECAB9b',
       production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/ink.png'),
