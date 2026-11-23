@@ -8,6 +8,7 @@ import {
   parseEip155ChainId,
   buildWalletSendCallsBatch,
   getWalletSendCallsDigest,
+  BATCH_MAX_CALLS,
   reviewEvmWalletConnectTx,
   reviewWalletSendCalls,
   toEthersTransactionRequest,
@@ -467,6 +468,12 @@ describe('wallet_sendCalls batch review', () => {
         ),
       ),
     ).toBe(5700);
+    const tooMany = Array.from({length: BATCH_MAX_CALLS + 1}, () => ({
+      to: TO,
+    }));
+    expect(codeOf(build(sendCalls({calls: tooMany})))).toBe(5740);
+    const atLimit = Array.from({length: BATCH_MAX_CALLS}, () => ({to: TO}));
+    expect(build(sendCalls({calls: atLimit}))().calls).toHaveLength(32);
     expect(codeOf(build(sendCalls({calls: []})))).toBe(-32602);
     expect(codeOf(build(sendCalls({calls: [{value: '0x1'}]})))).toBe(-32602);
     expect(codeOf(build(sendCalls({calls: [{to: TO, value: '-1'}]})))).toBe(

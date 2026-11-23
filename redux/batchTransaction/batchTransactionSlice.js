@@ -17,6 +17,7 @@ import {
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {getLocalCurrency} from 'dok-wallet-blockchain-networks/redux/settings/settingsSelectors';
 import structuredClone from '@ungap/structured-clone';
+import {BATCH_MAX_CALLS} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 
 const initialState = {
   transactions: {},
@@ -203,6 +204,22 @@ export const addBatchTransaction = createAsyncThunk(
       }
       const selectedCoin = payload.selectedCoin;
       const chain_name = selectedCoin?.chain_name;
+      // One batch is every transfer on one chain from one address, sent as
+      // one execute() call, and the batch contract takes at most
+      // BATCH_MAX_CALLS calls.
+      const sameBatchCount = existingTransactions.filter(
+        item =>
+          item?.coinInfo?.chain_name === chain_name &&
+          item?.coinInfo?.address === selectedCoin?.address,
+      ).length;
+      if (sameBatchCount >= BATCH_MAX_CALLS) {
+        showToast({
+          type: 'errorToast',
+          title: 'Batch is full',
+          message: `This batch already has ${sameBatchCount} transfers; at most ${BATCH_MAX_CALLS} can be sent together. Send it first, then add more.`,
+        });
+        return thunkAPI.rejectWithValue('Batch is full');
+      }
       const nativeCoin = await getNativeCoin(
         currentState,
         selectedCoin,
