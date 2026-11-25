@@ -44,6 +44,8 @@ const REQUEST_ID = 1795590787571795;
 const TOPIC = 'topic-1';
 const RECORD_DELETED = `Missing or invalid. Record was recently deleted - request: ${REQUEST_ID}`;
 
+const EVM_ADDRESS = '0x2222222222222222222222222222222222222222';
+
 const wallet = {
   clientId: 'client1',
   walletName: 'Main',
@@ -55,6 +57,13 @@ const wallet = {
       type: 'coin',
       address: ADDRESS,
       symbol: 'SOL',
+    },
+    {
+      _id: 'eth',
+      chain_name: 'ethereum',
+      type: 'coin',
+      address: EVM_ADDRESS,
+      symbol: 'ETH',
     },
   ],
 };
@@ -176,6 +185,72 @@ describe('walletConnect thunk: request liveness', () => {
 
     expect(action.payload).toBe('request_expired');
     expect(executor.signRawTransaction).not.toHaveBeenCalled();
+    expect(connector.respondSessionRequest).not.toHaveBeenCalled();
+  });
+
+  it('refuses to sign a request that expired while the coin was loading', async () => {
+    // Live when the thunk starts, gone by the time it is ready to sign.
+    connector.getPendingSessionRequests
+      .mockReturnValueOnce([pendingRecord(nowSeconds() + 300)])
+      .mockReturnValue([]);
+    const store = makeStore();
+
+    const action = await approve(store);
+
+    expect(action.payload).toBe('request_expired');
+    expect(executor.signRawTransaction).not.toHaveBeenCalled();
+    expect(connector.respondSessionRequest).not.toHaveBeenCalled();
+    // The expiry message replaces the "Please wait" progress toast.
+    expect(
+      showToast.mock.calls.map(([options]) => [options.type, options.toastId]),
+    ).toEqual([
+      ['progressToast', undefined],
+      ['errorToast', 'toast-1'],
+    ]);
+    expect(pendingOnScreen(store)).toBeNull();
+  });
+
+  it('refuses to broadcast a batch whose request expired during fee estimation', async () => {
+    const batchChain = {
+      getEstimateFeeForBatchTransaction: jest.fn(async () => {
+        connector.getPendingSessionRequests.mockReturnValue([]);
+        return {nonce: 1, gasFee: '1', estimateGas: '21000'};
+      }),
+      sendBatchTransaction: jest.fn(async () => '0xbatch'),
+    };
+    getCoin.mockResolvedValue({
+      chain: batchChain,
+      waitForConfirmation: jest.fn(),
+    });
+    const store = makeStore();
+
+    const action = await store.dispatch(
+      walletConnect({
+        chain_name: 'ethereum',
+        chainId: 'eip155:1',
+        id: REQUEST_ID,
+        topic: TOPIC,
+        method: 'wallet_sendCalls',
+        walletAddress: EVM_ADDRESS,
+        privateKey: 'key',
+        domain: 'https://dapp.test',
+        transactionData: {
+          batchCalls: [
+            {
+              to: '0x1111111111111111111111111111111111111111',
+              value: '0x0',
+              data: '0x',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(action.payload).toBe('request_expired');
+    expect(batchChain.getEstimateFeeForBatchTransaction).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(batchChain.sendBatchTransaction).not.toHaveBeenCalled();
     expect(connector.respondSessionRequest).not.toHaveBeenCalled();
   });
 

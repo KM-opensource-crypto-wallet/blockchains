@@ -1242,11 +1242,13 @@ export const walletConnect = createAsyncThunk(
     const clearPending = () =>
       thunkAPI.dispatch(clearWalletConnectTransactionData({id}));
 
-    // Before reviewing, signing or broadcasting anything: a request the dApp
-    // has stopped waiting for cannot be answered, and acting on it anyway
-    // would sign or send without the dApp ever learning the result
-    // (DOKWALLET-WALLET-WEB-1T, approved nine minutes after it arrived).
-    if (isWalletConnectRequestExpired(connector, id)) {
+    // A request the dApp has stopped waiting for cannot be answered, and
+    // acting on it anyway would sign or send without the dApp ever learning
+    // the result (DOKWALLET-WALLET-WEB-1T, approved nine minutes after it
+    // arrived). Checked before reviewing anything, and again right before
+    // signing or broadcasting, since loading the coin and estimating fees can
+    // outlast the expiry. The message replaces the progress toast, if shown.
+    const rejectAsExpired = () => {
       logger.warn('walletconnect.request_expired', {
         method,
         chain_name,
@@ -1257,9 +1259,13 @@ export const walletConnect = createAsyncThunk(
         title: 'Request expired',
         message:
           'The dApp stopped waiting for this request. Ask it to send the request again.',
+        toastId,
       });
       clearPending();
       return thunkAPI.rejectWithValue('request_expired');
+    };
+    if (isWalletConnectRequestExpired(connector, id)) {
+      return rejectAsExpired();
     }
 
     // KIML-002: an EVM transaction approval is bound to the request the user
@@ -1420,6 +1426,9 @@ export const walletConnect = createAsyncThunk(
             privateKey,
             isFetchNonce: true,
           });
+        if (isWalletConnectRequestExpired(connector, id)) {
+          return rejectAsExpired();
+        }
         const res = await nativeCoin.chain.sendBatchTransaction({
           calls,
           privateKey,
@@ -1443,6 +1452,9 @@ export const walletConnect = createAsyncThunk(
       } else {
         if (typeof executor?.[wcMethod] !== 'function') {
           throw new Error(`Unsupported WalletConnect method: ${method}`);
+        }
+        if (isWalletConnectRequestExpired(connector, id)) {
+          return rejectAsExpired();
         }
         tx = await executor[wcMethod]({
           payload: canonicalTx
