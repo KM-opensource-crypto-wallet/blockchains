@@ -267,9 +267,16 @@ export const calculateEstimateFee = createAsyncThunk(
           (totalAmountBN.gt(balanceBN) ||
             (transfer?.isSendFunds && !initialAmountBN.eq(transferAmountBN)))
         ) {
+          const maxAmountBN = balanceBN.minus(feeAmountBN);
+          if (maxAmountBN.lte(0)) {
+            // The balance does not cover the fee, so there is nothing to
+            // send: report it (the catch below shows "Low Balance") rather
+            // than store a Max of zero or less.
+            throw new Error('Insufficient balance to pay the network fee');
+          }
           dispatch(
             setCurrentTransferData({
-              amount: balanceBN.minus(feeAmountBN).toString(),
+              amount: maxAmountBN.toString(),
               isMax: true,
             }),
           );

@@ -4,6 +4,7 @@ import {
   currentTransferSlice,
 } from 'dok-wallet-blockchain-networks/redux/currentTransfer/currentTransferSlice';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
+import {showToast} from 'utils/toast';
 
 // The chain estimate is the boundary under test: whatever getEstimateFee
 // returns is what the Transfer screen's amount is clamped against.
@@ -79,4 +80,27 @@ describe('calculateEstimateFee: sending the whole balance', () => {
     expect(transfer.amount).toBe('99.5');
     expect(transfer.isMax).toBe(true);
   });
+});
+
+describe('calculateEstimateFee: a balance that cannot cover the fee', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it.each([
+    ['below the fee', '0.5'],
+    ['exactly the fee', '1.1'],
+  ])(
+    'reports insufficient balance instead of a Max of zero or less (%s)',
+    async (_, spendableBalance) => {
+      const transfer = await estimateWith({fee: '1.1', spendableBalance});
+
+      // The requested amount stays; nothing <= 0 reaches the transfer.
+      expect(transfer.amount).toBe('100');
+      expect(transfer.success).toBe(false);
+      expect(showToast).toHaveBeenCalledWith(
+        expect.objectContaining({type: 'errorToast', title: 'Low Balance'}),
+      );
+    },
+  );
 });
