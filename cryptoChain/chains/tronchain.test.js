@@ -37,6 +37,10 @@ const fakeTronWeb = (overrides = {}) => ({
     sign: jest.fn(async txn => ({...txn, signature: ['sig'], txID: 'txid1'})),
     sendRawTransaction: jest.fn().mockResolvedValue({result: true}),
     getTransactionInfo: jest.fn().mockResolvedValue({id: 'testTransactionId'}),
+    // Full-node (latest block) reads. getAccount / getTransactionInfo above
+    // are the solidity node, about 19 blocks behind the head.
+    getUnconfirmedAccount: jest.fn().mockResolvedValue({balance: 1000000}),
+    getUnconfirmedTransactionInfo: jest.fn().mockResolvedValue({}),
     ...(overrides.trx || {}),
   },
   transactionBuilder: {
@@ -115,23 +119,53 @@ describe('TronChain', () => {
     });
 
     it('returns 0 when the account has no balance', async () => {
-      tronWeb.trx.getAccount.mockResolvedValue({balance: 0});
+      tronWeb.trx.getUnconfirmedAccount.mockResolvedValue({balance: 0});
       await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
         '0',
       );
     });
 
     it('returns 0 for an account the node does not know', async () => {
-      tronWeb.trx.getAccount.mockResolvedValue({});
+      tronWeb.trx.getUnconfirmedAccount.mockResolvedValue({});
       await expect(
         instance.getBalance({address: 'unknown_address'}),
       ).resolves.toEqual('0');
     });
 
+    it('reads the latest block, not the solidified state', async () => {
+      // Right after a send the solidity node still has the old balance for
+      // ~19 blocks; the coin screen must show the new one.
+      tronWeb.trx.getAccount.mockResolvedValue({balance: 5000000});
+      tronWeb.trx.getUnconfirmedAccount.mockResolvedValue({balance: 3000000});
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '3000000',
+      );
+    });
+
+    it('answers a refresh right after a send with the new balance, not a cached one', async () => {
+      // An address the cache can match (other tests leave `address` unset).
+      tronWeb.address.toHex.mockReturnValue('cacheTestHex');
+      tronWeb.trx.getUnconfirmedAccount.mockResolvedValue({
+        address: 'cacheTestHex',
+        balance: 3000000,
+      });
+      await instance.getBalance({address: 'address'});
+
+      tronWeb.trx.getUnconfirmedAccount.mockResolvedValue({
+        address: 'cacheTestHex',
+        balance: 2000000,
+      });
+      await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
+        '2000000',
+      );
+    });
+
     // retryFunc falls back to its default rather than surfacing the error,
     // so a dead provider set reads as a zero balance, not a crash.
     it('falls back to 0 when every provider fails', async () => {
-      tronWeb.trx.getAccount.mockRejectedValue(new Error('node down'));
+      tronWeb.trx.getUnconfirmedAccount.mockRejectedValue(
+        new Error('node down'),
+      );
       await expect(instance.getBalance({address: 'address'})).resolves.toEqual(
         '0',
       );
@@ -141,9 +175,9 @@ describe('TronChain', () => {
       // Two providers: a premium one first, then the trongrid fallback.
       getPremiumRPCUrl.mockReturnValue('http://premium.test');
       const dead = fakeTronWeb();
-      dead.trx.getAccount.mockRejectedValue(new Error('node down'));
+      dead.trx.getUnconfirmedAccount.mockRejectedValue(new Error('node down'));
       const healthy = fakeTronWeb();
-      healthy.trx.getAccount.mockResolvedValue({balance: 4242});
+      healthy.trx.getUnconfirmedAccount.mockResolvedValue({balance: 4242});
 
       TronWeb.mockImplementationOnce(() => dead) // provider 0 — fails
         .mockImplementationOnce(() => healthy); // provider 1 — succeeds
@@ -406,15 +440,21 @@ describe('TronChain', () => {
       {key: 'getEnergyFee', value: 210},
       {key: 'getMemoFee', value: 1000000},
     ];
-    // Sender holds 25 TRX; the recipient has never been activated.
+    // Latest block: the sender holds 25 TRX and the recipient has never been
+    // activated. The solidified state lags: it still shows 30 TRX (before the
+    // last fee burn), so reading it would overstate what can be sent.
     const SENDER_SUN = 25000000;
+    const STALE_SENDER_SUN = 30000000;
 
     beforeEach(() => {
       tronWeb.trx.getChainParameters = jest
         .fn()
         .mockResolvedValue(chainParameters);
-      tronWeb.trx.getAccount.mockImplementation(async address =>
+      tronWeb.trx.getUnconfirmedAccount.mockImplementation(async address =>
         address === 'to' ? {} : {balance: SENDER_SUN, create_time: 1},
+      );
+      tronWeb.trx.getAccount.mockImplementation(async address =>
+        address === 'to' ? {} : {balance: STALE_SENDER_SUN, create_time: 1},
       );
       TronWeb.fromSun = jest.fn(sun => String(Number(sun) / 1e6));
     });
@@ -435,6 +475,25 @@ describe('TronChain', () => {
       await expect(estimate()).resolves.toMatchObject({fee: '1.1'});
     });
 
+    it('treats a recipient activated in the latest blocks as existing', async () => {
+      // Activated a few blocks ago: the head knows it, the solidity node not
+      // yet. With 600 free bandwidth the transfer itself costs nothing.
+      tronWeb.trx.getUnconfirmedAccount.mockImplementation(async () => ({
+        balance: SENDER_SUN,
+        create_time: 1,
+      }));
+      tronWeb.trx.getAccountResources = jest
+        .fn()
+        .mockResolvedValue({freeNetLimit: 600, freeNetUsed: 0});
+      tronWeb.transactionBuilder.sendTrx.mockResolvedValue({
+        raw_data: {},
+        raw_data_hex: 'ab'.repeat(100),
+        txID: 'txid1',
+      });
+
+      await expect(estimate()).resolves.toMatchObject({fee: '0'});
+    });
+
     it('adds the memo fee for a new recipient too', async () => {
       // 1 TRX activation + 0.1 TRX account creation + 1 TRX memo.
       await expect(estimate('invoice 42')).resolves.toMatchObject({
@@ -452,15 +511,39 @@ describe('TronChain', () => {
   });
 
   describe('waitForConfirmation', () => {
-    it('resolves once TronScan reports SUCCESS', async () => {
-      TronScan.getTransactionByHash.mockResolvedValue({data: 'SUCCESS'});
-      await expect(
-        instance.waitForConfirmation({
-          transaction: {txid: 'txid1'},
-          interval: 1,
-          retries: 5,
-        }),
-      ).resolves.toEqual({data: 'SUCCESS'});
+    // A transfer counts as done once it is in a block (~3 s), read from the
+    // full node on web and mobile alike; the solidity node only answers ~19
+    // blocks later and TronScan is no longer asked.
+    const confirm = (retries = 5) =>
+      instance.waitForConfirmation({
+        transaction: {txid: 'txid1'},
+        interval: 1,
+        retries,
+      });
+
+    it('resolves once the transaction is in a block', async () => {
+      tronWeb.trx.getTransactionInfo.mockResolvedValue({});
+      tronWeb.trx.getUnconfirmedTransactionInfo
+        .mockResolvedValueOnce({})
+        .mockResolvedValue({id: 'txid1', blockNumber: 88313173});
+
+      await expect(confirm()).resolves.toMatchObject({id: 'txid1'});
+      expect(TronScan.getTransactionByHash).not.toHaveBeenCalled();
+    });
+
+    it('rejects with the receipt result when the contract call failed', async () => {
+      tronWeb.trx.getUnconfirmedTransactionInfo.mockResolvedValue({
+        id: 'txid1',
+        receipt: {result: 'OUT_OF_ENERGY'},
+      });
+
+      await expect(confirm()).rejects.toBe('OUT_OF_ENERGY');
+    });
+
+    it('resolves pending when the transaction never shows up', async () => {
+      tronWeb.trx.getUnconfirmedTransactionInfo.mockResolvedValue({});
+
+      await expect(confirm(3)).resolves.toBe('pending');
     });
 
     it('resolves to null when the transaction has no id', async () => {

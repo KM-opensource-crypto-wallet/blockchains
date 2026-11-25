@@ -10,7 +10,6 @@ import {
   isSwapBlockingError,
   SWAP_QUOTE_EXPIRED_ERROR,
 } from 'dok-wallet-blockchain-networks/helper';
-import {isWeb} from 'dok-wallet-blockchain-networks/config/config';
 import BigNumber from 'bignumber.js';
 import {sha256} from 'ethers';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
@@ -209,14 +208,20 @@ export const TronChain = () => {
     return null;
   };
 
-  const getAccount = async ({tronWeb, address}) => {
+  // The account at the latest block (full node `wallet/getaccount`), like
+  // TronGrid's default. trx.getAccount reads the solidity node, ~19 blocks
+  // (~57 s) behind, so right after a send it still shows the old balance
+  // while the transfer already reports success. Cached for 10 s for the
+  // estimate's and staking's repeated lookups; balance reads pass `fresh`.
+  const getAccount = async ({tronWeb, address, fresh = false}) => {
     if (
+      fresh ||
       accountInfo?.address !== tronWeb?.address.toHex(address) ||
       !lastCallTimeStamp ||
       dayjs().diff(dayjs(lastCallTimeStamp), 'seconds') > 10
     ) {
       lastCallTimeStamp = dayjs();
-      accountInfo = await tronWeb.trx.getAccount(address);
+      accountInfo = await tronWeb.trx.getUnconfirmedAccount(address);
     }
     return accountInfo;
   };
@@ -234,7 +239,7 @@ export const TronChain = () => {
   // the caller keeps clamping to its cached balance.
   const readSpendableBalance = async ({tronWeb, address}) => {
     try {
-      const account = await getAccount({tronWeb, address});
+      const account = await getAccount({tronWeb, address, fresh: true});
       return TronWeb.fromSun(String(account?.balance || 0));
     } catch (e) {
       return undefined;
@@ -514,7 +519,7 @@ export const TronChain = () => {
     getBalance: async ({address}) =>
       retryFunc(async tronWeb => {
         try {
-          const json = await getAccount({tronWeb, address});
+          const json = await getAccount({tronWeb, address, fresh: true});
           const bal = json?.balance || 0;
 
           return bal?.toString() || '0';
@@ -1808,25 +1813,21 @@ export const TronChain = () => {
           let timer = setInterval(async () => {
             try {
               numberOfRetries += 1;
-              let response;
-              if (isWeb) {
-                response = await tronWeb.trx.getTransactionInfo(transactionID);
-              } else {
-                response = await TronScan.getTransactionByHash(transactionID);
-              }
-              if (
-                (response?.data === 'SUCCESS' && !isWeb) ||
-                (isWeb && response?.id)
-              ) {
+              // Done once the tx is in a block (~3 s), read from the same
+              // full node as the balance, on web and mobile alike. The
+              // solidity node (trx.getTransactionInfo) only answers ~19
+              // blocks later.
+              const response =
+                await tronWeb.trx.getUnconfirmedTransactionInfo(transactionID);
+              const result = response?.receipt?.result;
+              if (result && result !== 'SUCCESS') {
+                // In a block, but the contract call failed (REVERT,
+                // OUT_OF_ENERGY, ...).
+                clearInterval(timer);
+                reject(result);
+              } else if (response?.id) {
                 clearInterval(timer);
                 resolve(response);
-              } else if (
-                response?.data &&
-                typeof response?.data === 'string' &&
-                !isWeb
-              ) {
-                clearInterval(timer);
-                reject(response?.data);
               } else if (numberOfRetries === retries) {
                 clearInterval(timer);
                 resolve('pending');
