@@ -28,7 +28,6 @@ import {
 import {
   convertToSmallAmount,
   deleteItemAtIndex,
-  fetchRPCRequest,
   getExplorerTxUrl,
   isEip1559NotSupported,
   isEip7702SupportedChain,
@@ -37,6 +36,7 @@ import {
   isValidEVMTransactionHash,
   parseBalance,
   sleep,
+  SPONSOR_SUBMIT_UNKNOWN_CODE,
   SWAP_QUOTE_EXPIRED_ERROR,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -87,6 +87,8 @@ const isSponsoredBatchInput = input =>
 
 // `nonce` is the contract's first and only storage variable.
 const BATCH_NONCE_SLOT = `0x${'0'.repeat(64)}`;
+// The fee probe is signed for this nonce, which the chain never reaches, so it can't be replayed.
+const PROBE_BATCH_NONCE = 2n ** 255n;
 
 // Signature-shaped bytes used only to size the tx for GasPriceOracle getL1Fee. Signed
 // from a throwaway key so `s` is always canonical, which raw random bytes are not.
@@ -207,11 +209,15 @@ const isTrustedSponsorQuote = (
 };
 
 // A dApp signature on the signer's own account as domain could be relayed to its EIP-7702 delegate.
+// Unparseable counts as own: eth-sig-util still encodes forms getAddress rejects.
 const isOwnAccountDomain = (domain, address) => {
-  try {
-    return BigInt(domain?.verifyingContract) === BigInt(address);
-  } catch (e) {
+  if (domain?.verifyingContract == null) {
     return false;
+  }
+  try {
+    return ethers.getAddress(String(domain?.verifyingContract)) === address;
+  } catch (e) {
+    return true;
   }
 };
 
@@ -394,10 +400,12 @@ function decodeBatchTotalAmount(input) {
     .toString();
 }
 
-// The selector alone proves nothing: anyone can send calldata shaped like this to a
-// delegated EOA, so only calldata that actually decodes counts as a sponsored batch.
-function isSponsoredBatchTransaction(input) {
-  if (!isSponsoredBatchInput(input)) {
+// Anyone can send calldata shaped like this to an EOA, so only one our relayer sent counts.
+function isSponsoredBatchTransaction(input, from) {
+  if (
+    !sameAddress(from, SPONSOR_TREASURY_ADDRESS) ||
+    !isSponsoredBatchInput(input)
+  ) {
     return false;
   }
   try {
@@ -406,6 +414,18 @@ function isSponsoredBatchTransaction(input) {
     return false;
   }
 }
+
+const BATCH_RESULT_TOPIC =
+  '0x51eefe1c9d98da1f440d89101c89470839619bcaa99aa2c3642f54e545f56faa'; // BatchExecuted(uint256,bool,bytes)
+const isFailedSponsoredBatch = (receipt, account) =>
+  !!receipt?.logs?.some(
+    log =>
+      sameAddress(log.address, account) &&
+      log.topics?.[0] === BATCH_RESULT_TOPIC &&
+      BigInt(log.data.slice(0, 66)) === 0n,
+  );
+// A mined receipt never changes, so each sponsored batch is fetched once.
+const failedSponsoredBatches = new Map();
 
 const TRANSFER_SELECTOR = '0xa9059cbb'; // transfer(address,uint256)
 let erc20TransferIface;
@@ -503,18 +523,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
     );
   }
-
-  const getBatchContractNonce = async address => {
-    const raw = await rpcRequest(
-      'eth_getStorageAt',
-      [address, BATCH_NONCE_SLOT, 'latest'],
-      null,
-    );
-    if (raw == null) {
-      throw new Error('Could not read the batch nonce');
-    }
-    return raw === '0x' ? 0 : Number(BigInt(raw));
-  };
 
   const isOpStackSponsor = () => !!GAS_ORACLE_CONTRACT_ADDRESS[chain_name];
 
@@ -902,6 +910,20 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
     }
   };
 
+  const isFailedSponsoredBatchTx = async (txHash, account) => {
+    if (!failedSponsoredBatches.has(txHash)) {
+      const receipt = await safeGetTransactionStatus(txHash);
+      if (!receipt) {
+        return false;
+      }
+      failedSponsoredBatches.set(
+        txHash,
+        isFailedSponsoredBatch(receipt, account),
+      );
+    }
+    return failedSponsoredBatches.get(txHash);
+  };
+
   const fetchPendingTransactions = async ({
     pendingTransactions,
     key,
@@ -1055,9 +1077,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
 
   const retryFunc = (cb, defaultResponse) =>
     retryWithUrls(url => cb(createRpcProvider(url)), defaultResponse);
-
-  const rpcRequest = (method, params, defaultResponse) =>
-    retryWithUrls(url => fetchRPCRequest(url, method, params), defaultResponse);
 
   const createSendTransaction = async (wallet, tx) => {
     // Populate and sign ONCE so every RPC receives byte-identical raw bytes.
@@ -1823,6 +1842,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           address,
         });
         const removePendingTransactions = [];
+        const sponsoredBatchRows = [];
         if (Array.isArray(transactions?.data)) {
           const batchContractAddress =
             BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
@@ -1855,7 +1875,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             // chain is the relayer, not the account the funds left.
             const isSponsoredBatch =
               toAddress === normalizedAddress &&
-              isSponsoredBatchTransaction(item?.input);
+              isSponsoredBatchTransaction(item?.input, item?.from);
             const isBatch =
               (batchContractAddress &&
                 toAddress === batchContractAddress.toLowerCase()) ||
@@ -1866,7 +1886,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             const amount = isBatch
               ? decodeBatchTotalAmount(item?.input)
               : bnValue.toString();
-            return {
+            const row = {
               amount,
               link: txHash,
               url: getExplorerTxUrl(chain_name, txHash),
@@ -1879,7 +1899,19 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               blockNumber: item?.blockNumber ?? null,
               confirmations: item?.confirmations ?? null,
             };
+            if (isSponsoredBatch && row.status === 'SUCCESS') {
+              sponsoredBatchRows.push(row);
+            }
+            return row;
           });
+          // The explorer list carries no logs, so only sponsored rows read their receipt.
+          await Promise.all(
+            sponsoredBatchRows.map(async row => {
+              if (await isFailedSponsoredBatchTx(row.link, address)) {
+                row.status = 'FAIL';
+              }
+            }),
+          );
           if (removePendingTransactions.length) {
             const deletedPendingTransactions = pendingTransactionsHash.filter(
               item =>
@@ -1933,7 +1965,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
         const toAddr = tx.to?.toLowerCase();
         const fromAddr = tx.from?.toLowerCase();
-        const isSponsoredBatchTx = isSponsoredBatchTransaction(tx.data);
+        const isSponsoredBatchTx = isSponsoredBatchTransaction(
+          tx.data,
+          tx.from,
+        );
         const isBatchTx =
           (batchContractAddress &&
             toAddr === batchContractAddress.toLowerCase()) ||
@@ -1985,7 +2020,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             status:
               receipt === null
                 ? 'PENDING'
-                : receipt.status === 1
+                : receipt.status === 1 &&
+                  !(
+                    isSponsoredBatchTx && isFailedSponsoredBatch(receipt, tx.to)
+                  )
                 ? 'SUCCESS'
                 : 'FAILED',
           },
@@ -2519,7 +2557,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           undefined,
           customRpcUrl,
         ).getNonce({address: wallet.address});
-        const batchNonce = await getBatchContractNonce(wallet.address);
         const isDelegated = await delegatedToBatchContract(
           chain_name,
           customRpcUrl,
@@ -2527,7 +2564,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         );
         const provisionalSignature = await signBatchForSponsor(wallet, calls, {
           ...provisionalTerms,
-          batchNonce,
+          batchNonce: PROBE_BATCH_NONCE,
         });
         const probeCalldata = sponsoredExecuteInterface(
           provisionalTerms.opStack,
@@ -2542,17 +2579,35 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         const estimatedGas = await retryFunc(async evmProvider => {
           const {gasPrice: maxFeePerGas, maxPriorityFeePerGas} =
             await getEtherGasPrice('recommended', evmProvider);
-          return await evmProvider.estimateGas({
+          const probe = evmProvider.getRpcTransaction({
             from: provisionalTerms.sponsor,
             to: wallet.address,
             data: probeCalldata,
             value: 0n,
             maxFeePerGas,
             ...(maxPriorityFeePerGas ? {maxPriorityFeePerGas} : {}),
-            ...(quoteAuthorization
-              ? {type: 4, authorizationList: [quoteAuthorization]}
-              : {}),
           });
+          const probeOverride = {
+            [wallet.address]: {
+              ...(isDelegated
+                ? {}
+                : {
+                    code:
+                      EIP7702_DELEGATION_PREFIX +
+                      BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name].slice(2),
+                  }),
+              stateDiff: {
+                [BATCH_NONCE_SLOT]: ethers.toBeHex(PROBE_BATCH_NONCE, 32),
+              },
+            },
+          };
+          return BigInt(
+            await evmProvider.send('eth_estimateGas', [
+              probe,
+              'latest',
+              probeOverride,
+            ]),
+          );
         }, null);
         // retryFunc resolves null once every RPC has failed, and the worker
         // prices whatever we send, so bail rather than quote off nothing.
@@ -2640,6 +2695,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return signed.transactionHash;
       } catch (e) {
         console.error('Error in send sponsored batch transaction', e);
+        if (e?.isAxiosError && !e.response) {
+          const unknownError = new Error(
+            "We couldn't confirm the send. Check your transaction history before trying again.",
+          );
+          unknownError.code = SPONSOR_SUBMIT_UNKNOWN_CODE;
+          throw unknownError;
+        }
         const {code, error} = e?.response?.data ?? {};
         if (!error) {
           throw e;

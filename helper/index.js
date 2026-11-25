@@ -14,7 +14,6 @@ import {
 
 import bs58 from 'bs58';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
-import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
 import {
   decodeBatchExecuteCalls,
   decodeEvmCalldata,
@@ -360,6 +359,8 @@ export const isSwapBlockingError = message =>
   message === SWAP_QUOTE_EXPIRED_ERROR;
 
 export const SPONSOR_EMPTY_CODE = 'SPONSOR_EMPTY';
+// The worker may have broadcast before the reply was lost, so a retry could pay twice.
+export const SPONSOR_SUBMIT_UNKNOWN_CODE = 'SPONSOR_SUBMIT_UNKNOWN';
 
 const SPONSOR_QUOTE_CODES = ['QUOTE_USED', 'QUOTE_EXPIRED', 'TX_PENDING'];
 
@@ -1141,18 +1142,6 @@ export async function fetchRequest(url, options) {
     }
     throw e;
   }
-}
-
-export async function fetchRPCRequest(url, method, params) {
-  const data = await fetchRequest(url, {
-    method: 'post',
-    data: {jsonrpc: '2.0', id: 1, method, params},
-    adapter: rpcSessionAdapter,
-  });
-  if (data?.error) {
-    throw new Error(data.error?.message || 'RPC error');
-  }
-  return data?.result;
 }
 
 export const isNewerVersion = (v1, v2) => {

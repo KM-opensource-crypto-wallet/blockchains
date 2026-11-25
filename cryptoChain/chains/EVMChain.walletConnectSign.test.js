@@ -59,7 +59,7 @@ jest.mock('ethers', () => {
     }
   }
   return {
-    ethers: {Wallet},
+    ethers: {Wallet, getAddress: jest.requireActual('ethers').getAddress},
     FetchRequest,
     JsonRpcProvider,
     Transaction: {from: () => ({hash: '0x' + 'ab'.repeat(32)})},
@@ -243,6 +243,13 @@ describe('EVMChain WalletConnect signers', () => {
 
   describe('signTypedData (eth_signTypedData_v4)', () => {
     const KEY = '0x' + '11'.repeat(32);
+    const decimalWithLetter = address => {
+      const digits = BigInt(address).toString();
+      const [tens, ones] = digits.slice(-2);
+      return `${digits.slice(0, -2)}${Number(tens) - 1}${String.fromCharCode(
+        97 + Number(ones),
+      )}`;
+    };
     const typedData = verifyingContract =>
       JSON.stringify({
         types: {
@@ -260,6 +267,8 @@ describe('EVMChain WalletConnect signers', () => {
       ['upper case', '0x' + FROM.slice(2).toUpperCase()],
       ['zero-padded to 32 bytes', '0x' + FROM.slice(2).padStart(64, '0')],
       ['decimal', BigInt(FROM).toString()],
+      // eth-sig-util reads a letter as a base-10 digit, so this still encodes the signer.
+      ['decimal with a letter', decimalWithLetter(FROM)],
     ])(
       'refuses a domain bound to the signer account (%s)',
       async (_label, verifyingContract) => {

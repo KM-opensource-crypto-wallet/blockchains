@@ -298,7 +298,13 @@ export const calculateEstimateFee = createAsyncThunk(
         const balanceBN = new BigNumber(
           transfer?.currentCoin?.totalAmount || 0,
         );
-        if (isFeeTokenBeingSent && feeAmountBN.gte(balanceBN)) {
+        const exceedsBalance =
+          isFeeTokenBeingSent &&
+          transferAmountBN.plus(feeAmountBN).gt(balanceBN);
+        if (
+          (isFeeTokenBeingSent && feeAmountBN.gte(balanceBN)) ||
+          (exceedsBalance && payload?.isClampRequote)
+        ) {
           dispatch(
             setCurrentTransferCustomError(
               `Not enough ${transfer?.currentCoin?.symbol} to cover the network fee`,
@@ -307,19 +313,18 @@ export const calculateEstimateFee = createAsyncThunk(
           dispatch(setCurrentTransferSuccess(false));
           return null;
         }
-        if (
-          isFeeTokenBeingSent &&
-          transferAmountBN.plus(feeAmountBN).gt(balanceBN)
-        ) {
+        if (exceedsBalance) {
           dispatch(
             setCurrentTransferData({
               amount: balanceBN.minus(feeAmountBN).toString(),
               isMax: true,
             }),
           );
-        } else {
-          dispatch(setCurrentTransferData({isMax: false}));
+          return dispatch(
+            calculateEstimateFee({...payload, isClampRequote: true}),
+          ).unwrap();
         }
+        dispatch(setCurrentTransferData({isMax: !!payload?.isClampRequote}));
       } else if (isSwap) {
         // A swap spends exactly what the provider encoded in swapData, so the
         // max-amount clamp must not rewrite it — that would desync the amount we

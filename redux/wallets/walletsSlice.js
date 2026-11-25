@@ -81,6 +81,7 @@ import {
   isPlausibleTxHash,
   isSponsoredQuoteError,
   isSwapBlockingError,
+  SPONSOR_SUBMIT_UNKNOWN_CODE,
   SWAP_QUOTE_EXPIRED_ERROR,
   SOLANA_PREFLIGHT_REJECTED_PREFIX,
   MORALIS_CHAIN_TO_CHAIN,
@@ -1612,9 +1613,11 @@ export const sendFunds = createAsyncThunk(
         );
       }
 
-      const isSponsoredGas = !!(
-        transferData?.payGasWithToken && transferData?.sponsoredQuote
-      );
+      const isSponsoredGas =
+        !!transferData?.payGasWithToken &&
+        !!transferData?.sponsoredQuote?.fee?.token &&
+        transferData.sponsoredQuote.fee.token.toLowerCase() ===
+          transferData?.gasTokenContractAddress?.toLowerCase();
       // Never silently fall back to a native-gas send when the user asked to pay in their token
       if (transferData?.payGasWithToken && !isSponsoredGas) {
         throw new Error('Sponsored gas quote is not ready yet. Please retry.');
@@ -2065,7 +2068,12 @@ export const sendFunds = createAsyncThunk(
           extra: sendAttrs,
         });
       }
-      if (isSwapBlockingError(e?.message) || isSponsoredQuoteError(e?.code)) {
+      if (
+        e?.code === SPONSOR_SUBMIT_UNKNOWN_CODE ||
+        isSwapBlockingError(e?.message) ||
+        isSponsoredQuoteError(e?.code)
+      ) {
+        // A sponsored send with an unknown outcome leaves too, so the form can't resend it.
         // Expired quote caught before anything was signed/broadcast — same
         // handling on every chain: no failed-transaction record, back to the
         // Exchange screen for a fresh quote (the on-chain allowance persists,
