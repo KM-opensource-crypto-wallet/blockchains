@@ -1,5 +1,5 @@
 // CHANE BELOW FLAG TO false
-export const IS_SANDBOX = true;
+export const IS_SANDBOX = false;
 
 export const CHAIN_CONFIG = {
   ethereum: {
@@ -88,6 +88,7 @@ export const CHAIN_CONFIG = {
     },
     batch_contract: {
       sandbox: '0xcCa6c90e26e0C8050B7293413B623725b7eCA735',
+      production: '0x18057CE3aEF55c63cc7fd0500A4C09d1850B2c22',
     },
     old_batch_contract: {
       sandbox: '0x0E79A1C95Ac489634f9aCfc33C914663bBc9FC60',
@@ -263,6 +264,7 @@ export const CHAIN_CONFIG = {
     },
     batch_contract: {
       sandbox: '0xA88A9b313e6a2018b620348C58929C0c8E146A5E',
+      production: '0x827B180d43F58d481f01e0d77BcEE98b62B5Ac16',
     },
     logo: require('assets/chain_logo/base.png'),
     add_token: {
@@ -374,6 +376,7 @@ export const CHAIN_CONFIG = {
     },
     batch_contract: {
       sandbox: '0x5e6b29160937A1324d144715D1b8Ed55B75Bf276',
+      production: '0x8a553Ae55e699D63896686F0823104C19b021083',
     },
     logo: require('assets/chain_logo/arbitrum.png'),
     add_token: {
@@ -568,7 +571,6 @@ export const CHAIN_CONFIG = {
     },
     batch_contract: {
       sandbox: '0xe043382036673063D679CBcd8e002063B1E74394',
-      production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
 
     logo: require('assets/chain_logo/gnosis.png'),
@@ -893,7 +895,6 @@ export const CHAIN_CONFIG = {
     },
     batch_contract: {
       sandbox: '0x478B9e8E6b99b364c8535F3f8ED435d44DECAB9b',
-      production: '0xC6c4684b0e3D42D94c16cD5Cbeb6618d2202FB9D',
     },
     logo: require('assets/chain_logo/ink.png'),
     add_token: {
