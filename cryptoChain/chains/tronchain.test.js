@@ -344,6 +344,113 @@ describe('TronChain', () => {
     });
   });
 
+  describe('approve', () => {
+    // The swap waits for the approval to be in a block, like
+    // EVMChain.approve. trx.getTransactionInfo reads the solidity node, which
+    // answers only ~19 blocks (~57 s) later, after the 15 x 3 s polling window
+    // has run out (DOKWALLET-WALLET-WEB-1E).
+    beforeEach(() => {
+      jest.useFakeTimers();
+      tronWeb.trx.getTransactionInfo.mockResolvedValue({});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const approve = () =>
+      instance.approve({
+        spenderAddress: 'spender',
+        contractAddress: 'usdtContract',
+        amountInWei: '100',
+        allowance: '0',
+        from: 'from',
+        privateKey: 'privateKey',
+      });
+
+    // Lets the whole 15 x 3 s receipt window elapse.
+    const runPollingWindow = () => jest.advanceTimersByTimeAsync(15 * 3000);
+
+    it('confirms from the full node as soon as the approval is in a block', async () => {
+      tronWeb.trx.getUnconfirmedTransactionInfo = jest
+        .fn()
+        .mockResolvedValue({id: 'txid1', receipt: {result: 'SUCCESS'}});
+
+      const result = approve();
+      await runPollingWindow();
+
+      await expect(result).resolves.toMatchObject({
+        confirmTransaction: {result: true, txid: 'txid1'},
+      });
+    });
+
+    it('fails when the approval reverted on-chain', async () => {
+      tronWeb.trx.getUnconfirmedTransactionInfo = jest
+        .fn()
+        .mockResolvedValue({id: 'txid1', receipt: {result: 'OUT_OF_ENERGY'}});
+
+      const result = approve();
+      const settled = expect(result).rejects.toThrow(
+        'Tron approve failed: OUT_OF_ENERGY',
+      );
+      await runPollingWindow();
+      await settled;
+    });
+  });
+
+  describe('getEstimateFee', () => {
+    // Chain parameters in sun, as the node reports them.
+    const chainParameters = [
+      {key: 'getCreateAccountFee', value: 100000},
+      {key: 'getCreateNewAccountFeeInSystemContract', value: 1000000},
+      {key: 'getTransactionFee', value: 1000},
+      {key: 'getEnergyFee', value: 210},
+      {key: 'getMemoFee', value: 1000000},
+    ];
+    // Sender holds 25 TRX; the recipient has never been activated.
+    const SENDER_SUN = 25000000;
+
+    beforeEach(() => {
+      tronWeb.trx.getChainParameters = jest
+        .fn()
+        .mockResolvedValue(chainParameters);
+      tronWeb.trx.getAccount.mockImplementation(async address =>
+        address === 'to' ? {} : {balance: SENDER_SUN, create_time: 1},
+      );
+      TronWeb.fromSun = jest.fn(sun => String(Number(sun) / 1e6));
+    });
+    afterEach(() => {
+      delete TronWeb.fromSun;
+    });
+
+    const estimate = memo =>
+      instance.getEstimateFee({
+        fromAddress: 'from',
+        toAddress: 'to',
+        amount: '10',
+        privateKey: 'privateKey',
+        memo,
+      });
+
+    it('charges activation and account creation for a new recipient', async () => {
+      await expect(estimate()).resolves.toMatchObject({fee: '1.1'});
+    });
+
+    it('adds the memo fee for a new recipient too', async () => {
+      // 1 TRX activation + 0.1 TRX account creation + 1 TRX memo.
+      await expect(estimate('invoice 42')).resolves.toMatchObject({
+        fee: '2.1',
+      });
+    });
+
+    it("reports the sender's live liquid balance, so Max never uses a stale cached one", async () => {
+      // DOKWALLET-WALLET-WEB-1J: a TRC20 send burned TRX for energy, the
+      // cached TRX balance was read before that, and Max overshot.
+      await expect(estimate()).resolves.toMatchObject({
+        spendableBalance: '25',
+      });
+    });
+  });
+
   describe('waitForConfirmation', () => {
     it('resolves once TronScan reports SUCCESS', async () => {
       TronScan.getTransactionByHash.mockResolvedValue({data: 'SUCCESS'});

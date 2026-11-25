@@ -252,8 +252,14 @@ export const calculateEstimateFee = createAsyncThunk(
         const transferAmountBN = new BigNumber(transfer?.amount);
         const totalAmountBN = transferAmountBN.plus(feeAmountBN);
         const selectedUTXOsValue = transfer?.selectedUTXOsValue;
+        // A chain that reads the sender's balance while estimating (Tron)
+        // returns it: the cached coin balance can predate a fee the previous
+        // transaction burned, and Max would then overshoot
+        // (DOKWALLET-WALLET-WEB-1J).
         const balanceBN = new BigNumber(
-          selectedUTXOsValue || transfer?.currentCoin?.totalAmount,
+          selectedUTXOsValue ||
+            respData?.spendableBalance ||
+            transfer?.currentCoin?.totalAmount,
         );
         const initialAmountBN = new BigNumber(transfer?.initialAmount);
         if (

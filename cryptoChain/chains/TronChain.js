@@ -181,8 +181,12 @@ export const TronChain = () => {
   // Polls for the receipt of a broadcast transaction; transport errors keep
   // polling instead of aborting into any retry path. Stays on the premium
   // provider and only advances to the next one after a failed poll.
-  // getTransactionInfo returns {} until the tx is confirmed. Returns null
-  // when no receipt appeared within the window.
+  // Reads the full node (wallet/gettransactioninfobyid), which has the receipt
+  // once the tx is in a block (~3 s): the same single confirmation
+  // EVMChain.approve waits for. trx.getTransactionInfo reads the solidity
+  // node, ~19 blocks (~57 s) behind the head, so a 15 x 3 s window ran out on
+  // approvals that had already succeeded (DOKWALLET-WALLET-WEB-1E). Returns
+  // {} until the tx is in a block; null when no receipt appeared in time.
   const waitForTronReceipt = async (
     txid,
     {retries = 15, interval = 3000} = {},
@@ -193,7 +197,7 @@ export const TronChain = () => {
       await new Promise(resolve => setTimeout(resolve, interval));
       try {
         const tronWeb = withRpcSession(new TronWeb(providers[providerIndex]));
-        const info = await tronWeb.trx.getTransactionInfo(txid);
+        const info = await tronWeb.trx.getUnconfirmedTransactionInfo(txid);
         if (info?.receipt) {
           return info;
         }
@@ -222,6 +226,18 @@ export const TronChain = () => {
       return !(resp?.create_time || resp?.latest_opration_time);
     } catch (e) {
       return true;
+    }
+  };
+
+  // The sender's liquid TRX on chain now, in TRX (frozen/staked TRX excluded,
+  // as TransferContract excludes it). undefined when the node cannot say, so
+  // the caller keeps clamping to its cached balance.
+  const readSpendableBalance = async ({tronWeb, address}) => {
+    try {
+      const account = await getAccount({tronWeb, address});
+      return TronWeb.fromSun(String(account?.balance || 0));
+    } catch (e) {
+      return undefined;
     }
   };
 
@@ -673,6 +689,11 @@ export const TronChain = () => {
           if (isNewAccount) {
             totalFee += newAccountFee;
             totalFee += accountCreationFee;
+            // The memo fee applies whatever the recipient; leaving it out made
+            // Max overshoot when sending with a memo to a new account.
+            if (memo) {
+              totalFee += memoFee;
+            }
           } else {
             const {bandwidth: availableBandwidth} =
               await getAccountResourcesData(tronWeb, fromAddress);
@@ -697,6 +718,13 @@ export const TronChain = () => {
             fee: TronWeb.fromSun(totalFee?.toString()),
             gasFee: null,
             estimateGas: null,
+            // The cached coin balance can predate a fee the previous
+            // transaction burned (a TRC20 send's energy); Max is clamped to
+            // this instead (DOKWALLET-WALLET-WEB-1J).
+            spendableBalance: await readSpendableBalance({
+              tronWeb,
+              address: fromAddress,
+            }),
           };
         } catch (e) {
           console.error('Error in get estimate fee for tron', e);
