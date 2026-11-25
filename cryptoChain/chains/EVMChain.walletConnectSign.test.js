@@ -59,7 +59,7 @@ jest.mock('ethers', () => {
     }
   }
   return {
-    ethers: {Wallet},
+    ethers: {Wallet, getAddress: jest.requireActual('ethers').getAddress},
     FetchRequest,
     JsonRpcProvider,
     Transaction: {from: () => ({hash: '0x' + 'ab'.repeat(32)})},
@@ -238,6 +238,56 @@ describe('EVMChain WalletConnect signers', () => {
         privateKey: '0xkey',
       });
       expect(res).toBe(HASH);
+    });
+  });
+
+  describe('signTypedData (eth_signTypedData_v4)', () => {
+    const KEY = '0x' + '11'.repeat(32);
+    const decimalWithLetter = address => {
+      const digits = BigInt(address).toString();
+      const [tens, ones] = digits.slice(-2);
+      return `${digits.slice(0, -2)}${Number(tens) - 1}${String.fromCharCode(
+        97 + Number(ones),
+      )}`;
+    };
+    const typedData = verifyingContract =>
+      JSON.stringify({
+        types: {
+          EIP712Domain: [{name: 'verifyingContract', type: 'address'}],
+          Mail: [{name: 'body', type: 'string'}],
+        },
+        primaryType: 'Mail',
+        domain: {verifyingContract},
+        message: {body: 'hi'},
+      });
+
+    // The signer hashes all of these to the same address as the account itself.
+    it.each([
+      ['lowercase', FROM],
+      ['upper case', '0x' + FROM.slice(2).toUpperCase()],
+      ['zero-padded to 32 bytes', '0x' + FROM.slice(2).padStart(64, '0')],
+      ['decimal', BigInt(FROM).toString()],
+      // eth-sig-util reads a letter as a base-10 digit, so this still encodes the signer.
+      ['decimal with a letter', decimalWithLetter(FROM)],
+    ])(
+      'refuses a domain bound to the signer account (%s)',
+      async (_label, verifyingContract) => {
+        await expect(
+          loadChain().signTypedData({
+            privateKey: KEY,
+            signTypeData: typedData(verifyingContract),
+          }),
+        ).rejects.toBe('Refusing to sign this request');
+      },
+    );
+
+    it('signs a domain bound to another contract', async () => {
+      await expect(
+        loadChain().signTypedData({
+          privateKey: KEY,
+          signTypeData: typedData(TO),
+        }),
+      ).resolves.toBeUndefined();
     });
   });
 });

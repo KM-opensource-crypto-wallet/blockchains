@@ -11,9 +11,15 @@ import {removeWalletConnectSession} from 'dok-wallet-blockchain-networks/redux/w
 import {selectCustomRpcUrlByChainAndWallet} from 'dok-wallet-blockchain-networks/redux/customRpc/customRpcSelectors';
 import {getSdkError} from '@walletconnect/utils';
 import {
+  CHAIN_CONFIG,
   config,
   isSupportedWalletConnectMethod,
 } from 'dok-wallet-blockchain-networks/config/config';
+import {
+  buildWalletSendCallsBatch,
+  parseEip155ChainId,
+  UNSUPPORTED_CHAIN,
+} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {
   answerAddEthereumChain,
   answerSwitchEthereumChain,
@@ -108,23 +114,40 @@ export const getWalletConnect = () => {
   return walletConnect;
 };
 
-// Batch sending is paused (wallet_sendCalls is not accepted, see
-// WALLET_CONNECT_SPECIAL_METHODS), so no chain claims atomic batching.
-const supportsAtomicBatch = () => false;
 // wallet_sendCalls (EIP-5792) is only atomic where a batch contract is
 // deployed. Both environments' chain ids are listed; the session itself only
 // ever contains the current environment's chains.
-// const BATCH_CAPABLE_CHAIN_IDS = new Set(
-//   Object.values(CHAIN_CONFIG)
-//     .filter(cfg => cfg.batch_contract && cfg.chain_id)
-//     .flatMap(cfg =>
-//       ['sandbox', 'production']
-//         .filter(env => cfg.batch_contract[env] && cfg.chain_id[env])
-//         .map(env => Number(cfg.chain_id[env])),
-//     ),
-// );
-// const supportsAtomicBatch = hexChainId =>
-//   BATCH_CAPABLE_CHAIN_IDS.has(Number.parseInt(hexChainId, 16));
+const BATCH_CAPABLE_CHAIN_IDS = new Set(
+  Object.values(CHAIN_CONFIG)
+    .filter(cfg => cfg.batch_contract && cfg.chain_id)
+    .flatMap(cfg =>
+      ['sandbox', 'production']
+        .filter(env => cfg.batch_contract[env] && cfg.chain_id[env])
+        .map(env => Number(cfg.chain_id[env])),
+    ),
+);
+// Accepts a hex chain id (wallet_getCapabilities) or a CAIP-2 id.
+const supportsAtomicBatch = chainId =>
+  BATCH_CAPABLE_CHAIN_IDS.has(parseEip155ChainId(chainId));
+
+// EIP-5792 error to answer before any UI, or null when the batch can be shown.
+const getSendCallsError = (sessionData, params) => {
+  if (!supportsAtomicBatch(params?.chainId)) {
+    return {code: UNSUPPORTED_CHAIN, message: 'Unsupported chain id'};
+  }
+  const account = sessionData?.namespaces?.eip155?.accounts
+    ?.find(item => item.startsWith(`${params.chainId}:`))
+    ?.split(':')[2];
+  try {
+    buildWalletSendCallsBatch(params.request?.params?.[0], {
+      chainId: params.chainId,
+      account,
+    });
+    return null;
+  } catch (e) {
+    return {code: e.code ?? -32602, message: e.message};
+  }
+};
 
 // Read-only methods the handler answers itself. If one of them throws, nobody
 // else will ever reply, so the dApp would wait for the relay timeout.
@@ -272,6 +295,11 @@ export const subscribeWalletConnectEvent = () => {
         });
       }
 
+      const sendCallsError =
+        request?.method === 'wallet_sendCalls'
+          ? getSendCallsError(requestSessionData, params)
+          : null;
+
       // Reject methods this wallet cannot answer before any UI opens.
       // JSON-RPC -32601 ("Method not found") is what the WalletKit docs use
       // for unsupported session_request methods.
@@ -364,6 +392,17 @@ export const subscribeWalletConnectEvent = () => {
         await walletConnect.respondSessionRequest({
           topic,
           response: {id, jsonrpc: '2.0', result},
+        });
+      } else if (sendCallsError) {
+        logWalletConnectEvent('warn', 'session_request.send_calls_rejected', {
+          chainId: params?.chainId,
+          topic,
+          requestId: id,
+          code: sendCallsError.code,
+        });
+        await walletConnect.respondSessionRequest({
+          topic,
+          response: {id, jsonrpc: '2.0', error: sendCallsError},
         });
       } else if (
         store.getState()?.walletConnect?.transactionRequestData?.id === id
