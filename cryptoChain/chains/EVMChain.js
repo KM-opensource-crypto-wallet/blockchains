@@ -337,29 +337,46 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       chainId,
     });
     batchExecuteInterface ??= new ethers.Interface(contractABI);
-    const gas = await evmProvider.send('eth_estimateGas', [
-      {
-        type: '0x4',
-        from,
-        to: from,
-        data: batchExecuteInterface.encodeFunctionData('execute', [calls]),
-        authorizationList: [
-          {
-            chainId: ethers.toQuantity(chainId),
-            address: batchContract,
-            nonce: '0x0',
-            yParity: ethers.toQuantity(signature.yParity),
-            r: signature.r,
-            s: signature.s,
-          },
-        ],
-      },
-      'latest',
-      {
-        [from]: {code: EIP7702_DELEGATION_PREFIX + batchContract.slice(2)},
-        [throwaway.address]: {balance: '0x1'},
-      },
+    const request = {
+      from,
+      to: from,
+      data: batchExecuteInterface.encodeFunctionData('execute', [calls]),
+    };
+    const overrides = {
+      [from]: {code: EIP7702_DELEGATION_PREFIX + batchContract.slice(2)},
+      [throwaway.address]: {balance: '0x1'},
+    };
+    const [gas, gasWithoutAuthorization] = await Promise.all([
+      evmProvider.send('eth_estimateGas', [
+        {
+          type: '0x4',
+          ...request,
+          authorizationList: [
+            {
+              chainId: ethers.toQuantity(chainId),
+              address: batchContract,
+              nonce: '0x0',
+              yParity: ethers.toQuantity(signature.yParity),
+              r: signature.r,
+              s: signature.s,
+            },
+          ],
+        },
+        'latest',
+        overrides,
+      ]),
+      evmProvider.send('eth_estimateGas', [request, 'latest', overrides]),
     ]);
+    // Some nodes (eth.drpc.org) drop authorizationList and answer the
+    // execution cost alone, ~25k gas short, so the batch runs out of gas on
+    // chain. An authorization always costs gas: an estimate no higher than
+    // the one without it was not priced. Throwing moves retryFunc on to the
+    // next RPC.
+    if (BigInt(gas) <= BigInt(gasWithoutAuthorization)) {
+      throw new Error(
+        'The network node did not price the batch authorization. Please try again.',
+      );
+    }
     return BigInt(gas);
   }
 

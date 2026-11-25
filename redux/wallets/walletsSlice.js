@@ -1955,7 +1955,22 @@ export const sendFunds = createAsyncThunk(
             },
           });
         }
-        refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        // A batch's currentCoin is coinInfo, a slim snapshot of the first
+        // item's coin (no deriveAddresses, add-time address).
+        // refreshCurrentCoin replaces the wallet coin with a snapshot built
+        // from what it is given, so refresh the live coin instead.
+        if (txData?.isBatchTransaction) {
+          const liveCoin = selectCurrentWallet(
+            thunkAPI.getState(),
+          )?.coins?.find(item => item?._id === currentCoin?._id);
+          if (liveCoin) {
+            refreshCoinData(thunkAPI.dispatch, liveCoin, tx_hash);
+          } else {
+            thunkAPI.dispatch(refreshCoins());
+          }
+        } else {
+          refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        }
         const isDropped = confirmTransaction?.status === 'dropped';
         const status =
           confirmTransaction === 'pending'

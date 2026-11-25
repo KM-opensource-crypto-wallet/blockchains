@@ -236,6 +236,51 @@ describe('EVMChain EIP-7702 authorizations', () => {
     ]);
   });
 
+  // eth.drpc.org drops authorizationList and answers the execution cost
+  // alone, so mainnet batch 0x8bc3b0d1… was sent ~25k gas short and ran out
+  // of gas.
+  it('refuses an estimate from a node that ignores the authorization', async () => {
+    provider.send = jest.fn(async () => '0x10d0e');
+
+    await expect(
+      loadChain('ethereum').getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      }),
+    ).rejects.toThrow(/did not price the batch authorization/);
+    expect(provider.send).toHaveBeenCalledWith('eth_estimateGas', [
+      {from: FROM, to: FROM, data: '0xexecute:1'},
+      'latest',
+      {
+        [FROM]: {code: '0xef0100' + BATCH.slice(2)},
+        [THROWAWAY]: {balance: '0x1'},
+      },
+    ]);
+  });
+
+  it('keeps an estimate that prices the authorization', async () => {
+    provider.send = jest.fn(async (method, [tx]) =>
+      tx.authorizationList ? '0x16e5a' : '0x10d0e',
+    );
+
+    const error = await loadChain('ethereum')
+      .getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      })
+      .then(
+        () => null,
+        e => e,
+      );
+
+    // Fee calculation is not stubbed, so it may still fail after the estimate.
+    expect(error?.message ?? '').not.toMatch(
+      /did not price the batch authorization/,
+    );
+  });
+
   it('refuses a batch over the contract limit before any RPC call', async () => {
     await expect(
       loadChain('ethereum').getEstimateFeeForBatchTransaction({
