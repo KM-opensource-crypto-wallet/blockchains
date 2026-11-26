@@ -19,6 +19,11 @@ import {
 import {getPrice} from 'dok-wallet-blockchain-networks/service/coinMarketCap';
 import {recordSentAddress} from 'dok-wallet-blockchain-networks/redux/sentAddressHistory/sentAddressHistorySlice';
 import {
+  countContractRepairs,
+  isStaleBeforeRepair,
+  repairWalletsContracts,
+} from 'dok-wallet-blockchain-networks/helper/contractRepairs';
+import {
   fetchCoinByChainAPI,
   fetchCurrenciesAPI,
   registerUserAPI,
@@ -34,6 +39,7 @@ import {
   getSingleTransaction,
 } from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {
+  canDeriveAddresses,
   getMasterClientId,
   getSelectedNftData,
   isWalletHiddenAndLocked,
@@ -768,6 +774,30 @@ export const revokeDelegation = createAsyncThunk(
 const BATCH_DELEGATION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const lastBatchDelegationCheck = {};
 
+// Fixes coins that stored a contract address from the tampered catalog
+// (helper/contractRepairs.js). Runs after every unlock in both apps; does
+// nothing once repaired. Scheduled payments follow through their slice's
+// extraReducer on repairKnownBadContracts. Logs counts only, no addresses.
+export const repairWalletContracts = () => (dispatch, getState) => {
+  const state = getState();
+  const counts = countContractRepairs(
+    state?.wallets?.allWallets,
+    state?.schedulePayment?.scheduledPayments,
+  );
+  if (!counts.total) {
+    return 0;
+  }
+  dispatch(walletsSlice.actions.repairKnownBadContracts());
+  logger.info('wallet.contract_repair', {
+    coins: counts.coinTotal,
+    scheduled_payments: counts.scheduled,
+    tokens: Object.entries(counts.coins)
+      .map(([key, count]) => `${key}:${count}`)
+      .join(','),
+  });
+  return counts.total;
+};
+
 export const checkBatchDelegation = createAsyncThunk(
   'wallets/checkBatchDelegation',
   async ({force} = {}, thunkAPI) => {
@@ -1191,17 +1221,53 @@ export const walletConnect = createAsyncThunk(
     } = require('dok-wallet-blockchain-networks/service/walletconnect');
     const connector = getWalletConnect();
     let toastId;
+    // A failed error reply (relay down, request already gone) is logged, not
+    // thrown: it must not replace the failure the user is about to be shown.
     const respondWithError = async error => {
-      await connector?.respondSessionRequest({
-        topic,
-        response: {id, jsonrpc: '2.0', error},
-      });
+      try {
+        await connector?.respondSessionRequest({
+          topic,
+          response: {id, jsonrpc: '2.0', error},
+        });
+      } catch (replyError) {
+        logger.warn('walletconnect.error_reply_failed', {
+          method,
+          chain_name,
+          reason: replyError?.message,
+        });
+      }
     };
     // Whatever happens below, the pending request has been answered (or will
     // be by the error paths), so drop it; scoped by id so it cannot wipe a
     // request that arrived later.
     const clearPending = () =>
       thunkAPI.dispatch(clearWalletConnectTransactionData({id}));
+
+    // A request the dApp has stopped waiting for cannot be answered, and
+    // acting on it anyway would sign or send without the dApp ever learning
+    // the result (DOKWALLET-WALLET-WEB-1T, approved nine minutes after it
+    // arrived). Checked before reviewing anything, and again right before
+    // signing or broadcasting, since loading the coin and estimating fees can
+    // outlast the expiry. The message replaces the progress toast, if shown.
+    const rejectAsExpired = () => {
+      logger.warn('walletconnect.request_expired', {
+        method,
+        chain_name,
+        requestId: id,
+      });
+      showToast({
+        type: 'errorToast',
+        title: 'Request expired',
+        message:
+          'The dApp stopped waiting for this request. Ask it to send the request again.',
+        toastId,
+      });
+      clearPending();
+      return thunkAPI.rejectWithValue('request_expired');
+    };
+    if (isWalletConnectRequestExpired(connector, id)) {
+      return rejectAsExpired();
+    }
 
     // KIML-002: an EVM transaction or batch approval is bound to the request
     // the user reviewed. Rebuild the canonical tx from the store's pending
@@ -1274,14 +1340,7 @@ export const walletConnect = createAsyncThunk(
         title: 'Wrong account',
         message,
       });
-      await connector?.respondSessionRequest({
-        topic,
-        response: {
-          id,
-          jsonrpc: '2.0',
-          error: {code: 5000, message},
-        },
-      });
+      await respondWithError({code: 5000, message});
       clearPending();
       return thunkAPI.rejectWithValue(message);
     }
@@ -1374,6 +1433,9 @@ export const walletConnect = createAsyncThunk(
             privateKey,
             isFetchNonce: true,
           });
+        if (isWalletConnectRequestExpired(connector, id)) {
+          return rejectAsExpired();
+        }
         const res = await nativeCoin.chain.sendBatchTransaction({
           calls,
           privateKey,
@@ -1398,6 +1460,9 @@ export const walletConnect = createAsyncThunk(
         if (typeof executor?.[wcMethod] !== 'function') {
           throw new Error(`Unsupported WalletConnect method: ${method}`);
         }
+        if (isWalletConnectRequestExpired(connector, id)) {
+          return rejectAsExpired();
+        }
         tx = await executor[wcMethod]({
           payload: canonicalTx
             ? {...payload, transactionData: canonicalTx}
@@ -1421,27 +1486,54 @@ export const walletConnect = createAsyncThunk(
             walletClientId: currentWallet?.clientId,
           });
         }
-        await connector?.respondSessionRequest({
-          topic,
-          response: {id, result: tx, jsonrpc: '2.0'},
-        });
-        let successTitle = 'Transaction submitted';
-        let successMessage = 'Your transaction was sent successfully';
-        if (batchConfirmation === 'pending') {
-          successTitle = 'Transaction pending';
-          successMessage =
-            'Transaction is taking longer than expected. Please check again later.';
-        } else if (isSigningOnly) {
-          successTitle = 'Signed';
-          successMessage = 'The signature was returned to the dApp';
+        let resultDelivered = true;
+        try {
+          await connector?.respondSessionRequest({
+            topic,
+            response: {id, result: tx, jsonrpc: '2.0'},
+          });
+        } catch (replyError) {
+          // What was signed or sent is already out. Falling through to the
+          // "Transaction failed" path here would invite a second send; the
+          // dApp only missed the result (typically: the request expired
+          // while it was being signed).
+          resultDelivered = false;
+          logger.warn('walletconnect.result_reply_failed', {
+            method,
+            chain_name,
+            reason: replyError?.message,
+          });
         }
-        showToast({
-          type:
-            batchConfirmation === 'pending' ? 'warningToast' : 'successToast',
-          title: successTitle,
-          message: successMessage,
-          toastId,
-        });
+        if (!resultDelivered) {
+          showToast({
+            type: 'warningToast',
+            title: isSigningOnly
+              ? 'Signature not delivered'
+              : 'Transaction sent',
+            message: isSigningOnly
+              ? 'The dApp did not receive the signature. Ask it to send the request again.'
+              : 'The dApp did not receive the result. Check the explorer before trying again.',
+            toastId,
+          });
+        } else {
+          let successTitle = 'Transaction submitted';
+          let successMessage = 'Your transaction was sent successfully';
+          if (batchConfirmation === 'pending') {
+            successTitle = 'Transaction pending';
+            successMessage =
+              'Transaction is taking longer than expected. Please check again later.';
+          } else if (isSigningOnly) {
+            successTitle = 'Signed';
+            successMessage = 'The signature was returned to the dApp';
+          }
+          showToast({
+            type:
+              batchConfirmation === 'pending' ? 'warningToast' : 'successToast',
+            title: successTitle,
+            message: successMessage,
+            toastId,
+          });
+        }
         if (isBatch || wcMethod === 'sendRawTransaction') {
           // Only an EVM hash string is a usable transaction id for the coin's
           // own history lookup; other chains return protocol-specific objects.
@@ -1489,6 +1581,30 @@ export const walletConnect = createAsyncThunk(
     }
   },
 );
+
+// A WalletConnect request the dApp has given up on: WalletKit no longer lists
+// it, or it is past its expiryTimestamp (seconds). WalletKit's expirer only
+// runs while the relay is connected, so after the page was offline or
+// backgrounded an expired request can still be listed. When the connector
+// cannot tell (no listing API, or the listing throws), the request is treated
+// as live, which is what the thunk always did.
+const isWalletConnectRequestExpired = (connector, id) => {
+  let pending;
+  try {
+    pending = connector?.getPendingSessionRequests?.();
+  } catch (e) {
+    return false;
+  }
+  if (!Array.isArray(pending)) {
+    return false;
+  }
+  const record = pending.find(item => String(item?.id) === String(id));
+  if (!record) {
+    return true;
+  }
+  const expiry = Number(record?.params?.request?.expiryTimestamp);
+  return Number.isFinite(expiry) && expiry * 1000 <= Date.now();
+};
 
 // Attributes describing a send for logs/issues. Deliberately excludes
 // addresses and amounts, which together with user.id would be identifying.
@@ -2446,18 +2562,37 @@ export const addEVMAndTronDeriveAddresses = createAsyncThunk(
   async (payload, thunkAPI) => {
     const dispatch = thunkAPI.dispatch;
     let toastId;
+    let currentWalletClientId;
+    let previousSwitchValue;
     try {
       dispatch(setIsAddMoreAddressPopupHidden(true));
       const currentState = thunkAPI.getState();
-      const currentWalletClientId =
+      currentWalletClientId =
         payload?.clientId ?? selectCurrentWalletClientId(currentState);
+      const wallet = payload?.wallet || selectCurrentWallet(currentState);
+      if (!canDeriveAddresses(wallet)) {
+        // Nothing to derive from: the derive workers would get `undefined`
+        // for the phrase and throw (DOKWALLET-WALLET-WEB-1R).
+        showToast({
+          type: 'errorToast',
+          title: 'Not available for this wallet',
+          message:
+            'Extra addresses can only be added to wallets created from a recovery phrase.',
+          autoHide: true,
+        });
+        return thunkAPI.rejectWithValue('no_phrase');
+      }
+      previousSwitchValue = Boolean(
+        selectAllWallets(currentState)?.find(
+          item => item?.clientId === currentWalletClientId,
+        )?.isEVMAddressesAdded,
+      );
       dispatch(
         updateIsEVMAddressesAdded({
           clientId: currentWalletClientId,
           value: true,
         }),
       );
-      const wallet = payload?.wallet || selectCurrentWallet(currentState);
       toastId = showToast({
         type: 'progressToast',
         title: `Adding to the ${wallet.walletName}`,
@@ -2482,6 +2617,21 @@ export const addEVMAndTronDeriveAddresses = createAsyncThunk(
         solanaDeriveAddresses: solanaAddresses?.deriveAddresses || null,
       };
     } catch (e) {
+      // Nothing was added: put the switch back the way it was. Guarded,
+      // because the reducer throws for a wallet that has gone and that must
+      // not swallow the error toast.
+      if (previousSwitchValue !== undefined) {
+        try {
+          dispatch(
+            updateIsEVMAddressesAdded({
+              clientId: currentWalletClientId,
+              value: previousSwitchValue,
+            }),
+          );
+        } catch (restoreError) {
+          console.error('Error restoring isEVMAddressesAdded', restoreError);
+        }
+      }
       showToast({
         type: 'errorToast',
         title: 'Something Went wrong',
@@ -2794,6 +2944,9 @@ export const walletsSlice = createSlice({
         throw e;
       }
       currentWallet.selectedCoin = id;
+    },
+    repairKnownBadContracts: state => {
+      repairWalletsContracts(state.allWallets);
     },
     updateContractAddress: (state, action) => {
       const payload = action?.payload;
@@ -3617,14 +3770,24 @@ export const walletsSlice = createSlice({
       }
       const currentWallet = getWalletByClientId(state, clientId);
       if (Array.isArray(coinData) && currentWallet) {
-        currentWallet.coins = coinData;
+        // A refresh that started before repairKnownBadContracts (e.g. an
+        // interval running behind the lock screen) returns snapshots with the
+        // bad contract; keep the repaired coin instead of undoing the repair.
+        const storedById = new Map(
+          (currentWallet.coins || []).map(coin => [coin?._id, coin]),
+        );
+        const coins = coinData.map(coin => {
+          const stored = storedById.get(coin?._id);
+          return isStaleBeforeRepair(coin, stored) ? stored : coin;
+        });
+        currentWallet.coins = coins;
         currentWallet.chain_existing_coin = extractChainExistingCoins(
           currentWallet.chain_existing_coin,
-          coinData,
+          coins,
         );
         // extractChainExistingCoins never overwrites an entry; mirror the
         // Hedera legacy-address migration and the later-assigned account id.
-        const hederaCoin = coinData.find(
+        const hederaCoin = coins.find(
           item => item?.chain_name === 'hedera' && item?.type === 'coin',
         );
         const hederaExisting = currentWallet.chain_existing_coin?.hedera;
@@ -3680,7 +3843,11 @@ export const walletsSlice = createSlice({
           item => item?._id === updatedCurrentCoin?._id,
         );
         if (foundIndex !== -1) {
-          allCoins[foundIndex] = updatedCurrentCoin;
+          // Same guard as refreshCoins.fulfilled: a snapshot taken before the
+          // coin's contract was repaired must not overwrite the repaired coin.
+          if (!isStaleBeforeRepair(updatedCurrentCoin, allCoins[foundIndex])) {
+            allCoins[foundIndex] = updatedCurrentCoin;
+          }
           if (updatedNativeCoin) {
             const foundNativeCoinIndex = allCoins.findIndex(
               item => item?._id === updatedNativeCoin?._id,
@@ -4013,6 +4180,7 @@ export const {
   deleteMultipleDeriveAddressesInCurrentCoin,
   setSelectedDeriveAddress,
   updateContractAddress,
+  repairKnownBadContracts,
   setWalletPosition,
   rearrangeWallet,
   addPendingTransactions,

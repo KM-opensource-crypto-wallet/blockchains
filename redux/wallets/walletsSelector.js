@@ -29,6 +29,16 @@ export const selectVisibleWallets = createSelector(
     (allWallets || []).filter(wallet => !isWalletHiddenAndLocked(wallet)),
 );
 
+// Extra EVM/Tron/Solana addresses are derived from the recovery phrase, so a
+// wallet imported with a private key has none to offer.
+export const canDeriveAddresses = wallet =>
+  Boolean(wallet?.phrase) && !wallet?.isImportWalletWithPrivateKey;
+
+export const selectDerivableWallets = createSelector(
+  [selectVisibleWallets],
+  visibleWallets => visibleWallets.filter(canDeriveAddresses),
+);
+
 export const selectAllWalletName = createSelector(
   [selectAllWallets],
   allWallets => allWallets.map(item => item?.walletName),

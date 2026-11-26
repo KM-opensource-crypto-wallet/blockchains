@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import {combineReducers, configureStore} from '@reduxjs/toolkit';
 import {
   walletsSlice,
+  repairKnownBadContracts,
   resetWallet,
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {
@@ -65,7 +66,7 @@ const WALLET = {
   coins: [],
 };
 
-const makeStore = () =>
+const makeStore = (wallet = WALLET) =>
   configureStore({
     reducer: combineReducers({
       wallets: walletsSlice.reducer,
@@ -73,7 +74,7 @@ const makeStore = () =>
       customRpc: (state = {customRpcList: {}}) => state,
     }),
     preloadedState: {
-      wallets: {allWallets: [WALLET], currentWalletClientId: WALLET.clientId},
+      wallets: {allWallets: [wallet], currentWalletClientId: wallet.clientId},
     },
     middleware: getDefaultMiddleware =>
       getDefaultMiddleware({serializableCheck: false, immutableCheck: false}),
@@ -137,6 +138,43 @@ describe('submitScheduledPayment', () => {
       pendingSubmitCount: 0,
     });
     expect(reconcileScheduledPaymentNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores the contract the coin has after a repair that ran mid-submit', async () => {
+    const BAD = '0x1796F4516d6e70bfCC8CEF9d40251F590ff4810b';
+    const USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    const usdtWallet = {
+      ...WALLET,
+      selectedCoin: 'usdt',
+      coins: [
+        {
+          _id: 'usdt',
+          type: 'token',
+          chain_name: 'ethereum',
+          symbol: 'USDT',
+          decimal: 6,
+          contractAddress: BAD,
+          address: '0xsender',
+        },
+      ],
+    };
+    const gate = deferred();
+    resolveRecipientAddress.mockReturnValue(gate.promise);
+    const store = makeStore(usdtWallet);
+
+    const pending = store.dispatch(submitScheduledPayment({values}));
+    // An unlock repairs the coin while the submit is still awaiting.
+    store.dispatch(repairKnownBadContracts());
+    gate.resolve({resolvedAddress: 'recipient'});
+    const result = await pending;
+
+    expect(result.type).toBe(submitScheduledPayment.fulfilled.type);
+    const [payment] = store.getState().schedulePayment.scheduledPayments.c1;
+    expect(payment.asset).toEqual({
+      symbol: 'USDT',
+      contractAddress: USDT,
+      decimals: 6,
+    });
   });
 });
 
