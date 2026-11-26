@@ -8,11 +8,16 @@ import {
   SCAN_URL,
   IS_SANDBOX,
   CHAIN_CONFIG,
+  BATCH_TRANSACTION_CONTRACT_ADDRESS,
 } from 'dok-wallet-blockchain-networks/config/config';
 
 import bs58 from 'bs58';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
 import {rpcSessionAdapter} from 'dok-wallet-blockchain-networks/rpcUrls/rpcSession';
+import {
+  decodeBatchExecuteCalls,
+  decodeEvmCalldata,
+} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
 import axios from 'axios';
 dayjs.extend(duration);
 
@@ -382,6 +387,36 @@ export const isUnclaimDepositSupportedChain = chain_name =>
 
 export const isEip7702SupportedChain = chain_name =>
   EIP_7702_SUPPORTED_CHAIN.includes(chain_name);
+
+export const isBatchSupportedChain = chain_name =>
+  !!BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+
+// Rows for a batch read back from the chain, which has no transactionsData.
+export const getBatchTransferItems = (input, {coins = [], nativeSymbol}) =>
+  decodeBatchExecuteCalls(input).map(call => {
+    const decoded = decodeEvmCalldata(call.data);
+    const token =
+      decoded.method === 'transfer' &&
+      coins.find(
+        coin => coin?.contractAddress?.toLowerCase() === call.to.toLowerCase(),
+      );
+    if (token) {
+      return {
+        coinInfo: token,
+        transferData: {
+          amount: parseBalance(decoded.args._value, token.decimal),
+          to: decoded.args._to,
+        },
+      };
+    }
+    return {
+      coinInfo: {
+        name: decoded.kind === 'decoded' ? decoded.method : undefined,
+        symbol: nativeSymbol,
+      },
+      transferData: {amount: parseBalance(call.value, 18), to: call.to},
+    };
+  });
 
 export const isOptionGasFeesChain = chain_name =>
   OPTIONS_GAS_FEES_CHAIN.includes(chain_name);

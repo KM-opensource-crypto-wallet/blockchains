@@ -5,6 +5,7 @@ import {
 } from 'dok-wallet-blockchain-networks/redux/wallets/walletsSlice';
 import {walletConnectSlice} from 'dok-wallet-blockchain-networks/redux/walletConnect/walletConnectSlice';
 import {getCoin} from 'dok-wallet-blockchain-networks/cryptoChain';
+import {reviewWalletSendCalls} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {getWalletConnect} from 'dok-wallet-blockchain-networks/service/walletconnect';
 import {showToast} from 'utils/toast';
 
@@ -84,7 +85,14 @@ const pendingRecord = expiryTimestamp => ({
 const executor = {signRawTransaction: jest.fn(async () => 'signed-tx')};
 let connector;
 
-const makeStore = () =>
+const makeStore = (
+  transactionRequestData = {
+    id: REQUEST_ID,
+    topic: TOPIC,
+    chainId: CHAIN,
+    method: 'solana_signTransaction',
+  },
+) =>
   configureStore({
     reducer: {
       wallets: walletsSlice.reducer,
@@ -98,12 +106,7 @@ const makeStore = () =>
       },
       walletConnect: {
         ...walletConnectSlice.getInitialState(),
-        transactionRequestData: {
-          id: REQUEST_ID,
-          topic: TOPIC,
-          chainId: CHAIN,
-          method: 'solana_signTransaction',
-        },
+        transactionRequestData,
       },
     },
     middleware: getDefaultMiddleware =>
@@ -222,27 +225,44 @@ describe('walletConnect thunk: request liveness', () => {
       chain: batchChain,
       waitForConfirmation: jest.fn(),
     });
-    const store = makeStore();
+    // A batch is only sent once it matches the request the user reviewed
+    // (KIML-002), so the store holds the pending wallet_sendCalls and the
+    // payload carries the modal's digest of it.
+    const batchChainId = 'eip155:1';
+    const batchParams0 = {
+      chainId: '0x1',
+      from: EVM_ADDRESS,
+      calls: [
+        {
+          to: '0x1111111111111111111111111111111111111111',
+          value: '0x0',
+          data: '0x',
+        },
+      ],
+    };
+    const store = makeStore({
+      id: REQUEST_ID,
+      topic: TOPIC,
+      chainId: batchChainId,
+      method: 'wallet_sendCalls',
+      params: [batchParams0],
+    });
 
     const action = await store.dispatch(
       walletConnect({
         chain_name: 'ethereum',
-        chainId: 'eip155:1',
+        chainId: batchChainId,
         id: REQUEST_ID,
         topic: TOPIC,
         method: 'wallet_sendCalls',
         walletAddress: EVM_ADDRESS,
         privateKey: 'key',
         domain: 'https://dapp.test',
-        transactionData: {
-          batchCalls: [
-            {
-              to: '0x1111111111111111111111111111111111111111',
-              value: '0x0',
-              data: '0x',
-            },
-          ],
-        },
+        reviewedTxDigest: reviewWalletSendCalls(batchParams0, {
+          chainId: batchChainId,
+          account: EVM_ADDRESS,
+        }).digest,
+        reviewedRequestId: REQUEST_ID,
       }),
     );
 

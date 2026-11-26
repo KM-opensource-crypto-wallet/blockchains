@@ -95,7 +95,9 @@ import {
 } from 'dok-wallet-blockchain-networks/helper/walletConnectCoin';
 import {
   buildEvmWalletConnectTx,
+  buildWalletSendCallsBatch,
   getEvmWalletConnectTxDigest,
+  getWalletSendCallsDigest,
 } from 'dok-wallet-blockchain-networks/helper/evmTxReview';
 import {
   EVM_MESSAGE_SIGN_METHODS,
@@ -108,7 +110,7 @@ import {
 } from 'dok-wallet-blockchain-networks/service/moralis';
 import {
   BATCH_DELEGATION_NOTICE_ADDRESSES,
-  BATCH_TRANSACTION_CONTRACT_ADDRESS,
+  OLD_BATCH_CONTRACT_ADDRESS,
   config,
   WalletConnectMethods,
 } from 'dok-wallet-blockchain-networks/config/config';
@@ -849,7 +851,7 @@ export const checkBatchDelegation = createAsyncThunk(
       delete lastBatchDelegationCheck[throttleKey];
       return null;
     }
-    const ours = BATCH_TRANSACTION_CONTRACT_ADDRESS.ethereum?.toLowerCase();
+    const ours = OLD_BATCH_CONTRACT_ADDRESS.ethereum?.toLowerCase();
     if (
       !delegation.isDelegated ||
       delegation.contractAddress?.toLowerCase() !== ours
@@ -1207,7 +1209,6 @@ export const walletConnect = createAsyncThunk(
       method,
       signTypeData,
       topic,
-      transactionData,
       walletAddress,
       domain,
       privateKey,
@@ -1268,14 +1269,17 @@ export const walletConnect = createAsyncThunk(
       return rejectAsExpired();
     }
 
-    // KIML-002: an EVM transaction approval is bound to the request the user
-    // reviewed. Rebuild the canonical tx from the store's pending request (not
-    // from the modal's copy) and refuse unless its digest and id match what
-    // the modal reviewed. The executor then signs only that object.
+    // KIML-002: an EVM transaction or batch approval is bound to the request
+    // the user reviewed. Rebuild the canonical tx from the store's pending
+    // request (not from the modal's copy) and refuse unless its digest and id
+    // match what the modal reviewed. The executor then signs only that object.
+    const isBatch = method === ETH_WALLET_SEND_CALLS;
     const isEvmTransaction =
       typeof chainId === 'string' &&
       chainId.startsWith('eip155:') &&
-      (method === 'eth_sendTransaction' || method === 'eth_signTransaction');
+      (isBatch ||
+        method === 'eth_sendTransaction' ||
+        method === 'eth_signTransaction');
     let canonicalTx = null;
     if (isEvmTransaction) {
       const pending =
@@ -1288,10 +1292,17 @@ export const walletConnect = createAsyncThunk(
         pending.chainId === chainId
       ) {
         try {
-          canonicalTx = buildEvmWalletConnectTx(pending.params?.[0], {
-            chainId: pending.chainId,
-          });
-          digest = getEvmWalletConnectTxDigest(canonicalTx);
+          canonicalTx = isBatch
+            ? buildWalletSendCallsBatch(pending.params?.[0], {
+                chainId: pending.chainId,
+                account: walletAddress,
+              })
+            : buildEvmWalletConnectTx(pending.params?.[0], {
+                chainId: pending.chainId,
+              });
+          digest = isBatch
+            ? getWalletSendCallsDigest(canonicalTx)
+            : getEvmWalletConnectTxDigest(canonicalTx);
         } catch (e) {
           canonicalTx = null;
         }
@@ -1411,15 +1422,11 @@ export const walletConnect = createAsyncThunk(
 
       let tx;
       let batchConfirmation;
-      if (method === ETH_WALLET_SEND_CALLS) {
-        const calls = (transactionData?.batchCalls || []).map(call => ({
-          to: call.to,
-          value: call.value ? BigInt(call.value) : 0n,
-          data: call.data || '0x',
+      if (isBatch) {
+        const calls = canonicalTx.calls.map(call => ({
+          ...call,
+          value: BigInt(call.value),
         }));
-        if (!calls.length) {
-          throw new Error('No calls supplied');
-        }
         const {nonce, gasFee, estimateGas, maxPriorityFeePerGas} =
           await nativeCoin.chain.getEstimateFeeForBatchTransaction({
             calls,
@@ -1469,7 +1476,7 @@ export const walletConnect = createAsyncThunk(
       }
 
       if (tx) {
-        if (method === ETH_WALLET_SEND_CALLS) {
+        if (isBatch) {
           // Before the reply: the dApp polls wallet_getCallsStatus with this
           // id as soon as it has it, and only recorded batches are answered.
           recordIssuedBatch({
@@ -1527,10 +1534,7 @@ export const walletConnect = createAsyncThunk(
             toastId,
           });
         }
-        if (
-          method === ETH_WALLET_SEND_CALLS ||
-          wcMethod === 'sendRawTransaction'
-        ) {
+        if (isBatch || wcMethod === 'sendRawTransaction') {
           // Only an EVM hash string is a usable transaction id for the coin's
           // own history lookup; other chains return protocol-specific objects.
           const txHash =
@@ -2067,7 +2071,22 @@ export const sendFunds = createAsyncThunk(
             },
           });
         }
-        refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        // A batch's currentCoin is coinInfo, a slim snapshot of the first
+        // item's coin (no deriveAddresses, add-time address).
+        // refreshCurrentCoin replaces the wallet coin with a snapshot built
+        // from what it is given, so refresh the live coin instead.
+        if (txData?.isBatchTransaction) {
+          const liveCoin = selectCurrentWallet(
+            thunkAPI.getState(),
+          )?.coins?.find(item => item?._id === currentCoin?._id);
+          if (liveCoin) {
+            refreshCoinData(thunkAPI.dispatch, liveCoin, tx_hash);
+          } else {
+            thunkAPI.dispatch(refreshCoins());
+          }
+        } else {
+          refreshCoinData(thunkAPI.dispatch, txData.currentCoin, tx_hash);
+        }
         const isDropped = confirmTransaction?.status === 'dropped';
         const status =
           confirmTransaction === 'pending'

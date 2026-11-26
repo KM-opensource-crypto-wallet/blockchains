@@ -40,7 +40,14 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import axios from 'axios';
 import {ErrorDecoder} from 'ethers-decode-error';
-import {toEthersTransactionRequest} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {
+  BATCH_MAX_CALLS,
+  toEthersTransactionRequest,
+} from 'dok-wallet-blockchain-networks/helper/evmTxReview';
+import {
+  decodeBatchExecuteCalls,
+  describeBatchExecuteError,
+} from 'dok-wallet-blockchain-networks/helper/evmCalldata';
 import contractABI from 'dok-wallet-blockchain-networks/abis/contractABI.json';
 import {EvmStakingProvider} from 'dok-wallet-blockchain-networks/service/stakingProvider';
 
@@ -51,6 +58,10 @@ const errorDecoder = {
 };
 
 const BATCH_EXECUTE_SELECTOR = '0x3f707e6b';
+// EIP-7702: an account delegated to X has the code 0xef0100 || X.
+const EIP7702_DELEGATION_PREFIX = '0xef0100';
+// Created on first batch estimate, like errorDecoderInstance.
+let batchExecuteInterface;
 
 // Placeholder 65-byte signature used only to size the tx for GasPriceOracle
 // getL1Fee. Arbitrary high-entropy bytes; `s` kept in the low half so ethers
@@ -217,27 +228,10 @@ function getEVMTransactionType(item, isBatch, chainName) {
   return 'regular';
 }
 
-// Built on first parse so merely loading this module doesn't load ethers.
-let batchIface;
-const batchContractInterface = {
-  parseTransaction: tx =>
-    (batchIface ??= new ethers.Interface(contractABI)).parseTransaction(tx),
-};
-
 function decodeBatchTotalAmount(input) {
-  try {
-    const decoded = batchContractInterface.parseTransaction({data: input});
-    if (decoded?.args?.[0]) {
-      const total = decoded.args[0].reduce(
-        (sum, call) => sum + BigInt(call[1]),
-        0n,
-      );
-      return total.toString();
-    }
-  } catch (e) {
-    // ignore decode failures
-  }
-  return '0';
+  return decodeBatchExecuteCalls(input)
+    .reduce((sum, call) => sum + BigInt(call.value), 0n)
+    .toString();
 }
 
 const TRANSFER_SELECTOR = '0xa9059cbb'; // transfer(address,uint256)
@@ -257,17 +251,13 @@ function decodeBatchTokenTransfer(input, contractAddress) {
     if (!contractAddress) {
       return null;
     }
-    const decoded = batchContractInterface.parseTransaction({data: input});
-    const calls = decoded?.args?.[0];
-    if (!Array.isArray(calls)) {
-      return null;
-    }
+    const calls = decodeBatchExecuteCalls(input);
     const target = contractAddress.toLowerCase();
     let total = 0n;
     let recipient = null;
     for (const call of calls) {
-      const to = call?.[0]?.toLowerCase();
-      const data = call?.[2];
+      const to = call.to.toLowerCase();
+      const {data} = call;
       if (
         to === target &&
         typeof data === 'string' &&
@@ -310,10 +300,91 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
   const extraEstimate = CHAIN_CONFIG[chain_name]?.additional_estimate_gas || 0n;
 
   async function createAuthorization(wallet, nonce, delegationContractAddress) {
+    const batchContract = BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+    const isAllowedTarget =
+      delegationContractAddress === ethers.ZeroAddress ||
+      (!!batchContract &&
+        delegationContractAddress?.toLowerCase() ===
+          batchContract.toLowerCase());
+    if (!chainId || !isAllowedTarget) {
+      throw new Error('Refusing to sign this delegation');
+    }
     return await wallet.authorize({
       address: delegationContractAddress,
-      nonce: nonce,
+      nonce,
+      chainId,
     });
+  }
+
+  // Gas for execute(calls) sent by `from`, estimated without the user signing
+  // anything. A signed authorization sent to the RPC here could be submitted
+  // by anyone once the account's nonce reaches it, delegating the account
+  // without the user sending anything. Instead the node runs the call with the
+  // account's code overridden to the EIP-7702 delegation designator, and the
+  // request carries one authorization signed by a random throwaway key so the
+  // node also prices an authorization: that cost is not a constant (the
+  // Glamsterdam repricing changed it on Sepolia). The throwaway account gets
+  // a balance so it is priced as an existing account, like the sender.
+  async function estimateBatchGas(evmProvider, from, calls) {
+    const batchContract = BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name];
+    if (!chainId || !batchContract) {
+      throw new Error('Batch sending is not available on this chain');
+    }
+    const throwaway = new ethers.Wallet(ethers.hexlify(ethers.randomBytes(32)));
+    const {signature} = await throwaway.authorize({
+      address: batchContract,
+      nonce: 0,
+      chainId,
+    });
+    batchExecuteInterface ??= new ethers.Interface(contractABI);
+    const request = {
+      from,
+      to: from,
+      data: batchExecuteInterface.encodeFunctionData('execute', [calls]),
+    };
+    const overrides = {
+      [from]: {code: EIP7702_DELEGATION_PREFIX + batchContract.slice(2)},
+      [throwaway.address]: {balance: '0x1'},
+    };
+    // Both estimates run on one block: with 'latest' a load-balanced RPC can
+    // answer them from different blocks, and the calls' own gas can change
+    // between those, so the comparison below would no longer isolate the
+    // authorization's cost.
+    const block = ethers.toQuantity(
+      await evmProvider.send('eth_blockNumber', []),
+    );
+    const [gas, gasWithoutAuthorization] = await Promise.all([
+      evmProvider.send('eth_estimateGas', [
+        {
+          type: '0x4',
+          ...request,
+          authorizationList: [
+            {
+              chainId: ethers.toQuantity(chainId),
+              address: batchContract,
+              nonce: '0x0',
+              yParity: ethers.toQuantity(signature.yParity),
+              r: signature.r,
+              s: signature.s,
+            },
+          ],
+        },
+        block,
+        overrides,
+      ]),
+      evmProvider.send('eth_estimateGas', [request, block, overrides]),
+    ]);
+    // Some nodes (eth.drpc.org) drop authorizationList and answer the
+    // execution cost alone, ~25k gas short, so the batch runs out of gas on
+    // chain. An authorization always costs gas: an estimate no higher than
+    // the one without it was not priced. Throwing moves retryFunc on to the
+    // next RPC.
+    if (BigInt(gas) <= BigInt(gasWithoutAuthorization)) {
+      throw new Error(
+        'The network node did not price the batch authorization. Please try again.',
+      );
+    }
+    return BigInt(gas);
   }
 
   async function revokeAuthorization(walletSigner, evmProvider) {
@@ -321,10 +392,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       const currentNonce = await evmProvider.getTransactionCount(
         walletSigner.address,
       );
-      const revokeAuth = await walletSigner.authorize({
-        address: ethers.ZeroAddress,
-        nonce: currentNonce + 1,
-      });
+      const revokeAuth = await createAuthorization(
+        walletSigner,
+        currentNonce + 1,
+        ethers.ZeroAddress,
+      );
       const {gasPrice: finalGasPrice, maxPriorityFeePerGas} =
         await getEtherGasPrice('recommended', evmProvider);
       const revokeTx = {
@@ -1138,22 +1210,22 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           throw e;
         }
       }, 0),
+    // Signs nothing with the user's key: see estimateBatchGas.
     getEstimateFeeForBatchTransaction: async ({
       calls,
       privateKey,
       feesType,
       isFetchNonce,
       existingNonce,
-    }) =>
-      retryFunc(async evmProvider => {
+    }) => {
+      if (calls?.length > BATCH_MAX_CALLS) {
+        throw new Error(
+          `The batch has ${calls.length} calls; at most ${BATCH_MAX_CALLS} can be sent together. Remove some and try again.`,
+        );
+      }
+      return retryFunc(async evmProvider => {
         try {
           const wallet = new ethers.Wallet(privateKey);
-          let walletSigner = wallet.connect(evmProvider);
-          const delegatedContract = new ethers.Contract(
-            walletSigner.address,
-            contractABI,
-            walletSigner,
-          );
           let currentNonce;
           if (isFetchNonce || existingNonce == null) {
             currentNonce = await EVMChain(
@@ -1167,19 +1239,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             currentNonce = existingNonce;
           }
 
-          // Create authorization with incremented nonce for same-wallet transactions
-          const auth = await createAuthorization(
-            walletSigner,
-            Number(currentNonce) + 1,
-            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+          const estimateGas = await estimateBatchGas(
+            evmProvider,
+            wallet.address,
+            calls,
           );
-          const options = {
-            type: 4,
-            authorizationList: [auth],
-          };
-          const estimateGas = await delegatedContract[
-            'execute((address,uint256,bytes)[])'
-          ].estimateGas(calls, options);
           return await calculateTotalFees({
             evmProvider,
             feesType,
@@ -1191,9 +1255,11 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
           });
         } catch (e) {
           console.error('error in get token fees for batch transaction', e);
-          throw e;
+          const batchError = describeBatchExecuteError(e);
+          throw batchError ? new Error(batchError) : e;
         }
-      }),
+      });
+    },
     getEstimateFeeForToken: async ({
       fromAddress,
       toAddress,
@@ -1667,6 +1733,7 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
               : null,
             blockTimestamp,
             confirmations,
+            input: tx.data,
             gasPrice: tx.gasPrice ? `0x${tx.gasPrice.toString(16)}` : null,
             gasUsed: receipt?.gasUsed
               ? `0x${receipt.gasUsed.toString(16)}`
@@ -2120,18 +2187,18 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             walletSigner,
           );
 
+          // Create authorization with incremented nonce for same-wallet transactions
+          const auth = await createAuthorization(
+            walletSigner,
+            Number(nonce) + 1,
+            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
+          );
+          const tempOptions = {
+            type: 4,
+            authorizationList: [auth],
+          };
           let finalEstimateGas = estimateGas;
           if (typeof finalEstimateGas !== 'bigint') {
-            // Create authorization for gas estimation consistency
-            const tempAuth = await createAuthorization(
-              walletSigner,
-              Number(nonce) + 1,
-              BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-            );
-            const tempOptions = {
-              type: 4,
-              authorizationList: [tempAuth],
-            };
             finalEstimateGas = await delegatedContract[
               'execute((address,uint256,bytes)[])'
             ].estimateGas(calls, tempOptions);
@@ -2144,12 +2211,6 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             finalMaxPriorityFeePerGas = gasFeeData?.maxPriorityFeePerGas;
           }
 
-          // Create authorization with incremented nonce for same-wallet transactions
-          const auth = await createAuthorization(
-            walletSigner,
-            Number(nonce) + 1,
-            BATCH_TRANSACTION_CONTRACT_ADDRESS[chain_name],
-          );
           const options = {
             type: 4,
             gasLimit: finalEstimateGas + extraEstimate,
@@ -2175,6 +2236,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
         return await createSendTransaction(new ethers.Wallet(privateKey), tx);
       } catch (e) {
         console.error('Error in send ether batch transaction', e);
+        const batchError = describeBatchExecuteError(e);
+        if (batchError) {
+          throw new Error(batchError);
+        }
         const {reason} = await errorDecoder.decode(e);
         throw new Error(reason);
       }

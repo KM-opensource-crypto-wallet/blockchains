@@ -1,182 +1,300 @@
 [
   {
-    "inputs":[ ],
-    "name":"ECDSAInvalidSignature",
-    "type":"error"
-  },
-  {
-    "inputs":[
+    "type": "error",
+    "name": "CallFailed",
+    "inputs": [
       {
-        "internalType":"uint256",
-        "name":"length",
-        "type":"uint256"
-      }
-    ],
-    "name":"ECDSAInvalidSignatureLength",
-    "type":"error"
-  },
-  {
-    "inputs":[
-      {
-        "internalType":"bytes32",
-        "name":"s",
-        "type":"bytes32"
-      }
-    ],
-    "name":"ECDSAInvalidSignatureS",
-    "type":"error"
-  },
-  {
-    "anonymous":false,
-    "inputs":[
-      {
-        "indexed":true,
-        "internalType":"uint256",
-        "name":"nonce",
-        "type":"uint256"
+        "type": "uint256",
+        "name": "index"
       },
       {
-        "components":[
+        "type": "bytes",
+        "name": "reason"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "EmptyBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidTarget",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "index"
+      },
+      {
+        "type": "address",
+        "name": "to"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotDelegated",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TokenCallReturnedFalse",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "index"
+      },
+      {
+        "type": "address",
+        "name": "to"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyCalls",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "count"
+      },
+      {
+        "type": "uint256",
+        "name": "max"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "anonymous": false,
+    "name": "CallExecuted",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "index"
+      },
+      {
+        "type": "address",
+        "name": "to",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "value"
+      },
+      {
+        "type": "bytes4",
+        "name": "selector"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "MAX_CALLS",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "MAX_REVERT_DATA",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "execute",
+    "constant": false,
+    "stateMutability": "payable",
+    "payable": true,
+    "inputs": [
+      {
+        "type": "tuple[]",
+        "name": "calls",
+        "components": [
           {
-            "internalType":"address",
-            "name":"to",
-            "type":"address"
+            "type": "address",
+            "name": "to"
           },
           {
-            "internalType":"uint256",
-            "name":"value",
-            "type":"uint256"
+            "type": "uint256",
+            "name": "value"
           },
           {
-            "internalType":"bytes",
-            "name":"data",
-            "type":"bytes"
+            "type": "bytes",
+            "name": "data"
           }
-        ],
-        "indexed":false,
-        "internalType":"struct BatchCallAndSponsor.Call[]",
-        "name":"calls",
-        "type":"tuple[]"
+        ]
       }
     ],
-    "name":"BatchExecuted",
-    "type":"event"
+    "outputs": []
   },
   {
-    "anonymous":false,
-    "inputs":[
+    "type": "function",
+    "name": "isValidSignature",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [
       {
-        "indexed":true,
-        "internalType":"address",
-        "name":"sender",
-        "type":"address"
+        "type": "bytes32",
+        "name": "hash"
       },
       {
-        "indexed":true,
-        "internalType":"address",
-        "name":"to",
-        "type":"address"
+        "type": "bytes",
+        "name": "signature"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "onERC1155BatchReceived",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
       },
       {
-        "indexed":false,
-        "internalType":"uint256",
-        "name":"value",
-        "type":"uint256"
+        "type": "address",
+        "name": ""
       },
       {
-        "indexed":false,
-        "internalType":"bytes",
-        "name":"data",
-        "type":"bytes"
-      }
-    ],
-    "name":"CallExecuted",
-    "type":"event"
-  },
-  {
-    "stateMutability":"payable",
-    "type":"fallback"
-  },
-  {
-    "inputs":[
-      {
-        "components":[
-          {
-            "internalType":"address",
-            "name":"to",
-            "type":"address"
-          },
-          {
-            "internalType":"uint256",
-            "name":"value",
-            "type":"uint256"
-          },
-          {
-            "internalType":"bytes",
-            "name":"data",
-            "type":"bytes"
-          }
-        ],
-        "internalType":"struct BatchCallAndSponsor.Call[]",
-        "name":"calls",
-        "type":"tuple[]"
-      }
-    ],
-    "name":"execute",
-    "outputs":[ ],
-    "stateMutability":"payable",
-    "type":"function"
-  },
-  {
-    "inputs":[
-      {
-        "components":[
-          {
-            "internalType":"address",
-            "name":"to",
-            "type":"address"
-          },
-          {
-            "internalType":"uint256",
-            "name":"value",
-            "type":"uint256"
-          },
-          {
-            "internalType":"bytes",
-            "name":"data",
-            "type":"bytes"
-          }
-        ],
-        "internalType":"struct BatchCallAndSponsor.Call[]",
-        "name":"calls",
-        "type":"tuple[]"
+        "type": "uint256[]",
+        "name": ""
       },
       {
-        "internalType":"bytes",
-        "name":"signature",
-        "type":"bytes"
-      }
-    ],
-    "name":"execute",
-    "outputs":[ ],
-    "stateMutability":"payable",
-    "type":"function"
-  },
-  {
-    "inputs":[ ],
-    "name":"nonce",
-    "outputs":[
+        "type": "uint256[]",
+        "name": ""
+      },
       {
-        "internalType":"uint256",
-        "name":"",
-        "type":"uint256"
+        "type": "bytes",
+        "name": ""
       }
     ],
-    "stateMutability":"view",
-    "type":"function"
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
   },
   {
-    "stateMutability":"payable",
-    "type":"receive"
+    "type": "function",
+    "name": "onERC1155Received",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "bytes",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "onERC721Received",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "bytes",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "supportsInterface",
+    "constant": true,
+    "stateMutability": "pure",
+    "payable": false,
+    "inputs": [
+      {
+        "type": "bytes4",
+        "name": "interfaceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
   }
 ]
