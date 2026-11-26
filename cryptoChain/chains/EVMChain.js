@@ -346,6 +346,13 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
       [from]: {code: EIP7702_DELEGATION_PREFIX + batchContract.slice(2)},
       [throwaway.address]: {balance: '0x1'},
     };
+    // Both estimates run on one block: with 'latest' a load-balanced RPC can
+    // answer them from different blocks, and the calls' own gas can change
+    // between those, so the comparison below would no longer isolate the
+    // authorization's cost.
+    const block = ethers.toQuantity(
+      await evmProvider.send('eth_blockNumber', []),
+    );
     const [gas, gasWithoutAuthorization] = await Promise.all([
       evmProvider.send('eth_estimateGas', [
         {
@@ -362,10 +369,10 @@ export const EVMChain = (chain_name, _phrase, customRpcUrl) => {
             },
           ],
         },
-        'latest',
+        block,
         overrides,
       ]),
-      evmProvider.send('eth_estimateGas', [request, 'latest', overrides]),
+      evmProvider.send('eth_estimateGas', [request, block, overrides]),
     ]);
     // Some nodes (eth.drpc.org) drop authorizationList and answer the
     // execution cost alone, ~25k gas short, so the batch runs out of gas on
