@@ -113,13 +113,14 @@ describe('onSessionRequest: a request arriving while one is on screen', () => {
   it('still auto-answers wallet_getCapabilities while busy', async () => {
     store.getState.mockImplementation(busy);
     await handlers.session_request(
-      sessionRequest('wallet_getCapabilities', ['0xabc', ['0x1']], 'eip155:1'),
+      sessionRequest('wallet_getCapabilities', ['0xabc', ['0x89']], 'eip155:1'),
     );
 
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({'0x1': {}});
+    // Polygon has no batch contract, so it gets no `atomic` capability.
+    expect(response.result).toEqual({'0x89': {}});
   });
 
   it('still answers wallet_getCallsStatus while busy', async () => {
