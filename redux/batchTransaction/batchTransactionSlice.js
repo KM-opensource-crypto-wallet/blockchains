@@ -38,7 +38,15 @@ const initialState = {
   balances: {},
   isValid: true,
   invalid_reason: '',
+  // requestId -> batch key of every addBatchTransaction still running, so
+  // concurrent additions count each other against BATCH_MAX_CALLS. Set by the
+  // pending action, cleared by fulfilled/rejected; reset on rehydrate.
+  addsInFlight: {},
 };
+
+// One batch: every transfer on one chain from one address of one wallet.
+const getBatchKey = (wallet_id, coin) =>
+  `${wallet_id}_${coin?.chain_name}_${coin?.address}`;
 
 export const initializeFilters = createAsyncThunk(
   'batchTransaction/initializeFilters',
@@ -206,12 +214,23 @@ export const addBatchTransaction = createAsyncThunk(
       const chain_name = selectedCoin?.chain_name;
       // One batch is every transfer on one chain from one address, sent as
       // one execute() call, and the batch contract takes at most
-      // BATCH_MAX_CALLS calls.
-      const sameBatchCount = existingTransactions.filter(
-        item =>
-          item?.coinInfo?.chain_name === chain_name &&
-          item?.coinInfo?.address === selectedCoin?.address,
+      // BATCH_MAX_CALLS calls. Additions still running for the same batch
+      // count too: this check and this addition's own pending entry happen
+      // in one tick, before the first await, so two concurrent additions can
+      // never both take the last place.
+      const batchKey = getBatchKey(wallet_id, selectedCoin);
+      const othersInFlight = Object.entries(
+        currentState.batchTransaction.addsInFlight || {},
+      ).filter(
+        ([requestId, key]) =>
+          requestId !== thunkAPI.requestId && key === batchKey,
       ).length;
+      const sameBatchCount =
+        existingTransactions.filter(
+          item =>
+            item?.coinInfo?.chain_name === chain_name &&
+            item?.coinInfo?.address === selectedCoin?.address,
+        ).length + othersInFlight;
       if (sameBatchCount >= BATCH_MAX_CALLS) {
         showToast({
           type: 'errorToast',
@@ -288,6 +307,15 @@ export const addBatchTransaction = createAsyncThunk(
       });
       return thunkAPI.rejectWithValue(e?.message);
     }
+  },
+  {
+    // Read by the pending reducer, which reserves the transfer's place.
+    getPendingMeta: ({arg}, {getState}) => ({
+      batchKey: getBatchKey(
+        selectCurrentWallet(getState())?.clientId,
+        arg?.selectedCoin,
+      ),
+    }),
   },
 );
 
@@ -435,7 +463,21 @@ export const batchTransactionSlice = createSlice({
         state.filteredData.loading = false;
         state.filteredData.error = payload || 'Failed to initialize filters';
       })
-      .addCase(addBatchTransaction.fulfilled, (state, {payload}) => {
+      .addCase(addBatchTransaction.pending, (state, {meta}) => {
+        state.addsInFlight ??= {};
+        state.addsInFlight[meta.requestId] = meta.batchKey;
+      })
+      .addCase(addBatchTransaction.rejected, (state, {meta}) => {
+        delete state.addsInFlight?.[meta.requestId];
+      })
+      .addCase(addBatchTransaction.fulfilled, (state, {payload, meta}) => {
+        // Released in the same update that adds the transfer, so it is never
+        // counted twice or not at all.
+        delete state.addsInFlight?.[meta.requestId];
+        if (!payload) {
+          // No native coin: nothing was added.
+          return;
+        }
         const {wallet_id, chain_name, transaction} = payload;
         if (!state.transactions) {
           state.transactions = {};
