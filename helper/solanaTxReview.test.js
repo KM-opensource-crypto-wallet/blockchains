@@ -16,6 +16,8 @@ import {
   AuthorityType,
   createApproveInstruction,
   createSetAuthorityInstruction,
+  createTransferCheckedInstruction,
+  createTransferInstruction,
 } from '@solana/spl-token';
 import bs58 from 'bs58';
 import {Buffer} from 'buffer';
@@ -131,6 +133,56 @@ describe('reviewSolanaRequest', () => {
       createApproveInstruction(tokenAccount, other, wallet.publicKey, 10n),
     ]);
     expect(bounded.level).toBe('warn');
+  });
+
+  it('shows token transfers sent from the wallet', () => {
+    const mint = Keypair.fromSeed(
+      Uint8Array.from({length: 32}, () => 10),
+    ).publicKey;
+    const r = review([
+      createTransferInstruction(tokenAccount, other, wallet.publicKey, 5n),
+      createTransferCheckedInstruction(
+        tokenAccount,
+        mint,
+        other,
+        wallet.publicKey,
+        1500000n,
+        6,
+      ),
+    ]);
+    expect(r.level).toBe('none');
+    const sends = r.rows
+      .filter(x => x.label === 'Sends tokens')
+      .map(x => x.value);
+    expect(sends).toEqual([
+      `5 (smallest unit) to token account ${other.toBase58()}`,
+      `1.5 of ${mint.toBase58()} to token account ${other.toBase58()}`,
+    ]);
+  });
+
+  it('reviews the field the signer uses for each method', () => {
+    const approve = txBase64([
+      createApproveInstruction(
+        tokenAccount,
+        other,
+        wallet.publicKey,
+        2n ** 64n - 1n,
+      ),
+    ]);
+    const data = {transaction: approve, transactions: []};
+    expect(
+      reviewSolanaRequest(data, WALLET, 'solana_signAndSendTransaction').level,
+    ).toBe('danger');
+    expect(
+      reviewSolanaRequest(data, WALLET, 'solana_signTransaction').level,
+    ).toBe('danger');
+    expect(
+      reviewSolanaRequest(
+        {transaction: undefined, transactions: [approve]},
+        WALLET,
+        'solana_signAllTransactions',
+      ).level,
+    ).toBe('danger');
   });
 
   it('marks instructions for programs it cannot check as danger, not blocked', () => {

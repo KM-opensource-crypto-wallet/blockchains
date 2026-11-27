@@ -50,9 +50,16 @@ const readable = {
     }
     return isReadableBytes(bytes);
   },
+  // AptosChain.signMessage signs both the message and the nonce (normalised
+  // the same way here), so both must be readable.
   aptos_signMessage: data => {
-    const message = typeof data === 'string' ? data : data?.message;
-    return typeof message === 'string' && isPrintable(message);
+    const input = typeof data === 'string' ? {message: data} : data || {};
+    const nonce = input.nonce == null ? '' : String(input.nonce);
+    return (
+      typeof input.message === 'string' &&
+      isPrintable(input.message) &&
+      (nonce === '' || isPrintable(nonce))
+    );
   },
 };
 

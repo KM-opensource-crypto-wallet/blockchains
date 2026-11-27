@@ -71,6 +71,19 @@ describe('reviewStellarTransaction', () => {
     expect(r.level).toBe('none');
   });
 
+  it('marks removing a signer as danger but does not refuse it', () => {
+    const transaction = build(
+      Operation.setOptions({signer: {ed25519PublicKey: other, weight: 0}}),
+    );
+    const r = reviewStellarTransaction(transaction.toXDR());
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/removes a signer/);
+    // The signer's refusal stays limited to adding signers or changing
+    // weights and thresholds.
+    expect(getStellarTakeoverReason(transaction)).toBeNull();
+  });
+
   it('marks an account merge as danger without blocking it', () => {
     const r = reviewStellarTransaction(
       xdrOf(Operation.accountMerge({destination: other})),

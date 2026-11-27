@@ -100,6 +100,31 @@ describe('reviewXrplRequest', () => {
     ).toBe('none');
   });
 
+  it('shows the SendMax spending limit of a payment', () => {
+    const r = reviewXrplRequest(
+      request({
+        TransactionType: 'Payment',
+        Amount: {currency: 'USD', issuer: OTHER, value: '1'},
+        SendMax: '1000000000',
+        Destination: OTHER,
+      }),
+    );
+    expect(row(r, 'Sends')).toBe(`1 USD to ${OTHER}`);
+    expect(row(r, 'Spends up to')).toBe('1000 XRP');
+  });
+
+  it('reads DeliverMax when a payment has no Amount', () => {
+    const r = reviewXrplRequest(
+      request({
+        TransactionType: 'Payment',
+        DeliverMax: '1500000',
+        Destination: OTHER,
+      }),
+    );
+    expect(r.level).toBe('none');
+    expect(row(r, 'Sends')).toBe(`1.5 XRP to ${OTHER}`);
+  });
+
   it('shows what a DEX offer gives and gets', () => {
     const r = reviewXrplRequest(
       request({

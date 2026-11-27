@@ -43,6 +43,8 @@ describe('reviewNonEvmSignMessage', () => {
     ['tezos_sign', {payload: undefined}],
     ['aptos_signMessage', {message: 'a‮b', nonce: '1'}],
     ['aptos_signMessage', {message: {x: 1}}],
+    // The nonce is part of the signed text too.
+    ['aptos_signMessage', {message: 'Welcome', nonce: 'a\u202Eb'}],
   ])('flags %s binary or hidden content as unreadable', (method, data) => {
     expect(reviewNonEvmSignMessage(method, data)).toEqual({
       digestSized: false,

@@ -136,6 +136,14 @@ export const reviewTronTransaction = tx => {
           value: formatTrx(value.call_value),
         });
       }
+      // TRC-10 tokens attached to the call go to the contract as well.
+      if (BigInt(value.call_token_value || 0) > 0n) {
+        result.rows.push({
+          label: 'Also sends TRC-10',
+          value: `${value.call_token_value} of token ${value.token_id}`,
+        });
+        raise('warn', 'This call also sends TRC-10 tokens to the contract.');
+      }
       if (selector === 'a9059cbb') {
         result.rows.push(
           {label: 'To', value: addressWord(data, 0)},

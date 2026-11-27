@@ -16,9 +16,16 @@ const MAX_UINT256 = (2n ** 256n - 1n).toString();
 const MAX_UINT160 = (2n ** 160n - 1n).toString();
 const DEADLINE = 1798761600; // 2027-01-01 00:00 UTC
 
+// Declares every message field on the primary type, as real payloads do.
 const typed = (primaryType, message, domain = {}) =>
   JSON.stringify({
-    types: {EIP712Domain: []},
+    types: {
+      EIP712Domain: [],
+      [primaryType]:
+        message && typeof message === 'object'
+          ? Object.keys(message).map(name => ({name, type: 'string'}))
+          : [],
+    },
     primaryType,
     domain: {chainId: 1, ...domain},
     message,
@@ -77,7 +84,41 @@ describe('reviewEvmTypedData', () => {
     expect(row(review, 'Spender')).toBe(SPENDER);
     expect(row(review, 'Token')).toBe(`USD Coin (${TOKEN})`);
     expect(row(review, 'Amount')).toBe('Unlimited');
-    expect(row(review, 'Valid until')).toBe('2027-01-01 00:00 UTC');
+    // The deadline only limits when the signature can be used; the
+    // allowance itself stays until it is revoked.
+    expect(row(review, 'Signature valid until')).toBe('2027-01-01 00:00 UTC');
+    expect(review.reasons.join(' ')).toMatch(/until you revoke it/);
+  });
+
+  it('ignores an allowed field the Permit schema does not declare', () => {
+    const review = reviewEvmTypedData(
+      JSON.stringify({
+        types: {
+          EIP712Domain: [],
+          Permit: [
+            {name: 'owner', type: 'address'},
+            {name: 'spender', type: 'address'},
+            {name: 'value', type: 'uint256'},
+            {name: 'nonce', type: 'uint256'},
+            {name: 'deadline', type: 'uint256'},
+          ],
+        },
+        primaryType: 'Permit',
+        domain: {chainId: 1, verifyingContract: TOKEN},
+        message: {
+          owner: OWNER,
+          spender: SPENDER,
+          value: MAX_UINT256,
+          nonce: 0,
+          deadline: DEADLINE,
+          allowed: false,
+        },
+      }),
+      {chainId: 'eip155:1'},
+    );
+    expect(review.kind).toBe('permit');
+    expect(review.level).toBe('danger');
+    expect(row(review, 'Amount')).toBe('Unlimited');
   });
 
   it('marks a bounded EIP-2612 permit as a warning only', () => {
@@ -215,6 +256,39 @@ describe('reviewEvmTypedData', () => {
     expect(review.kind).toBe('order');
     expect(row(review, 'You give')).toBe('1 item(s)');
     expect(row(review, 'Paid to you')).toBe('1 (native coin, smallest unit)');
+  });
+
+  it('shows both amounts and the order period when a Seaport price changes over time', () => {
+    const review = reviewEvmTypedData(
+      typed(
+        'OrderComponents',
+        {
+          offerer: OWNER,
+          startTime: 1798761600,
+          endTime: 1798848000,
+          offer: [
+            {itemType: 2, token: TOKEN, startAmount: '1', endAmount: '1'},
+          ],
+          consideration: [
+            {
+              itemType: 0,
+              token: '0x0000000000000000000000000000000000000000',
+              startAmount: '1000',
+              endAmount: '1',
+              recipient: OWNER,
+            },
+          ],
+        },
+        {name: 'Seaport'},
+      ),
+      {chainId: 'eip155:1'},
+    );
+    expect(row(review, 'Paid to you')).toBe(
+      '1000 → 1 (native coin, smallest unit)',
+    );
+    expect(row(review, 'Order period')).toBe(
+      '2027-01-01 00:00 UTC to 2027-01-02 00:00 UTC',
+    );
   });
 
   it('never throws on unreadable input', () => {

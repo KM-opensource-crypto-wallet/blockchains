@@ -97,10 +97,26 @@ export const reviewXrplRequest = signTypeData => {
       result.blocked = true;
       raise('danger', `${takeover} It cannot be signed.`);
     } else if (type === 'Payment') {
-      result.rows.push({
-        label: 'Sends',
-        value: `${describeAmount(tx.Amount)} to ${tx.Destination}`,
-      });
+      // DeliverMax is the newer name for Amount.
+      const amount = tx.Amount ?? tx.DeliverMax;
+      if (amount === undefined) {
+        raise(
+          'danger',
+          'This XRP Ledger payment has no amount the wallet can read.',
+        );
+      } else {
+        result.rows.push({
+          label: 'Sends',
+          value: `${describeAmount(amount)} to ${tx.Destination}`,
+        });
+      }
+      // SendMax caps what leaves the account (cross-currency payments).
+      if (tx.SendMax !== undefined) {
+        result.rows.push({
+          label: 'Spends up to',
+          value: describeAmount(tx.SendMax),
+        });
+      }
       if (tx.DestinationTag !== undefined) {
         result.rows.push({
           label: 'Destination tag',

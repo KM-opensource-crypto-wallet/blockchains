@@ -42,6 +42,15 @@ describe('reviewWalletConnectRequest', () => {
     expect(review).toMatchObject({level: 'danger', blocked: true});
   });
 
+  it('passes the method to the Solana review (single transaction, not the array)', () => {
+    const review = reviewWalletConnectRequest({
+      method: 'solana_signAndSendTransaction',
+      signTypeData: {transaction: 'not-a-transaction', transactions: []},
+      walletAddress: '11111111111111111111111111111111',
+    });
+    expect(review).toMatchObject({level: 'danger'});
+  });
+
   it('routes XRPL', () => {
     const review = reviewWalletConnectRequest({
       method: 'xrpl_submitTransaction',

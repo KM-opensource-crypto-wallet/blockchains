@@ -26,6 +26,22 @@ const trigger = data =>
   });
 const row = (review, label) => review.rows.find(r => r.label === label)?.value;
 
+describe('reviewTronTransaction TRC-10 attached to a contract call', () => {
+  it('shows the TRC-10 amount and token a call also sends', () => {
+    const review = reviewTronTransaction(
+      tx('TriggerSmartContract', {
+        owner_address: OWNER_HEX,
+        contract_address: CONTRACT_HEX,
+        data: 'a9059cbb' + word('22'.repeat(20)) + word('64'),
+        call_token_value: 1000000,
+        token_id: 1000001,
+      }),
+    );
+    expect(row(review, 'Also sends TRC-10')).toBe('1000000 of token 1000001');
+    expect(review.level).toBe('warn');
+  });
+});
+
 describe('reviewTronTransaction', () => {
   it('blocks AccountPermissionUpdate', () => {
     const t = tx('AccountPermissionUpdateContract', {owner_address: OWNER_HEX});

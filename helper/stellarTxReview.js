@@ -113,6 +113,17 @@ export const reviewStellarTransaction = xdr => {
           value: `${op.startingBalance} XLM to ${op.destination}`,
         });
         break;
+      case 'setOptions':
+        // Removing a signer (weight 0) is not refused: the wallet's own key is
+        // the master key, which the takeover check above covers.
+        if (op.signer && Number(op.signer.weight) === 0) {
+          result.rows.push({
+            label: 'Removes signer',
+            value: String(op.signer.ed25519PublicKey ?? 'a signer'),
+          });
+          raise('danger', 'This removes a signer from your Stellar account.');
+        }
+        break;
       case 'accountMerge':
         raise(
           'danger',

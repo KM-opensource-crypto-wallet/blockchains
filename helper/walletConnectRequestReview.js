@@ -26,11 +26,19 @@ const REVIEWERS = {
   tron_signTransaction: ({signTypeData}) => reviewTronTransaction(signTypeData),
   tron_sendTransaction: ({signTypeData}) => reviewTronTransaction(signTypeData),
   solana_signTransaction: ({signTypeData, walletAddress}) =>
-    reviewSolanaRequest(signTypeData, walletAddress),
+    reviewSolanaRequest(signTypeData, walletAddress, 'solana_signTransaction'),
   solana_signAndSendTransaction: ({signTypeData, walletAddress}) =>
-    reviewSolanaRequest(signTypeData, walletAddress),
+    reviewSolanaRequest(
+      signTypeData,
+      walletAddress,
+      'solana_signAndSendTransaction',
+    ),
   solana_signAllTransactions: ({signTypeData, walletAddress}) =>
-    reviewSolanaRequest(signTypeData, walletAddress),
+    reviewSolanaRequest(
+      signTypeData,
+      walletAddress,
+      'solana_signAllTransactions',
+    ),
   stellar_signXDR: ({signTypeData}) => reviewStellarTransaction(signTypeData),
   stellar_signAndSubmitXDR: ({signTypeData}) =>
     reviewStellarTransaction(signTypeData),

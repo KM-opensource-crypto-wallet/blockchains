@@ -24,8 +24,10 @@ const READ_ONLY_PROGRAMS = [
 ];
 const SYSTEM_ASSIGN = 1;
 const SYSTEM_TRANSFER = 2;
+const TOKEN_TRANSFER = 3;
 const TOKEN_APPROVE = 4;
 const TOKEN_SET_AUTHORITY = 6;
+const TOKEN_TRANSFER_CHECKED = 12;
 const TOKEN_APPROVE_CHECKED = 13;
 // spl-token AuthorityType: AccountOwner = 2, CloseAccount = 3.
 const TOKEN_ACCOUNT_AUTHORITIES = [2, 3];
@@ -46,6 +48,15 @@ const readU64 = (data, offset) => {
     value = (value << 8n) + BigInt(data[offset + i] ?? 0);
   }
   return value;
+};
+
+const formatUnits = (amount, decimals) => {
+  const base = 10n ** BigInt(decimals);
+  const fraction = (amount % base)
+    .toString()
+    .padStart(decimals, '0')
+    .replace(/0+$/, '');
+  return `${amount / base}${fraction ? `.${fraction}` : ''}`;
 };
 
 const formatSol = lamports => {
@@ -143,6 +154,24 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
     }
     if (TOKEN_PROGRAMS.includes(ix.program)) {
       const op = ix.data[0];
+      if (op === TOKEN_TRANSFER || op === TOKEN_TRANSFER_CHECKED) {
+        // Transfer: source, destination, owner. TransferChecked: source,
+        // mint, destination, owner (+ decimals in the data).
+        const checked = op === TOKEN_TRANSFER_CHECKED;
+        if (ix.accounts[checked ? 3 : 2] === wallet) {
+          const amount = readU64(ix.data, 1);
+          const destination = ix.accounts[checked ? 2 : 1] ?? '—';
+          result.rows.push({
+            label: label('Sends tokens'),
+            value: checked
+              ? `${formatUnits(amount, ix.data[9] ?? 0)} of ${
+                  ix.accounts[1]
+                } to token account ${destination}`
+              : `${amount} (smallest unit) to token account ${destination}`,
+          });
+        }
+        return;
+      }
       if (op === TOKEN_APPROVE || op === TOKEN_APPROVE_CHECKED) {
         const delegate = ix.accounts[op === TOKEN_APPROVE ? 1 : 2];
         const owner = ix.accounts[op === TOKEN_APPROVE ? 2 : 3];
@@ -196,7 +225,9 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
   }
 };
 
-export const reviewSolanaRequest = (signTypeData, walletAddress) => {
+// `method` picks the field the signer uses: SolanaChain signs `transactions`
+// for solana_signAllTransactions and `transaction` for the other methods.
+export const reviewSolanaRequest = (signTypeData, walletAddress, method) => {
   const result = {level: 'none', reasons: [], rows: [], blocked: false};
   const raise = (level, reason) => {
     if (LEVEL_RANK[level] > LEVEL_RANK[result.level]) {
@@ -207,9 +238,16 @@ export const reviewSolanaRequest = (signTypeData, walletAddress) => {
     }
   };
   try {
-    const transactions = Array.isArray(signTypeData?.transactions)
-      ? signTypeData.transactions
-      : [signTypeData?.transaction];
+    const all =
+      method === undefined
+        ? Array.isArray(signTypeData?.transactions)
+        : method === 'solana_signAllTransactions';
+    let transactions = [signTypeData?.transaction];
+    if (all) {
+      transactions = Array.isArray(signTypeData?.transactions)
+        ? signTypeData.transactions
+        : [undefined];
+    }
     if (transactions.length > 1) {
       result.rows.push({
         label: 'Transactions',

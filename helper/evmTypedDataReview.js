@@ -71,8 +71,17 @@ const sameAddress = (a, b) =>
   typeof b === 'string' &&
   a.toLowerCase() === b.toLowerCase();
 
+const hasChangingAmount = item =>
+  item?.startAmount !== undefined &&
+  item?.endAmount !== undefined &&
+  String(item.startAmount) !== String(item.endAmount);
+
+// Seaport moves an amount from startAmount to endAmount over the order period,
+// so both ends are shown when they differ.
 const describeOrderItem = item => {
-  const amount = item?.endAmount ?? item?.startAmount;
+  const amount = hasChangingAmount(item)
+    ? `${item.startAmount} → ${item.endAmount}`
+    : item?.endAmount ?? item?.startAmount;
   switch (Number(item?.itemType)) {
     case 0:
       return `${amount} (native coin, smallest unit)`;
@@ -119,11 +128,13 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
   const tokenLabel = domain.name
     ? `${domain.name} (${domain.verifyingContract})`
     : domain.verifyingContract;
-  const gradeAllowance = (spender, unlimited) =>
+  // `until`: EIP-2612 / DAI allowances last until revoked (their deadline only
+  // limits when the signature can be used); Permit2 allowances expire.
+  const gradeAllowance = (spender, unlimited, until) =>
     unlimited
       ? raise(
           'danger',
-          `Lets ${spender} move all of this token from your wallet until it expires, without another approval.`,
+          `Lets ${spender} move all of this token from your wallet ${until}, without another approval.`,
         )
       : raise(
           'warn',
@@ -133,7 +144,12 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
   if (primaryType === 'Permit') {
     result.kind = 'permit';
     const spender = message.spender;
-    const isDai = 'allowed' in message;
+    // Only fields the schema declares are signed, so DAI's `allowed` counts
+    // only when the Permit type declares it.
+    const declared = Array.isArray(data.types?.[primaryType])
+      ? data.types[primaryType]
+      : [];
+    const isDai = declared.some(field => field?.name === 'allowed');
     if (isDai && !message.allowed) {
       result.kind = 'revoke';
       result.rows.push({label: 'Spender', value: String(spender)});
@@ -148,11 +164,11 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
         value: isDai ? 'Unlimited' : describeAmount(message.value),
       },
       {
-        label: 'Valid until',
+        label: 'Signature valid until',
         value: describeTime(isDai ? message.expiry : message.deadline),
       },
     );
-    gradeAllowance(spender, unlimited);
+    gradeAllowance(spender, unlimited, 'until you revoke it');
   } else if (PERMIT2_ALLOWANCE_TYPES.includes(primaryType)) {
     result.kind = 'permit';
     const spender = message.spender;
@@ -167,15 +183,20 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
       gradeAllowance(
         spender,
         message.details.some(detail => isUnlimited(detail?.amount)),
+        'until the allowance expires',
       );
     } else {
       const detail = message.details || {};
       result.rows.push(
         {label: 'Token', value: String(detail.token)},
         {label: 'Amount', value: describeAmount(detail.amount)},
-        {label: 'Valid until', value: describeTime(detail.expiration)},
+        {label: 'Allowance expires', value: describeTime(detail.expiration)},
       );
-      gradeAllowance(spender, isUnlimited(detail.amount));
+      gradeAllowance(
+        spender,
+        isUnlimited(detail.amount),
+        'until the allowance expires',
+      );
     }
   } else if (
     PERMIT2_TRANSFER_TYPES.includes(primaryType) ||
@@ -201,7 +222,7 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
       );
     }
     result.rows.push({
-      label: 'Valid until',
+      label: 'Signature valid until',
       value: describeTime(message.deadline),
     });
     if (permitted.some(item => isUnlimited(item?.amount))) {
@@ -235,6 +256,14 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
             : 'Nothing',
         },
       );
+      if ([...offer, ...paidToYou].some(hasChangingAmount)) {
+        result.rows.push({
+          label: 'Order period',
+          value: `${describeTime(message.startTime)} to ${describeTime(
+            message.endTime,
+          )}`,
+        });
+      }
     } else {
       result.rows.push(
         {label: 'Collection', value: String(message.collection)},
