@@ -204,6 +204,29 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     });
   });
 
+  it.each([
+    ['tron_sendTransaction', [{to: '0x1', data: '0x095ea7b3'}], 'eip155:1'],
+    ['solana_signMessage', {message: 'x'}, 'eip155:1'],
+    ['eth_sendTransaction', [{to: 'T1'}], 'tron:0x2b6653dc'],
+  ])(
+    'replies -32601 to %s on the wrong namespace without opening the modal',
+    async (method, params, chainId) => {
+      await handlers.session_request(sessionRequest(method, params, chainId));
+
+      expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
+      const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
+      expect(response.error.code).toBe(-32601);
+      expect(response.error.data).toEqual({method, chainId});
+      expect(setWalletConnectTransactionData).not.toHaveBeenCalled();
+      expect(store.dispatch).not.toHaveBeenCalled();
+      expect(logWalletConnectEvent).toHaveBeenCalledWith(
+        'warn',
+        'session_request.unsupported_method',
+        expect.objectContaining({method, chainId}),
+      );
+    },
+  );
+
   it('replies -32601 to hedera_signTransaction without opening the modal', async () => {
     await handlers.session_request(
       sessionRequest('hedera_signTransaction', [{}], 'hedera:testnet'),

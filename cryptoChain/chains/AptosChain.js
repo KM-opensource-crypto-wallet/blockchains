@@ -7,6 +7,16 @@ import {
 } from 'dok-wallet-blockchain-networks/helper';
 import {IS_SANDBOX} from 'dok-wallet-blockchain-networks/config/config';
 import {getRPCUrl} from 'dok-wallet-blockchain-networks/rpcUrls/rpcUrls';
+import {Buffer} from 'buffer';
+
+// The dApp's origin, as a browser wallet reports `application`.
+const toOrigin = url => {
+  try {
+    return new URL(url).origin;
+  } catch (e) {
+    return url || undefined;
+  }
+};
 
 let aptosSdk;
 const getAptosSdk = () => (aptosSdk ??= require('@aptos-labs/ts-sdk'));
@@ -121,15 +131,49 @@ export const AptosChain = () => {
         privateKey: privateKey,
       };
     },
-    signMessage: ({signTypeData, privateKey}) => {
+    // AIP-62 (as Petra): sign the "APTOS\n…" full message text and return it
+    // as `fullMessage`.
+    signMessage: ({signTypeData, privateKey, chainId, domain}) => {
       try {
-        const message = signTypeData;
+        const input =
+          typeof signTypeData === 'string'
+            ? {message: signTypeData}
+            : signTypeData || {};
+        const {message} = input;
+        if (typeof message !== 'string') {
+          throw new Error(
+            'Invalid aptos_signMessage: message must be a string',
+          );
+        }
+        const nonce = input.nonce == null ? '' : String(input.nonce);
         const account = getAccountFromPrivateKey(privateKey);
-        const signature = account.sign(message);
+        const address = account.accountAddress.toString();
+        const application = input.application ? toOrigin(domain) : undefined;
+        const aptosChainId = input.chainId
+          ? Number(String(chainId).split(':').pop())
+          : undefined;
+        const lines = ['APTOS'];
+        if (input.address) {
+          lines.push(`address: ${address}`);
+        }
+        if (application) {
+          lines.push(`application: ${application}`);
+        }
+        if (aptosChainId !== undefined) {
+          lines.push(`chainId: ${aptosChainId}`);
+        }
+        lines.push(`message: ${message}`, `nonce: ${nonce}`);
+        const fullMessage = lines.join('\n');
+        const signature = account.sign(Buffer.from(fullMessage, 'utf8'));
         return {
+          address,
+          application,
+          chainId: aptosChainId,
+          fullMessage,
+          message,
+          nonce,
+          prefix: 'APTOS',
           signature: signature.toString(),
-          fullMessage: message,
-          address: account.accountAddress.toString(),
         };
       } catch (e) {
         console.error('Error in aptos signMessage', e);

@@ -34,7 +34,7 @@ const isInvisibleFormat = code =>
 
 // Tabs and line breaks are fine; other C0/C1 control characters and invisible
 // formatting characters are not readable text.
-const isPrintable = text => {
+export const isPrintable = text => {
   for (const char of text) {
     const code = char.codePointAt(0);
     const isControl =

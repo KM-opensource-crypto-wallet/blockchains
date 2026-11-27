@@ -11,6 +11,7 @@ import {
   Transaction,
   TransactionInstruction,
   TransactionMessage,
+  VersionedMessage,
   VersionedTransaction,
 } from '@solana/web3.js';
 import {
@@ -252,6 +253,20 @@ const readComputeBudget = message => {
     console.log('Error reading Solana compute budget', e);
   }
   return {units, microLamports};
+};
+
+// True when the bytes deserialize as a legacy or v0 transaction message whose
+// required signers include `publicKey`. Readable text never does: it would
+// need this wallet's 32-byte key at a signer position.
+const isTransactionMessageSignedBy = (bytes, publicKey) => {
+  try {
+    const message = VersionedMessage.deserialize(bytes);
+    return message.staticAccountKeys
+      .slice(0, message.header.numRequiredSignatures)
+      .some(key => key.equals(publicKey));
+  } catch (e) {
+    return false;
+  }
 };
 
 export const SolanaChain = () => {
@@ -759,10 +774,15 @@ export const SolanaChain = () => {
         const from = Keypair.fromSecretKey(secretKey, {
           skipValidation: true,
         });
-        const signature = nacl.sign.detached(
-          bs58.decode(message),
-          from.secretKey,
-        );
+        const messageBytes = bs58.decode(message);
+        // As Phantom and Solflare do: bytes that are a transaction message
+        // for this wallet are not signed as a message.
+        if (isTransactionMessageSignedBy(messageBytes, from.publicKey)) {
+          throw new Error(
+            'This message is a Solana transaction, so it was not signed.',
+          );
+        }
+        const signature = nacl.sign.detached(messageBytes, from.secretKey);
         const bs58Signature = bs58.encode(signature);
         return {signature: bs58Signature};
       } catch (e) {

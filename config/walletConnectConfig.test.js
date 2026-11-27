@@ -10,7 +10,9 @@ import {
   IS_SANDBOX,
   isNonEVMChain,
   isSupportedWalletConnectMethod,
+  isWalletConnectMethodForChain,
   NON_EVM_METHOD_HANDLERS,
+  SUPPORTED_WALLET_CONNECT_METHODS,
   WalletConnectMethods,
 } from 'dok-wallet-blockchain-networks/config/config';
 
@@ -167,6 +169,83 @@ describe('Polkadot WalletConnect method routing', () => {
       }),
     ).toEqual({
       signTypeData: {message: '0x68656c6c6f', type: undefined},
+    });
+  });
+});
+
+// A method is only answered on its own namespace.
+describe('isWalletConnectMethodForChain', () => {
+  it.each([
+    ['eth_sendTransaction', 'eip155:1'],
+    ['eth_signTransaction', 'eip155:56'],
+    ['personal_sign', 'eip155:1'],
+    ['eth_signTypedData_v4', 'eip155:137'],
+    ['wallet_sendCalls', 'eip155:11155111'],
+    ['wallet_getCapabilities', 'eip155:1'],
+    ['wallet_switchEthereumChain', 'eip155:1'],
+    ['eth_sendTransaction', 'eip155:295'],
+    ['solana_signMessage', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+    ['tron_sendTransaction', 'tron:0x2b6653dc'],
+    ['ton_sendMessage', 'ton:-239'],
+    ['polkadot_signMessage', 'polkadot:91b171bb158e2d3848fa23a9f1c25182'],
+    ['stellar_signXDR', 'stellar:pubnet'],
+    ['xrpl_signTransaction', 'xrpl:0'],
+    ['hedera_signMessage', 'hedera:mainnet'],
+    ['hedera_getNodeAddresses', 'hedera:testnet'],
+    ['aptos_signMessage', 'aptos:1'],
+    ['tezos_sign', 'tezos:NetXdQprcVkpaWU'],
+    ['signPsbt', 'bip122:000000000019d6689c085ae165831e93'],
+    ['signMessage', 'bip122:000000000019d6689c085ae165831e93'],
+  ])('allows %s on %s', (method, chainId) => {
+    expect(isWalletConnectMethodForChain(method, chainId)).toBe(true);
+  });
+
+  it.each([
+    // another namespace's method on eip155,
+    ['tron_sendTransaction', 'eip155:1'],
+    ['solana_signAndSendTransaction', 'eip155:1'],
+    ['hedera_signMessage', 'eip155:295'],
+    ['signMessage', 'eip155:1'],
+    ['sendTransfer', 'eip155:1'],
+    // eth_* on a non-EVM namespace,
+    ['eth_sendTransaction', 'tron:0x2b6653dc'],
+    ['eth_sendTransaction', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+    ['personal_sign', 'hedera:mainnet'],
+    ['wallet_getCapabilities', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+    ['tron_signMessage', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+    ['solana_signMessage', 'bip122:000000000019d6689c085ae165831e93'],
+    // unsupported methods and malformed chain ids stay refused.
+    ['hedera_signTransaction', 'hedera:mainnet'],
+    ['stellar_signAuthEntry', 'stellar:pubnet'],
+    ['eth_sendTransaction', undefined],
+    ['eth_sendTransaction', 'eip155'],
+    ['cosmos_signDirect', 'cosmos:cosmoshub-4'],
+    [undefined, 'eip155:1'],
+  ])('refuses %s on %s', (method, chainId) => {
+    expect(isWalletConnectMethodForChain(method, chainId)).toBe(false);
+  });
+
+  it('allows every supported method on at least one namespace', () => {
+    const namespaces = [
+      'eip155:1',
+      'solana:x',
+      'tron:x',
+      'ton:x',
+      'polkadot:x',
+      'stellar:x',
+      'xrpl:x',
+      'hedera:x',
+      'aptos:x',
+      'tezos:x',
+      'bip122:x',
+    ];
+    SUPPORTED_WALLET_CONNECT_METHODS.forEach(method => {
+      expect([
+        method,
+        namespaces.some(chainId =>
+          isWalletConnectMethodForChain(method, chainId),
+        ),
+      ]).toEqual([method, true]);
     });
   });
 });

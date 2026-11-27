@@ -262,6 +262,24 @@ describe('walletConnect thunk: review binding for EVM transactions', () => {
     );
   });
 
+  it('refuses another chain’s method on an eip155 chain before signing', async () => {
+    store = configureMockStore([thunk])(
+      makeState(pendingRequest({method: 'tron_sendTransaction'})),
+    );
+    const result = await store.dispatch(
+      walletConnect(
+        basePayload({method: 'tron_sendTransaction', transactionData: params0}),
+      ),
+    );
+    expect(result.type).toBe('wallets/walletConnect/rejected');
+    expect(getCoin).not.toHaveBeenCalled();
+    expect(executor.sendRawTransaction).not.toHaveBeenCalled();
+    expect(errorReply().code).toBe(-32601);
+    expect(store.getActions().map(a => a.type)).toContain(
+      'walletConnect/clearWalletConnectTransactionData',
+    );
+  });
+
   it('leaves message signing untouched (no digest required)', async () => {
     store = configureMockStore([thunk])(
       makeState(

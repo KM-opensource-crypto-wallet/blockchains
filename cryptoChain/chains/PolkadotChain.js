@@ -219,21 +219,19 @@ export const PolkadotChain = () => {
           Buffer.from(privateKey, 'hex'),
         );
         const message = signTypeData?.message ?? signTypeData;
-        const type = signTypeData?.type;
         if (typeof message !== 'string') {
           throw new Error(
             'Invalid polkadot_signMessage: data must be a string',
           );
         }
         // WalletConnect polkadot_signMessage (SignerPayloadRaw) sends `data`
-        // hex-encoded. For type 'bytes' (the default) the dApp has already
-        // wrapped the text in <Bytes>…</Bytes> before hex-encoding, so decode
-        // the hex and rely on u8aWrapBytes being a no-op on wrapped input
-        // (same as polkadot-js extension signRaw). A non-hex string is still
-        // UTF-8 encoded, keeping plain-text callers working. type 'payload'
-        // is transaction-like data and must be signed unwrapped.
-        const bytes = u8aToU8a(message);
-        const toSign = type === 'payload' ? bytes : u8aWrapBytes(bytes);
+        // hex-encoded. The dApp has usually wrapped the text in
+        // <Bytes>…</Bytes> before hex-encoding, so decode the hex and rely on
+        // u8aWrapBytes being a no-op on wrapped input. A non-hex string is
+        // still UTF-8 encoded, keeping plain-text callers working. Every
+        // `type`, 'payload' included, is wrapped, as polkadot-js extension
+        // signRaw does.
+        const toSign = u8aWrapBytes(u8aToU8a(message));
         const signature = keypair.sign(toSign);
         return {signature: u8aToHex(signature)};
       } catch (e) {
