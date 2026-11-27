@@ -7,7 +7,6 @@ import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
-  mergeUniqueAccounts,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -21,7 +20,6 @@ import {
   getLegacyWindowItems,
   getNetworkByChainName,
   getStandardChainItems,
-  hasLegacyScheme,
   isKnownBitcoinChain,
   parsePathTail,
   removeLegacyWindowItems,
@@ -29,7 +27,6 @@ import {
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
-import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {getUnsafePsbtInput} from 'dok-wallet-blockchain-networks/helper/psbtReview';
 import {
   fetchBitcoinAddressUsage,
@@ -476,34 +473,14 @@ export const BitcoinChain = () => {
       isLegacyScanDone,
     }) => {
       let newDeriveAddresses = deriveAddresses;
-      // A lost/near-empty list means backend recovery may merge old-scheme
-      // entries back in below, so the resolved flag is ignored for this call
-      // and the legacy window is regenerated and rescanned in the same pass.
+      // A lost/near-empty list may be an old wallet whose funds sit on the
+      // old-scheme window, so the resolved flag is ignored for this call and
+      // that window is re-derived from the xpub and rescanned in the same pass.
       let legacyResolved =
         !!isLegacyScanDone &&
         Array.isArray(deriveAddresses) &&
         deriveAddresses.length > 1;
       try {
-        // Backend recovery only knows the old-scheme address types; newer
-        // types (taproot) are fully re-derivable from the xpub below.
-        if (
-          hasLegacyScheme(chain_name) &&
-          (!Array.isArray(deriveAddresses) || deriveAddresses?.length <= 1) &&
-          extendedPublicKey
-        ) {
-          const resp = await getBitcoinAddresses({
-            chain_name,
-            extended_pub_key: extendedPublicKey,
-          });
-          if (Array.isArray(resp?.data)) {
-            // Merge (old-first) instead of replacing: a lone custom entry
-            // must survive backend recovery.
-            newDeriveAddresses = mergeUniqueAccounts(
-              Array.isArray(newDeriveAddresses) ? newDeriveAddresses : [],
-              resp.data,
-            );
-          }
-        }
         // BIP44 discovery: make sure the standard receive/change window
         // exists, then extend it past the last used address (gap limit).
         newDeriveAddresses = ensureStandardAddresses({

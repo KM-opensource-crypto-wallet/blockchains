@@ -22,10 +22,6 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => ({
   validateNumber: jest.fn(),
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
-  getBitcoinAddresses: jest.fn(),
-}));
-
 jest.mock('dok-wallet-blockchain-networks/service/bitcoinDataSource', () => ({
   isAddressUsageScanAvailable: jest.fn(() => true),
   fetchBitcoinAddressUsage: jest.fn(),
