@@ -542,6 +542,100 @@ describe('BitcoinChain.getBalance for a wallet with one saved address', () => {
   );
 });
 
+describe('BitcoinChain.getBalance takes only balances from the response', () => {
+  // Not an address of the test-vector account.
+  const OTHER_ADDRESS = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const CHANGE_0_PATH = "m/84'/0'/0'/1/0";
+  const ownList = () =>
+    ensureStandardAddresses({
+      chain_name: 'bitcoin',
+      deriveAddresses: [],
+      accountKey: ZPUB,
+      includeLegacyWindow: false,
+    });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    isAddressUsageScanAvailable.mockReturnValue(true);
+    fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
+  });
+
+  const respondWith = deriveAddresses =>
+    fetchBitcoinBalances.mockResolvedValue({
+      data: {totalBalance: '5000', deriveAddresses},
+    });
+
+  it('ignores a changed address and extra entries in the response', async () => {
+    const own = ownList();
+    const ownChange0 = own.find(item => item.derivePath === CHANGE_0_PATH);
+    respondWith([
+      ...own.map(item => ({
+        ...item,
+        address:
+          item.derivePath === CHANGE_0_PATH ? OTHER_ADDRESS : item.address,
+        balance: item.address === FIRST_RECEIVE_ADDRESS ? '5000' : '0',
+      })),
+      {derivePath: "m/84'/0'/0'/1/1", address: OTHER_ADDRESS, balance: '0'},
+    ]);
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      extendedPublicKey: ZPUB,
+      deriveAddresses: own,
+      isLegacyScanDone: true,
+    });
+
+    expect(result.totalBalance).toBe('5000');
+    expect(result.deriveAddresses).toHaveLength(own.length);
+    expect(result.deriveAddresses.map(item => item.address)).not.toContain(
+      OTHER_ADDRESS,
+    );
+    expect(
+      result.deriveAddresses.find(item => item.derivePath === CHANGE_0_PATH)
+        .address,
+    ).toBe(ownChange0.address);
+    expect(
+      result.deriveAddresses.find(
+        item => item.address === FIRST_RECEIVE_ADDRESS,
+      ).balance,
+    ).toBe('5000');
+  });
+
+  it('keeps entries the response left out', async () => {
+    const own = ownList();
+    respondWith(own.slice(0, 5).map(item => ({...item, balance: '0'})));
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      extendedPublicKey: ZPUB,
+      deriveAddresses: own,
+      isLegacyScanDone: true,
+    });
+
+    expect(result.deriveAddresses.map(item => item.address)).toEqual(
+      own.map(item => item.address),
+    );
+  });
+
+  it('keeps the coin address when there is no xpub', async () => {
+    respondWith([
+      {derivePath: "m/84'/0'/0'/0/0", address: OTHER_ADDRESS, balance: '7'},
+    ]);
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      deriveAddresses: [],
+    });
+
+    expect(result.deriveAddresses).toEqual([
+      {derivePath: "m/84'/0'/0'/0/0", address: FIRST_RECEIVE_ADDRESS},
+    ]);
+  });
+});
+
 describe('bitcoin_taproot (BIP-86)', () => {
   it('uses purpose 86 and plain xpub/xprv version bytes', () => {
     expect(getAccountBasePath('bitcoin_taproot')).toBe("m/86'/0'/0'");

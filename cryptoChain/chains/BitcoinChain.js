@@ -24,6 +24,7 @@ import {
   parsePathTail,
   removeLegacyWindowItems,
   shouldPruneLegacyWindow,
+  withReportedBalances,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
@@ -555,19 +556,24 @@ export const BitcoinChain = () => {
             derive_addresses: newDeriveAddresses,
           });
           return resp?.data
-            ? {...resp.data, isLegacyScanDone: legacyResolved}
+            ? {
+                ...keepOwnAddresses(resp.data, newDeriveAddresses),
+                isLegacyScanDone: legacyResolved,
+              }
             : resp?.data;
         } else {
-          const deriveAddress = getDeriveAddressByChain(chain_name);
+          const ownItems = [
+            {
+              derivePath: getDeriveAddressByChain(chain_name),
+              address,
+            },
+          ];
           const resp = await fetchBitcoinBalances({
-            derive_addresses: [
-              {
-                derivePath: deriveAddress,
-                address,
-              },
-            ],
+            derive_addresses: ownItems,
           });
-          return resp?.data;
+          return resp?.data
+            ? keepOwnAddresses(resp.data, ownItems)
+            : resp?.data;
         }
       } catch (e) {
         console.error('error in get balance from bitcoin', e);
@@ -1093,6 +1099,17 @@ const buildUTXO = async ({
   }
   return createdTx.toHex();
 };
+
+// The saved address list (and with it the change address) must come only
+// from the wallet's own derivation: the balance response may add balances,
+// never addresses.
+const keepOwnAddresses = (data, ownItems) =>
+  Array.isArray(data?.deriveAddresses)
+    ? {
+        ...data,
+        deriveAddresses: withReportedBalances(ownItems, data.deriveAddresses),
+      }
+    : data;
 
 // First receive address of the mainnet account for this address type.
 const getDeriveAddressByChain = chain_name =>
