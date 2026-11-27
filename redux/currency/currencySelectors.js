@@ -1,10 +1,14 @@
 import {createSelector} from 'reselect';
+import {DEFAULT_COINS} from 'dok-wallet-blockchain-networks/redux/currency/defaultCoins';
 
 export const selectAllCurrencies = state => state.currency.currencies;
 
 export const selectAllActiveCurrencies = createSelector(
   [selectAllCurrencies],
-  currencies => currencies?.filter(item => item?.status) ?? [],
+  currencies => {
+    const activeCurrencies = currencies?.filter(item => item?.status) ?? [];
+    return activeCurrencies.length ? activeCurrencies : DEFAULT_COINS;
+  },
 );
 
 export const selectAllActiveCoins = createSelector(
