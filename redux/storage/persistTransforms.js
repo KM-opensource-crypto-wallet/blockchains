@@ -15,7 +15,7 @@
 //                     in the encrypted store; never a plaintext cache)
 //   schedulePayment   outbound reset isSubmitting / pendingSubmitCount
 //   sellCrypto        inbound strip the embedded selectedFromWallet
-//   batchTransaction  inbound strip coinInfo secrets
+//   batchTransaction  inbound strip coinInfo secrets; outbound reset addsInFlight
 import {createTransform} from 'redux-persist';
 import {stripAllWalletsSecrets} from '../wallets/walletSecrets';
 import {
@@ -229,5 +229,6 @@ export const batchTransactionPersistTransform = createTransform(
       : key === 'filteredData'
       ? sanitizeBatchTransaction({filteredData: inbound}).filteredData
       : inbound,
-  outbound => outbound,
+  // Additions that were running when the app stopped never finish.
+  (outbound, key) => (key === 'addsInFlight' ? {} : outbound),
 );

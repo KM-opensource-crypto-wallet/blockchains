@@ -142,7 +142,7 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     await handlers.session_request(
       sessionRequest(
         'wallet_getCapabilities',
-        ['0xabc', ['0x1', '0xaa36a7']],
+        ['0xabc', ['0x89', '0xaa36a7']],
         'eip155:1',
       ),
     );
@@ -150,9 +150,10 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     expect(mockWalletKit.respondSessionRequest).toHaveBeenCalledTimes(1);
     const {response} = mockWalletKit.respondSessionRequest.mock.calls[0][0];
     expect(response.error).toBeUndefined();
-    // Only chains with a batch_contract offer batching (Sepolia here).
+    // Only chains with a batch_contract offer batching (Sepolia here; Polygon
+    // has none in either environment).
     expect(response.result).toEqual({
-      '0x1': {},
+      '0x89': {},
       '0xaa36a7': {atomic: {status: 'supported'}},
     });
     expect(showToast).not.toHaveBeenCalled();
@@ -183,7 +184,7 @@ describe('onSessionRequest: unsupported WalletConnect methods', () => {
     it.each([
       [
         'a chain without a batch contract',
-        sendCalls({chainId: '0x1'}, 'eip155:1'),
+        sendCalls({chainId: '0x89'}, 'eip155:137'),
         5710,
       ],
       ['a chain id other than the session', sendCalls({chainId: '0x1'}), 5710],

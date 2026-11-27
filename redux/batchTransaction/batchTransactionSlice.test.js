@@ -5,7 +5,11 @@
  *
  *   npx jest dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice.test.js
  */
-import {addBatchTransaction} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
+import {configureStore} from '@reduxjs/toolkit';
+import {
+  addBatchTransaction,
+  batchTransactionSlice,
+} from 'dok-wallet-blockchain-networks/redux/batchTransaction/batchTransactionSlice';
 import {getNativeCoin} from 'dok-wallet-blockchain-networks/service/wallet.service';
 import {showToast} from 'utils/toast';
 
@@ -90,5 +94,69 @@ describe('addBatchTransaction batch size', () => {
     ]);
 
     expect(action.payload.transaction.calls).toBe(CALL);
+  });
+
+  describe('concurrent additions', () => {
+    const makeStore = existing =>
+      configureStore({
+        reducer: {batchTransaction: batchTransactionSlice.reducer},
+        preloadedState: {
+          batchTransaction: {
+            ...batchTransactionSlice.getInitialState(),
+            transactions: {w1: existing},
+          },
+        },
+        middleware: getDefaultMiddleware =>
+          getDefaultMiddleware({
+            serializableCheck: false,
+            immutableCheck: false,
+          }),
+      });
+    const addTo = (store, transactionId) =>
+      store.dispatch(
+        addBatchTransaction({
+          transactionId,
+          selectedCoin: {chain_name: 'ethereum', address: ADDRESS},
+          transferData: {amount: '1'},
+        }),
+      );
+    const batchState = store => store.getState().batchTransaction;
+
+    it('never lets two additions both take the last place', async () => {
+      // Both would still be waiting for the coin when the other checks.
+      let resolveCoin;
+      getNativeCoin.mockReturnValue(
+        new Promise(resolve => {
+          resolveCoin = resolve;
+        }),
+      );
+      const store = makeStore(queued(31));
+
+      const first = addTo(store, 'a');
+      const second = addTo(store, 'b');
+      resolveCoin({createCall: jest.fn(async () => CALL)});
+      const [a, b] = await Promise.all([first, second]);
+
+      expect(a.meta.requestStatus).toBe('fulfilled');
+      expect(b.payload).toBe('Batch is full');
+      expect(getNativeCoin).toHaveBeenCalledTimes(1);
+      expect(batchState(store).transactions.w1).toHaveLength(32);
+      expect(batchState(store).addsInFlight).toEqual({});
+    });
+
+    it.each([
+      ['fails', () => getNativeCoin.mockRejectedValueOnce(new Error('down'))],
+      ['finds no native coin', () => getNativeCoin.mockResolvedValueOnce(null)],
+    ])('gives the place back when an addition %s', async (_, setUp) => {
+      setUp();
+      const store = makeStore(queued(31));
+
+      await addTo(store, 'a');
+      const next = await addTo(store, 'b');
+
+      expect(next.meta.requestStatus).toBe('fulfilled');
+      expect(batchState(store).transactions.w1).toHaveLength(32);
+      expect(batchState(store).addsInFlight).toEqual({});
+    });
   });
 });

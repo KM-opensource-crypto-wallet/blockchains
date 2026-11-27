@@ -13,6 +13,13 @@ const BATCH = '0x03203E5a57f568aca9C83d28a79Af3981BA54434';
 const ZERO = '0x0000000000000000000000000000000000000000';
 const CHAIN_ID = 11155111;
 const THROWAWAY = '0x3333333333333333333333333333333333333333';
+// eth_blockNumber's answer: both batch gas estimates are pinned to it.
+const BLOCK = '0x1234';
+// An RPC that answers eth_blockNumber with BLOCK and every estimate with gas().
+const rpcSend = gas =>
+  jest.fn(async (method, params) =>
+    method === 'eth_blockNumber' ? BLOCK : gas(params?.[0]),
+  );
 
 const provider = {};
 const authorizeCalls = [];
@@ -157,7 +164,7 @@ describe('EVMChain EIP-7702 authorizations', () => {
     contractCalls.populate.length = 0;
     Object.assign(provider, {
       getTransactionCount: jest.fn(async () => 7),
-      send: jest.fn(async () => '0x186a0'),
+      send: rpcSend(() => '0x186a0'),
       broadcastTransaction: jest.fn(async () => ({
         hash: '0x' + 'ab'.repeat(32),
       })),
@@ -228,12 +235,75 @@ describe('EVMChain EIP-7702 authorizations', () => {
           },
         ],
       },
-      'latest',
+      BLOCK,
       {
         [FROM]: {code: '0xef0100' + BATCH.slice(2)},
         [THROWAWAY]: {balance: '0x1'},
       },
     ]);
+  });
+
+  // eth.drpc.org drops authorizationList and answers the execution cost
+  // alone, so mainnet batch 0x8bc3b0d1… was sent ~25k gas short and ran out
+  // of gas.
+  it('refuses an estimate from a node that ignores the authorization', async () => {
+    provider.send = rpcSend(() => '0x10d0e');
+
+    await expect(
+      loadChain('ethereum').getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      }),
+    ).rejects.toThrow(/did not price the batch authorization/);
+    expect(provider.send).toHaveBeenCalledWith('eth_estimateGas', [
+      {from: FROM, to: FROM, data: '0xexecute((address,uint256,bytes)[]):1'},
+      BLOCK,
+      {
+        [FROM]: {code: '0xef0100' + BATCH.slice(2)},
+        [THROWAWAY]: {balance: '0x1'},
+      },
+    ]);
+  });
+
+  it('keeps an estimate that prices the authorization', async () => {
+    provider.send = rpcSend(tx =>
+      tx.authorizationList ? '0x16e5a' : '0x10d0e',
+    );
+
+    const error = await loadChain('ethereum')
+      .getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      })
+      .then(
+        () => null,
+        e => e,
+      );
+
+    // Fee calculation is not stubbed, so it may still fail after the estimate.
+    expect(error?.message ?? '').not.toMatch(
+      /did not price the batch authorization/,
+    );
+  });
+
+  // With 'latest' a load-balanced RPC can answer the two estimates from
+  // different blocks, and the comparison would then measure a state change
+  // instead of the authorization's cost.
+  it('runs both estimates on the same block', async () => {
+    await loadChain('ethereum')
+      .getEstimateFeeForBatchTransaction({
+        calls,
+        privateKey: '0xkey',
+        existingNonce: 7,
+      })
+      .catch(() => {});
+
+    const blocks = provider.send.mock.calls
+      .filter(([method]) => method === 'eth_estimateGas')
+      .map(([, params]) => params[1]);
+    expect(blocks).toEqual([BLOCK, BLOCK]);
   });
 
   it('refuses a batch over the contract limit before any RPC call', async () => {

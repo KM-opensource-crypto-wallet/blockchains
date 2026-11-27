@@ -151,6 +151,16 @@ describe('persistTransforms', () => {
     expect(batchTransactionPersistTransform.in('x', 'other')).toBe('x');
   });
 
+  it('batchTransaction outbound drops additions that never finished', () => {
+    expect(
+      batchTransactionPersistTransform.out(
+        {r1: 'w1_ethereum_0xa'},
+        'addsInFlight',
+      ),
+    ).toEqual({});
+    expect(batchTransactionPersistTransform.out('x', 'transactions')).toBe('x');
+  });
+
   describe('slimming (Phase 4)', () => {
     const tx = (i, date) => ({hash: `h${i}`, date});
 

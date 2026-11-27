@@ -114,6 +114,32 @@ export const getWalletConnect = () => {
   return walletConnect;
 };
 
+// The user rejected a request on screen. Never rejects: WalletKit throws when
+// the request is already gone (expired, or the session ended) and the dApp
+// has stopped waiting anyway, so there is nothing left to tell it. Callers
+// fire and forget; an unawaited rejection here was DOKWALLET-WALLET-WEB-1T.
+export const rejectSessionRequest = async ({id, topic}) => {
+  if (!walletConnect) {
+    return;
+  }
+  try {
+    await walletConnect.respondSessionRequest({
+      topic,
+      response: {
+        id,
+        jsonrpc: '2.0',
+        error: {code: 5000, message: 'User rejected.'},
+      },
+    });
+  } catch (e) {
+    logWalletConnectEvent('warn', 'session_request.reject_reply_failed', {
+      requestId: id,
+      topic,
+      message: e?.message,
+    });
+  }
+};
+
 // wallet_sendCalls (EIP-5792) is only atomic where a batch contract is
 // deployed. Both environments' chain ids are listed; the session itself only
 // ever contains the current environment's chains.
