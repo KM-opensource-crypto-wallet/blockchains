@@ -10,7 +10,13 @@ import {
   ContractExecuteTransaction,
   Hbar,
   PrivateKey,
+  ScheduleCreateTransaction,
+  ScheduleSignTransaction,
   TokenAssociateTransaction,
+  TokenDissociateTransaction,
+  TokenUpdateTransaction,
+  TopicMessageSubmitTransaction,
+  Transaction,
   TransactionId,
   TransferTransaction,
 } from '@hiero-ledger/sdk';
@@ -161,6 +167,62 @@ describe('reviewHederaRequest (hedera_signAndExecuteTransaction)', () => {
         new TokenAssociateTransaction()
           .setAccountId('0.0.1234')
           .setTokenIds(['0.0.777']),
+      ).level,
+    ).toBe('none');
+  });
+
+  it('blocks a scheduled AccountUpdate that sets a new key', () => {
+    const schedule = new ScheduleCreateTransaction().setScheduledTransaction(
+      new AccountUpdateTransaction().setAccountId('0.0.1234').setKey(newKey),
+    );
+    const r = review(schedule);
+    expect(r.blocked).toBe(true);
+    expect(r.level).toBe('danger');
+    // As the signer sees it: decoded from the request bytes.
+    expect(
+      getHederaTakeoverReason(Transaction.fromBytes(schedule.toBytes())),
+    ).toMatch(/key that controls/);
+  });
+
+  it('marks other scheduled transactions and schedule signing as danger', () => {
+    const scheduled = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(
+        new TransferTransaction()
+          .addHbarTransfer('0.0.1234', new Hbar(-1))
+          .addHbarTransfer('0.0.3', new Hbar(1)),
+      ),
+    );
+    expect(scheduled.level).toBe('danger');
+    expect(scheduled.blocked).toBe(false);
+
+    const sign = review(new ScheduleSignTransaction().setScheduleId('0.0.55'));
+    expect(sign.level).toBe('danger');
+    expect(sign.blocked).toBe(false);
+    expect(row(sign, 'Schedule')).toBe('0.0.55');
+  });
+
+  it('marks a transaction type it does not check as danger', () => {
+    const r = review(
+      new TokenUpdateTransaction().setTokenId('0.0.777').setTokenMemo('x'),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/not checked by the wallet/);
+  });
+
+  it('leaves token dissociation and topic messages without a warning', () => {
+    expect(
+      review(
+        new TokenDissociateTransaction()
+          .setAccountId('0.0.1234')
+          .setTokenIds(['0.0.777']),
+      ).level,
+    ).toBe('none');
+    expect(
+      review(
+        new TopicMessageSubmitTransaction()
+          .setTopicId('0.0.42')
+          .setMessage('hello'),
       ).level,
     ).toBe('none');
   });

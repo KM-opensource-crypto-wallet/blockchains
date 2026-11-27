@@ -98,7 +98,8 @@ export const reviewEvmTypedData = (signTypeData, {chainId} = {}) => {
     return result;
   }
   const domain = data.domain || {};
-  const message = data.message || {};
+  const message =
+    data.message && typeof data.message === 'object' ? data.message : {};
   const primaryType = data.primaryType;
 
   const sessionChain = toBigInt(String(chainId || '').split(':')[1]);

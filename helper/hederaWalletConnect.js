@@ -80,15 +80,39 @@ export const describeHederaRequest = (method, params) => {
 
 const LEVEL_RANK = {none: 0, warn: 1, danger: 2};
 
+// The transaction a decoded ScheduleCreate carries. The SDK keeps it only in
+// this field (set by ScheduleCreateTransaction._fromProtobuf); there is no
+// public getter.
+const scheduledTransactionOf = transaction =>
+  transaction?._scheduledTransaction || null;
+
 // On a decoded Transaction, as HederaChain signs it. Classes are matched with
-// instanceof: release builds may minify constructor names.
+// instanceof: release builds may minify constructor names. A ScheduleCreate is
+// checked through the transaction it schedules, because the signatures on the
+// ScheduleCreate also count for the scheduled transaction.
 export const getHederaTakeoverReason = transaction => {
-  const {AccountUpdateTransaction} = require('@hiero-ledger/sdk');
-  return transaction instanceof AccountUpdateTransaction &&
-    transaction.key != null
+  const {
+    AccountUpdateTransaction,
+    ScheduleCreateTransaction,
+  } = require('@hiero-ledger/sdk');
+  const target =
+    transaction instanceof ScheduleCreateTransaction
+      ? scheduledTransactionOf(transaction)
+      : transaction;
+  return target instanceof AccountUpdateTransaction && target.key != null
     ? 'This request changes the key that controls a Hedera account.'
     : null;
 };
+
+// Types reviewed without a warning beyond their rows (AccountUpdate gets here
+// only without a new key).
+const KNOWN_TRANSACTION_TYPES = [
+  'TransferTransaction',
+  'TokenAssociateTransaction',
+  'TokenDissociateTransaction',
+  'TopicMessageSubmitTransaction',
+  'AccountUpdateTransaction',
+];
 
 const reviewTransaction = (sdk, tx, result, raise) => {
   const takeover = getHederaTakeoverReason(tx);
@@ -135,6 +159,32 @@ const reviewTransaction = (sdk, tx, result, raise) => {
     raise(
       'danger',
       'This calls a smart contract the wallet cannot check. Only continue if you trust this site.',
+    );
+  } else if (tx instanceof sdk.ScheduleCreateTransaction) {
+    const scheduled = scheduledTransactionOf(tx);
+    if (scheduled && !(scheduled instanceof sdk.ScheduleCreateTransaction)) {
+      reviewTransaction(sdk, scheduled, result, raise);
+    }
+    raise(
+      'danger',
+      'This schedules a transaction to run later, and your signature also approves it. Only continue if you trust this site.',
+    );
+  } else if (tx instanceof sdk.ScheduleSignTransaction) {
+    result.rows.push({label: 'Schedule', value: String(tx.scheduleId)});
+    raise(
+      'danger',
+      'This adds your signature to a scheduled transaction the wallet cannot show. Only continue if you trust this site.',
+    );
+  } else if (!KNOWN_TRANSACTION_TYPES.some(name => tx instanceof sdk[name])) {
+    const kind =
+      typeof tx._getTransactionDataCase === 'function'
+        ? tx._getTransactionDataCase()
+        : null;
+    raise(
+      'danger',
+      `This Hedera transaction type${
+        kind ? ` (${kind})` : ''
+      } is not checked by the wallet.`,
     );
   } else if (tx instanceof sdk.TransferTransaction) {
     for (const [tokenId, transfers] of tx.tokenTransfers) {

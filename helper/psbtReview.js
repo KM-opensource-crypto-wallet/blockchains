@@ -44,6 +44,23 @@ export const getUnsafePsbtInput = (psbt, indexes) => {
   return null;
 };
 
+// Outputs the wallet's signatures commit to: every output once any signed
+// input uses ALL (or the taproot DEFAULT); with only SIGHASH_SINGLE inputs,
+// just the output at each signed input's own index.
+const fixedOutputIndexes = (psbt, indexes) => {
+  const all = psbt.txOutputs.map((_, i) => i);
+  const onlySingle =
+    indexes.length > 0 &&
+    indexes.every(
+      index =>
+        ((psbt.data.inputs[index]?.sighashType ??
+          bitcoin.Transaction.SIGHASH_ALL) &
+          SIGHASH_BASE_MASK) ===
+        SIGHASH_SINGLE,
+    );
+  return new Set(onlySingle ? indexes : all);
+};
+
 const formatBtc = sats => {
   const value = BigInt(sats);
   const whole = value / 100000000n;
@@ -89,16 +106,6 @@ export const reviewPsbt = (signTypeData, {chainId, walletAddress} = {}) => {
       rows: [],
     };
   }
-  const rows = psbt.txOutputs.map((output, i) => {
-    const address = addressOf(output.script, network);
-    const own = walletAddress && address === walletAddress;
-    return {
-      label: `Output ${i + 1}`,
-      value: `${address}: ${formatBtc(output.value)} BTC${
-        own ? ' (this wallet)' : ''
-      }`,
-    };
-  });
   const indexes = data?.signInputs?.length
     ? data.signInputs.map(input => input.index)
     : psbt.txInputs
@@ -111,15 +118,47 @@ export const reviewPsbt = (signTypeData, {chainId, walletAddress} = {}) => {
             addressOf(script, network) === walletAddress
           );
         });
+  const unsafe = getUnsafePsbtInput(psbt, indexes);
+  const fixed = unsafe
+    ? new Set(psbt.txOutputs.map((_, i) => i))
+    : fixedOutputIndexes(psbt, indexes);
+  const rows = psbt.txOutputs.map((output, i) => {
+    const address = addressOf(output.script, network);
+    const own = walletAddress && address === walletAddress;
+    let note = own ? ' (this wallet)' : '';
+    if (!fixed.has(i)) {
+      note = ' (can be changed after you sign)';
+    }
+    return {
+      label: `Output ${i + 1}`,
+      value: `${address}: ${formatBtc(output.value)} BTC${note}`,
+    };
+  });
   rows.push({
     label: 'Inputs you sign',
     value: `${indexes.length} (${indexes.map(i => `#${i}`).join(', ')})`,
   });
-  const unsafe = getUnsafePsbtInput(psbt, indexes);
-  return {
-    level: unsafe ? 'danger' : 'none',
-    blocked: !!unsafe,
-    reasons: unsafe ? [`${unsafe.reason} It cannot be signed.`] : [],
-    rows,
-  };
+  if (unsafe) {
+    return {
+      level: 'danger',
+      blocked: true,
+      reasons: [`${unsafe.reason} It cannot be signed.`],
+      rows,
+    };
+  }
+  if (fixed.size < psbt.txOutputs.length) {
+    const fixedList = [...fixed]
+      .sort((a, b) => a - b)
+      .map(i => `Output ${i + 1}`)
+      .join(', ');
+    return {
+      level: 'danger',
+      blocked: false,
+      reasons: [
+        `Your signature fixes only ${fixedList}. The other outputs can be changed after you sign.`,
+      ],
+      rows,
+    };
+  }
+  return {level: 'none', blocked: false, reasons: [], rows};
 };

@@ -16,6 +16,7 @@ import {
   PrecheckStatusError,
   PrivateKey,
   Query,
+  ScheduleCreateTransaction,
   Status,
   Transaction,
   TransactionId,
@@ -253,6 +254,27 @@ describe('hedera_signAndExecuteTransaction → sendRawTransaction', () => {
         signTypeData: {
           signerAccountId: SIGNER,
           transactionList: b64(update.toBytes()),
+        },
+        privateKey,
+      }),
+    ).rejects.toThrow(/key that controls/);
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses a scheduled AccountUpdate that sets a new key', async () => {
+    executeSpy.mockImplementation(async () => {
+      throw new Error('must not execute');
+    });
+    const schedule = new ScheduleCreateTransaction().setScheduledTransaction(
+      new AccountUpdateTransaction()
+        .setAccountId(ACCOUNT_ID)
+        .setKey(PrivateKey.generateECDSA().publicKey),
+    );
+    await expect(
+      HederaChain().sendRawTransaction({
+        signTypeData: {
+          signerAccountId: SIGNER,
+          transactionList: b64(schedule.toBytes()),
         },
         privateKey,
       }),

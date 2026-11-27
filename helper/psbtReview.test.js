@@ -71,6 +71,63 @@ describe('reviewPsbt', () => {
     expect(review.reasons.join(' ')).toMatch(/does not cover the outputs/);
   });
 
+  it('warns when a SIGHASH_SINGLE signature leaves other outputs unfixed', () => {
+    const psbt = buildPsbt({
+      sighashType: 0x03,
+      outputs: [
+        {address: p2wpkh(otherKey).address, value: 100000},
+        {address: walletAddress, value: 90000},
+      ],
+    });
+    const review = reviewPsbt(
+      {psbt: psbt.toBase64(), signInputs: [{index: 0}]},
+      {chainId: TESTNET, walletAddress},
+    );
+    expect(review.level).toBe('danger');
+    expect(review.blocked).toBe(false);
+    expect(review.reasons.join(' ')).toMatch(/only Output 1/);
+    expect(review.rows[1]).toEqual({
+      label: 'Output 2',
+      value: `${walletAddress}: 0.0009 BTC (can be changed after you sign)`,
+    });
+  });
+
+  it('needs no warning for a listing whose only output matches the input', () => {
+    const psbt = buildPsbt({
+      sighashType: 0x83,
+      outputs: [{address: walletAddress, value: 1000000}],
+    });
+    const review = reviewPsbt(
+      {psbt: psbt.toBase64(), signInputs: [{index: 0}]},
+      {chainId: TESTNET, walletAddress},
+    );
+    expect(review.level).toBe('none');
+    expect(review.rows[0].value).toBe(
+      `${walletAddress}: 0.01 BTC (this wallet)`,
+    );
+  });
+
+  it('treats every output as fixed when another signed input uses ALL', () => {
+    const psbt = buildPsbt({
+      sighashType: 0x83,
+      outputs: [
+        {address: walletAddress, value: 1000000},
+        {address: p2wpkh(otherKey).address, value: 50000},
+      ],
+    });
+    psbt.addInput({
+      hash: 'bb'.repeat(32),
+      index: 0,
+      witnessUtxo: {script: p2wpkh(walletKey).output, value: 100000},
+    });
+    const review = reviewPsbt(
+      {psbt: psbt.toBase64(), signInputs: [{index: 0}, {index: 1}]},
+      {chainId: TESTNET, walletAddress},
+    );
+    expect(review.level).toBe('none');
+    expect(review.rows[0].value).toMatch(/\(this wallet\)$/);
+  });
+
   it('flags a PSBT it cannot read as danger without blocking', () => {
     const review = reviewPsbt({psbt: 'not-a-psbt'}, {chainId: TESTNET});
     expect(review.level).toBe('danger');

@@ -223,4 +223,12 @@ describe('reviewEvmTypedData', () => {
     );
     expect(reviewEvmTypedData(undefined).level).toBe('none');
   });
+
+  it('never throws when a permit message is not an object', () => {
+    for (const message of ['x', 7, true]) {
+      expect(() =>
+        reviewEvmTypedData(typed('Permit', message), {chainId: 'eip155:1'}),
+      ).not.toThrow();
+    }
+  });
 });

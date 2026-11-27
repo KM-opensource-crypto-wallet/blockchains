@@ -29,6 +29,7 @@ const TOKEN_SET_AUTHORITY = 6;
 const TOKEN_APPROVE_CHECKED = 13;
 // spl-token AuthorityType: AccountOwner = 2, CloseAccount = 3.
 const TOKEN_ACCOUNT_AUTHORITIES = [2, 3];
+const CLOSE_ACCOUNT_AUTHORITY = 3;
 const U64_MAX = 2n ** 64n - 1n;
 
 const decode = base64Tx => {
@@ -86,7 +87,10 @@ const takeoverOf = (ix, wallet) => {
   ) {
     const newAuthority =
       ix.data[2] === 1 ? new PublicKey(ix.data.slice(3, 35)).toBase58() : null;
-    if (newAuthority !== wallet) {
+    // Clearing the close authority hands it back to the account owner.
+    const clearsCloseAuthority =
+      ix.data[1] === CLOSE_ACCOUNT_AUTHORITY && newAuthority === null;
+    if (newAuthority !== wallet && !clearsCloseAuthority) {
       return 'This request hands control of one of your token accounts to another address.';
     }
   }

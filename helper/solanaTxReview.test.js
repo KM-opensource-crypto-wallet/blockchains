@@ -88,6 +88,19 @@ describe('reviewSolanaRequest', () => {
     },
   );
 
+  it('does not block clearing the close authority (it falls back to the owner)', () => {
+    const tx = txBase64([
+      createSetAuthorityInstruction(
+        tokenAccount,
+        wallet.publicKey,
+        AuthorityType.CloseAccount,
+        null,
+      ),
+    ]);
+    expect(reviewSolanaRequest({transaction: tx}, WALLET).blocked).toBe(false);
+    expect(getSolanaTakeoverReason(tx, WALLET)).toBeNull();
+  });
+
   it('only warns when revoking a mint authority (token launch)', () => {
     const r = review([
       createSetAuthorityInstruction(

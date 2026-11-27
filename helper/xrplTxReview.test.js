@@ -100,6 +100,62 @@ describe('reviewXrplRequest', () => {
     ).toBe('none');
   });
 
+  it('shows what a DEX offer gives and gets', () => {
+    const r = reviewXrplRequest(
+      request({
+        TransactionType: 'OfferCreate',
+        TakerGets: '1000000',
+        TakerPays: {currency: 'USD', issuer: OTHER, value: '0.5'},
+      }),
+    );
+    expect(r.level).toBe('none');
+    expect(row(r, 'You give')).toBe('1 XRP');
+    expect(row(r, 'You get')).toBe('0.5 USD');
+  });
+
+  it('shows a trust line limit and its issuer', () => {
+    const r = reviewXrplRequest(
+      request({
+        TransactionType: 'TrustSet',
+        LimitAmount: {currency: 'USD', issuer: OTHER, value: '100'},
+      }),
+    );
+    expect(r.level).toBe('none');
+    expect(row(r, 'Trust line')).toBe(`100 USD, issuer ${OTHER}`);
+  });
+
+  it('marks NFT offers as danger and shows the offer', () => {
+    const create = reviewXrplRequest(
+      request({
+        TransactionType: 'NFTokenCreateOffer',
+        NFTokenID: 'ABC',
+        Amount: '0',
+        Destination: OTHER,
+        Flags: 1,
+      }),
+    );
+    expect(create.level).toBe('danger');
+    expect(create.blocked).toBe(false);
+    expect(row(create, 'NFT')).toBe('ABC');
+    expect(row(create, 'Sell for')).toBe('0 XRP');
+    expect(row(create, 'Only to')).toBe(OTHER);
+
+    const accept = reviewXrplRequest(
+      request({TransactionType: 'NFTokenAcceptOffer', NFTokenSellOffer: 'F1'}),
+    );
+    expect(accept.level).toBe('danger');
+    expect(accept.blocked).toBe(false);
+  });
+
+  it('marks a transaction type the wallet does not check as danger', () => {
+    const r = reviewXrplRequest(
+      request({TransactionType: 'PaymentChannelCreate', Amount: '1000000'}),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/PaymentChannelCreate.*not checked/);
+  });
+
   it('flags a request without a transaction type as danger', () => {
     expect(reviewXrplRequest({}).level).toBe('danger');
   });
