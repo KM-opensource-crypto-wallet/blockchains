@@ -3,13 +3,29 @@
  * Runner: node-env jest config (real Hedera SDK).
  */
 import {
+  AccountAllowanceApproveTransaction,
   AccountBalanceQuery,
+  AccountDeleteTransaction,
+  AccountUpdateTransaction,
+  ContractExecuteTransaction,
   Hbar,
+  PrivateKey,
+  ScheduleCreateTransaction,
+  ScheduleSignTransaction,
+  TokenAssociateTransaction,
+  TokenDissociateTransaction,
+  TokenUpdateTransaction,
+  TopicMessageSubmitTransaction,
+  Transaction,
   TransactionId,
   TransferTransaction,
 } from '@hiero-ledger/sdk';
 import {Buffer} from 'buffer';
-import {describeHederaRequest} from 'dok-wallet-blockchain-networks/helper/hederaWalletConnect';
+import {
+  describeHederaRequest,
+  getHederaTakeoverReason,
+  reviewHederaRequest,
+} from 'dok-wallet-blockchain-networks/helper/hederaWalletConnect';
 
 const b64 = bytes => Buffer.from(bytes).toString('base64');
 const SIGNER = 'hedera:testnet:0.0.1234';
@@ -73,5 +89,180 @@ describe('describeHederaRequest', () => {
     expect(describeHederaRequest('hedera_unknown', {a: 1})).toEqual({
       raw: {a: 1},
     });
+  });
+});
+
+describe('reviewHederaRequest (hedera_signAndExecuteTransaction)', () => {
+  const withId = tx => tx.setTransactionId(TransactionId.generate('0.0.1234'));
+  const review = tx =>
+    reviewHederaRequest('hedera_signAndExecuteTransaction', {
+      signerAccountId: SIGNER,
+      transactionList: b64(withId(tx).toBytes()),
+    });
+  const row = (r, label) => r.rows.find(x => x.label === label)?.value;
+  const newKey = PrivateKey.fromStringECDSA('11'.repeat(32)).publicKey;
+
+  it('blocks an AccountUpdate that sets a new key', () => {
+    const tx = new AccountUpdateTransaction()
+      .setAccountId('0.0.1234')
+      .setKey(newKey);
+    const r = review(tx);
+    expect(r.blocked).toBe(true);
+    expect(r.level).toBe('danger');
+    expect(getHederaTakeoverReason(tx)).toMatch(/key that controls/);
+  });
+
+  it('does not block an AccountUpdate that only changes the memo', () => {
+    const r = review(
+      new AccountUpdateTransaction()
+        .setAccountId('0.0.1234')
+        .setAccountMemo('hi'),
+    );
+    expect(r.blocked).toBe(false);
+  });
+
+  it('marks an allowance approval as danger and lists it', () => {
+    const r = review(
+      new AccountAllowanceApproveTransaction().approveHbarAllowance(
+        '0.0.1234',
+        '0.0.99',
+        new Hbar(5),
+      ),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(row(r, 'HBAR allowance')).toBe('0.0.99: 5 ℏ');
+  });
+
+  it('marks an account delete and a contract call as danger', () => {
+    expect(
+      review(
+        new AccountDeleteTransaction()
+          .setAccountId('0.0.1234')
+          .setTransferAccountId('0.0.99'),
+      ).level,
+    ).toBe('danger');
+    expect(
+      review(
+        new ContractExecuteTransaction().setContractId('0.0.5').setGas(100000),
+      ).level,
+    ).toBe('danger');
+  });
+
+  it('shows token transfers and leaves plain transfers without a warning', () => {
+    const r = review(
+      new TransferTransaction()
+        .addHbarTransfer('0.0.1234', new Hbar(-1))
+        .addHbarTransfer('0.0.3', new Hbar(1))
+        .addTokenTransfer('0.0.777', '0.0.1234', -10)
+        .addTokenTransfer('0.0.777', '0.0.3', 10),
+    );
+    expect(r.level).toBe('none');
+    expect(row(r, 'Token 0.0.777')).toBe('0.0.1234: -10, 0.0.3: 10');
+  });
+
+  it('leaves token association without a warning', () => {
+    expect(
+      review(
+        new TokenAssociateTransaction()
+          .setAccountId('0.0.1234')
+          .setTokenIds(['0.0.777']),
+      ).level,
+    ).toBe('none');
+  });
+
+  it('blocks a scheduled AccountUpdate that sets a new key', () => {
+    const schedule = new ScheduleCreateTransaction().setScheduledTransaction(
+      new AccountUpdateTransaction().setAccountId('0.0.1234').setKey(newKey),
+    );
+    const r = review(schedule);
+    expect(r.blocked).toBe(true);
+    expect(r.level).toBe('danger');
+    // As the signer sees it: decoded from the request bytes.
+    expect(
+      getHederaTakeoverReason(Transaction.fromBytes(schedule.toBytes())),
+    ).toMatch(/key that controls/);
+  });
+
+  it('marks other scheduled transactions and schedule signing as danger', () => {
+    const scheduled = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(
+        new TransferTransaction()
+          .addHbarTransfer('0.0.1234', new Hbar(-1))
+          .addHbarTransfer('0.0.3', new Hbar(1)),
+      ),
+    );
+    expect(scheduled.level).toBe('danger');
+    expect(scheduled.blocked).toBe(false);
+
+    const sign = review(new ScheduleSignTransaction().setScheduleId('0.0.55'));
+    expect(sign.level).toBe('danger');
+    expect(sign.blocked).toBe(false);
+    expect(row(sign, 'Schedule')).toBe('0.0.55');
+  });
+
+  it('shows HBAR transfers, also inside a scheduled transaction', () => {
+    const hbarTransfer = () =>
+      new TransferTransaction()
+        .addHbarTransfer('0.0.1234', new Hbar(-2))
+        .addHbarTransfer('0.0.3', new Hbar(2));
+    expect(row(review(hbarTransfer()), 'HBAR')).toBe(
+      '0.0.1234: -2 ℏ, 0.0.3: 2 ℏ',
+    );
+    const scheduled = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(hbarTransfer()),
+    );
+    expect(row(scheduled, 'HBAR')).toBe('0.0.1234: -2 ℏ, 0.0.3: 2 ℏ');
+    expect(scheduled.level).toBe('danger');
+  });
+
+  it('reviews an allowance inside a scheduled transaction', () => {
+    const r = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(
+        new AccountAllowanceApproveTransaction().approveHbarAllowance(
+          '0.0.1234',
+          '0.0.99',
+          new Hbar(5),
+        ),
+      ),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(row(r, 'HBAR allowance')).toBe('0.0.99: 5 ℏ');
+  });
+
+  it('marks a transaction type it does not check as danger', () => {
+    const r = review(
+      new TokenUpdateTransaction().setTokenId('0.0.777').setTokenMemo('x'),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/not checked by the wallet/);
+  });
+
+  it('leaves token dissociation and topic messages without a warning', () => {
+    expect(
+      review(
+        new TokenDissociateTransaction()
+          .setAccountId('0.0.1234')
+          .setTokenIds(['0.0.777']),
+      ).level,
+    ).toBe('none');
+    expect(
+      review(
+        new TopicMessageSubmitTransaction()
+          .setTopicId('0.0.42')
+          .setMessage('hello'),
+      ).level,
+    ).toBe('none');
+  });
+
+  it('returns null for methods it does not review, danger for bad bytes', () => {
+    expect(reviewHederaRequest('hedera_signAndExecuteQuery', {})).toBeNull();
+    expect(
+      reviewHederaRequest('hedera_signAndExecuteTransaction', {
+        transactionList: 'AAAA',
+      }).level,
+    ).toBe('danger');
   });
 });

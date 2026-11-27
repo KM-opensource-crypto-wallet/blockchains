@@ -12,6 +12,16 @@ import {
   getExplorerTxUrl,
   isValidStringWithValue,
 } from 'dok-wallet-blockchain-networks/helper';
+import {getStellarTakeoverReason} from 'dok-wallet-blockchain-networks/helper/stellarTxReview';
+
+// WalletConnect: a transaction that changes who can sign for the account is
+// never signed.
+const refuseStellarTakeover = transaction => {
+  const reason = getStellarTakeoverReason(transaction);
+  if (reason) {
+    throw new Error(`${reason} It was not signed.`);
+  }
+};
 
 export const StellarChain = () => {
   let stellarProvider;
@@ -57,6 +67,7 @@ export const StellarChain = () => {
           xdr,
           config.STELLAR_NETWORK,
         );
+        refuseStellarTakeover(transaction);
         transaction.sign(keypair);
         return {signedXDR: transaction.toEnvelope().toXDR('base64')};
       } catch (e) {
@@ -104,6 +115,7 @@ export const StellarChain = () => {
           payload,
           config.STELLAR_NETWORK,
         );
+        refuseStellarTakeover(transaction);
         transaction.sign(keypair);
         await stellarProvider.submitTransaction(transaction);
         return {status: 'success'};

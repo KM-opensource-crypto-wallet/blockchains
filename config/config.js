@@ -2026,6 +2026,62 @@ export const SUPPORTED_WALLET_CONNECT_METHODS = new Set([
 export const isSupportedWalletConnectMethod = method =>
   typeof method === 'string' && SUPPORTED_WALLET_CONNECT_METHODS.has(method);
 
+// A method is only answered on its own namespace (eth_* / personal_sign /
+// wallet_* on eip155, solana_* on solana, the BTC methods on bip122, …), so
+// the review screen and the signer always agree on the chain family.
+const EIP155_WALLET_CONNECT_METHODS = new Set([
+  'eth_sendTransaction',
+  'eth_signTransaction',
+  'personal_sign',
+  'eth_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4',
+  'wallet_sendCalls',
+  'wallet_addEthereumChain',
+  'wallet_switchEthereumChain',
+  'wallet_getCapabilities',
+  'wallet_getCallsStatus',
+]);
+const BIP122_WALLET_CONNECT_METHODS = new Set([
+  'sendTransfer',
+  'signMessage',
+  'signPsbt',
+  'getAccountAddresses',
+]);
+// Namespaces whose methods all carry the namespace as prefix (solana_*, …).
+const PREFIXED_WALLET_CONNECT_NAMESPACES = [
+  'solana',
+  'ton',
+  'polkadot',
+  'tron',
+  'stellar',
+  'xrpl',
+  'hedera',
+  'aptos',
+  'tezos',
+];
+
+export const isWalletConnectMethodForChain = (method, chainId) => {
+  if (!isSupportedWalletConnectMethod(method) || typeof chainId !== 'string') {
+    return false;
+  }
+  const [namespace, reference] = chainId.split(':');
+  if (!reference) {
+    return false;
+  }
+  if (namespace === 'eip155') {
+    return EIP155_WALLET_CONNECT_METHODS.has(method);
+  }
+  if (namespace === 'bip122') {
+    return BIP122_WALLET_CONNECT_METHODS.has(method);
+  }
+  return (
+    PREFIXED_WALLET_CONNECT_NAMESPACES.includes(namespace) &&
+    method.startsWith(`${namespace}_`)
+  );
+};
+
 const hederaSignerAccountId = params =>
   params?.signerAccountId?.split(':')?.pop();
 

@@ -13,7 +13,6 @@ import {
   shouldPruneLegacyWindow,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BitcoinChain} from 'dok-wallet-blockchain-networks/cryptoChain/chains/BitcoinChain';
-import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
 import {
   fetchBitcoinAddressUsage,
   fetchBitcoinBalances,
@@ -55,10 +54,6 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => ({
     );
     return [...merged, ...toAdd];
   },
-}));
-
-jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
-  getBitcoinAddresses: jest.fn(),
 }));
 
 jest.mock('dok-wallet-blockchain-networks/service/bitcoinDataSource', () => ({
@@ -358,7 +353,6 @@ describe('BitcoinChain.getBalance legacy scan', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     isAddressUsageScanAvailable.mockReturnValue(true);
-    getBitcoinAddresses.mockResolvedValue({data: []});
     fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
     fetchBitcoinBalances.mockImplementation(({derive_addresses}) =>
       Promise.resolve({
@@ -447,6 +441,201 @@ describe('BitcoinChain.getBalance legacy scan', () => {
   });
 });
 
+// What the old address-recovery endpoint returned for the BIP84/49/44 test
+// vector accounts (abandon x11 + about): the old app scheme …/i/0, i = 0..19.
+// The app must find the same addresses from the xpub on its own.
+const OLD_SCHEME_ACCOUNTS = [
+  {
+    chain_name: 'bitcoin',
+    xpub: ZPUB,
+    basePath: "m/84'/0'/0'",
+    addresses: {
+      0: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu',
+      1: 'bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el',
+      2: 'bc1qgypllrw8plmfj3tutsff7c0p9j9adukc4qagn6',
+      10: 'bc1qgtm9w3l96jxxw4agvsz8lcm6vamr8nrf8l0du0',
+      19: 'bc1qn6rssdh4nexle22799k0tdck53msg90zm0fgjp',
+    },
+  },
+  {
+    chain_name: 'bitcoin_segwit',
+    xpub: 'ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP',
+    basePath: "m/49'/0'/0'",
+    addresses: {
+      0: '37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf',
+      1: '34K56kSjgUCUSD8GTtuF7c9Zzwokbs6uZ7',
+      2: '3GHtPiS333CV2fDqX68GEL7eNYt3nXGo1G',
+      10: '3PSbikpKfS8H5dryb8Vtr6TCP9kW1SwPXd',
+      19: '3Kqu6afqeeCFwQLoeBQtpPoXERMuumNH6P',
+    },
+  },
+  {
+    chain_name: 'bitcoin_legacy',
+    xpub: 'xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj',
+    basePath: "m/44'/0'/0'",
+    addresses: {
+      0: '1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA',
+      1: '1J3J6EvPrv8q6AC3VCjWV45Uf3nssNMRtH',
+      2: '1PKxPe6zBab3JRFwj4EzNXZLxhJy6YTKWv',
+      10: '1KjcT5eqhrVER9qE3xxtEKUSoZVHTJreqb',
+      19: '1MTHAfzqPk6VVgGMJhdNGQYinsAqMg5E7k',
+    },
+  },
+];
+
+describe('BitcoinChain.getBalance for a wallet with one saved address', () => {
+  const cases = OLD_SCHEME_ACCOUNTS.flatMap(account => [
+    {...account, label: 'no saved address', saved: []},
+    {
+      ...account,
+      label: 'one saved address',
+      saved: [
+        {derivePath: `${account.basePath}/0/0`, address: account.addresses[0]},
+      ],
+    },
+  ]);
+
+  it.each(cases)(
+    '$chain_name, $label: finds every old-scheme address from the xpub',
+    async ({chain_name, xpub, basePath, addresses, saved}) => {
+      jest.clearAllMocks();
+      isAddressUsageScanAvailable.mockReturnValue(true);
+      // Funds sit on an old-scheme address, so the scan keeps the window.
+      fetchBitcoinAddressUsage.mockImplementation(({addresses: list}) =>
+        Promise.resolve(
+          Object.fromEntries(
+            list.map(address => [address, address === addresses[10]]),
+          ),
+        ),
+      );
+      fetchBitcoinBalances.mockImplementation(({derive_addresses}) =>
+        Promise.resolve({
+          data: {
+            totalBalance: '1000',
+            deriveAddresses: derive_addresses.map(item => ({
+              ...item,
+              balance: item.address === addresses[10] ? '1000' : '0',
+            })),
+          },
+        }),
+      );
+
+      const result = await BitcoinChain().getBalance({
+        address: addresses[0],
+        chain_name,
+        extendedPublicKey: xpub,
+        deriveAddresses: saved,
+        isLegacyScanDone: false,
+      });
+
+      expect(result?.totalBalance).toBe('1000');
+      const byPath = new Map(
+        result.deriveAddresses.map(item => [item.derivePath, item.address]),
+      );
+      for (let i = 0; i < 20; i++) {
+        expect(byPath.has(`${basePath}/${i}/0`)).toBe(true);
+      }
+      for (const [index, address] of Object.entries(addresses)) {
+        expect(byPath.get(`${basePath}/${index}/0`)).toBe(address);
+      }
+    },
+  );
+});
+
+describe('BitcoinChain.getBalance takes only balances from the response', () => {
+  // Not an address of the test-vector account.
+  const OTHER_ADDRESS = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const CHANGE_0_PATH = "m/84'/0'/0'/1/0";
+  const ownList = () =>
+    ensureStandardAddresses({
+      chain_name: 'bitcoin',
+      deriveAddresses: [],
+      accountKey: ZPUB,
+      includeLegacyWindow: false,
+    });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    isAddressUsageScanAvailable.mockReturnValue(true);
+    fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
+  });
+
+  const respondWith = deriveAddresses =>
+    fetchBitcoinBalances.mockResolvedValue({
+      data: {totalBalance: '5000', deriveAddresses},
+    });
+
+  it('ignores a changed address and extra entries in the response', async () => {
+    const own = ownList();
+    const ownChange0 = own.find(item => item.derivePath === CHANGE_0_PATH);
+    respondWith([
+      ...own.map(item => ({
+        ...item,
+        address:
+          item.derivePath === CHANGE_0_PATH ? OTHER_ADDRESS : item.address,
+        balance: item.address === FIRST_RECEIVE_ADDRESS ? '5000' : '0',
+      })),
+      {derivePath: "m/84'/0'/0'/1/1", address: OTHER_ADDRESS, balance: '0'},
+    ]);
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      extendedPublicKey: ZPUB,
+      deriveAddresses: own,
+      isLegacyScanDone: true,
+    });
+
+    expect(result.totalBalance).toBe('5000');
+    expect(result.deriveAddresses).toHaveLength(own.length);
+    expect(result.deriveAddresses.map(item => item.address)).not.toContain(
+      OTHER_ADDRESS,
+    );
+    expect(
+      result.deriveAddresses.find(item => item.derivePath === CHANGE_0_PATH)
+        .address,
+    ).toBe(ownChange0.address);
+    expect(
+      result.deriveAddresses.find(
+        item => item.address === FIRST_RECEIVE_ADDRESS,
+      ).balance,
+    ).toBe('5000');
+  });
+
+  it('keeps entries the response left out', async () => {
+    const own = ownList();
+    respondWith(own.slice(0, 5).map(item => ({...item, balance: '0'})));
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      extendedPublicKey: ZPUB,
+      deriveAddresses: own,
+      isLegacyScanDone: true,
+    });
+
+    expect(result.deriveAddresses.map(item => item.address)).toEqual(
+      own.map(item => item.address),
+    );
+  });
+
+  it('keeps the coin address when there is no xpub', async () => {
+    respondWith([
+      {derivePath: "m/84'/0'/0'/0/0", address: OTHER_ADDRESS, balance: '7'},
+    ]);
+
+    const result = await BitcoinChain().getBalance({
+      address: FIRST_RECEIVE_ADDRESS,
+      chain_name: 'bitcoin',
+      deriveAddresses: [],
+    });
+
+    expect(result.deriveAddresses).toEqual([
+      {derivePath: "m/84'/0'/0'/0/0", address: FIRST_RECEIVE_ADDRESS},
+    ]);
+  });
+});
+
 describe('bitcoin_taproot (BIP-86)', () => {
   it('uses purpose 86 and plain xpub/xprv version bytes', () => {
     expect(getAccountBasePath('bitcoin_taproot')).toBe("m/86'/0'/0'");
@@ -498,10 +687,9 @@ describe('bitcoin_taproot (BIP-86)', () => {
     expect(result[0].address).toBe(TAPROOT_FIRST_RECEIVE_ADDRESS);
   });
 
-  it('getBalance skips backend recovery and resolves the legacy flag', async () => {
+  it('getBalance resolves the legacy flag without a legacy window', async () => {
     jest.clearAllMocks();
     isAddressUsageScanAvailable.mockReturnValue(true);
-    getBitcoinAddresses.mockRejectedValue(new Error('unsupported chain'));
     fetchBitcoinAddressUsage.mockImplementation(usageAllUnused);
     fetchBitcoinBalances.mockImplementation(({derive_addresses}) =>
       Promise.resolve({
@@ -521,7 +709,6 @@ describe('bitcoin_taproot (BIP-86)', () => {
       deriveAddresses: [],
       isLegacyScanDone: false,
     });
-    expect(getBitcoinAddresses).not.toHaveBeenCalled();
     expect(result.deriveAddresses).toHaveLength(STANDARD_COUNT);
     expect(result.isLegacyScanDone).toBe(true);
   });

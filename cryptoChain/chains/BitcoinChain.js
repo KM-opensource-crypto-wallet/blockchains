@@ -7,7 +7,6 @@ import BigNumber from 'bignumber.js';
 import {
   convertToSmallAmount,
   getExplorerTxUrl,
-  mergeUniqueAccounts,
   parseBalance,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
@@ -21,15 +20,15 @@ import {
   getLegacyWindowItems,
   getNetworkByChainName,
   getStandardChainItems,
-  hasLegacyScheme,
   isKnownBitcoinChain,
   parsePathTail,
   removeLegacyWindowItems,
   shouldPruneLegacyWindow,
+  withReportedBalances,
 } from 'dok-wallet-blockchain-networks/service/bitcoinHdAddress';
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
-import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {getUnsafePsbtInput} from 'dok-wallet-blockchain-networks/helper/psbtReview';
 import {
   fetchBitcoinAddressUsage,
   fetchBitcoinBalances,
@@ -361,6 +360,13 @@ export const BitcoinChain = () => {
         if (!inputs.length) {
           throw new Error('No PSBT inputs belong to this wallet');
         }
+        const unsafe = getUnsafePsbtInput(
+          psbtObj,
+          inputs.map(input => input.index),
+        );
+        if (unsafe) {
+          throw new Error(`${unsafe.reason} It was not signed.`);
+        }
         await completePsbtInputs({
           psbtObj,
           inputs,
@@ -468,34 +474,14 @@ export const BitcoinChain = () => {
       isLegacyScanDone,
     }) => {
       let newDeriveAddresses = deriveAddresses;
-      // A lost/near-empty list means backend recovery may merge old-scheme
-      // entries back in below, so the resolved flag is ignored for this call
-      // and the legacy window is regenerated and rescanned in the same pass.
+      // A lost/near-empty list may be an old wallet whose funds sit on the
+      // old-scheme window, so the resolved flag is ignored for this call and
+      // that window is re-derived from the xpub and rescanned in the same pass.
       let legacyResolved =
         !!isLegacyScanDone &&
         Array.isArray(deriveAddresses) &&
         deriveAddresses.length > 1;
       try {
-        // Backend recovery only knows the old-scheme address types; newer
-        // types (taproot) are fully re-derivable from the xpub below.
-        if (
-          hasLegacyScheme(chain_name) &&
-          (!Array.isArray(deriveAddresses) || deriveAddresses?.length <= 1) &&
-          extendedPublicKey
-        ) {
-          const resp = await getBitcoinAddresses({
-            chain_name,
-            extended_pub_key: extendedPublicKey,
-          });
-          if (Array.isArray(resp?.data)) {
-            // Merge (old-first) instead of replacing: a lone custom entry
-            // must survive backend recovery.
-            newDeriveAddresses = mergeUniqueAccounts(
-              Array.isArray(newDeriveAddresses) ? newDeriveAddresses : [],
-              resp.data,
-            );
-          }
-        }
         // BIP44 discovery: make sure the standard receive/change window
         // exists, then extend it past the last used address (gap limit).
         newDeriveAddresses = ensureStandardAddresses({
@@ -570,19 +556,24 @@ export const BitcoinChain = () => {
             derive_addresses: newDeriveAddresses,
           });
           return resp?.data
-            ? {...resp.data, isLegacyScanDone: legacyResolved}
+            ? {
+                ...keepOwnAddresses(resp.data, newDeriveAddresses),
+                isLegacyScanDone: legacyResolved,
+              }
             : resp?.data;
         } else {
-          const deriveAddress = getDeriveAddressByChain(chain_name);
+          const ownItems = [
+            {
+              derivePath: getDeriveAddressByChain(chain_name),
+              address,
+            },
+          ];
           const resp = await fetchBitcoinBalances({
-            derive_addresses: [
-              {
-                derivePath: deriveAddress,
-                address,
-              },
-            ],
+            derive_addresses: ownItems,
           });
-          return resp?.data;
+          return resp?.data
+            ? keepOwnAddresses(resp.data, ownItems)
+            : resp?.data;
         }
       } catch (e) {
         console.error('error in get balance from bitcoin', e);
@@ -1108,6 +1099,17 @@ const buildUTXO = async ({
   }
   return createdTx.toHex();
 };
+
+// The saved address list (and with it the change address) must come only
+// from the wallet's own derivation: the balance response may add balances,
+// never addresses.
+const keepOwnAddresses = (data, ownItems) =>
+  Array.isArray(data?.deriveAddresses)
+    ? {
+        ...data,
+        deriveAddresses: withReportedBalances(ownItems, data.deriveAddresses),
+      }
+    : data;
 
 // First receive address of the mainnet account for this address type.
 const getDeriveAddressByChain = chain_name =>

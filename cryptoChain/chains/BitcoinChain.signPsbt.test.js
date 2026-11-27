@@ -24,10 +24,6 @@ jest.mock('dok-wallet-blockchain-networks/helper', () => ({
   validateNumber: jest.fn(),
 }));
 
-jest.mock('dok-wallet-blockchain-networks/service/dokApi', () => ({
-  getBitcoinAddresses: jest.fn(),
-}));
-
 jest.mock('dok-wallet-blockchain-networks/service/bitcoinDataSource', () => ({
   isAddressUsageScanAvailable: jest.fn(() => true),
   fetchBitcoinAddressUsage: jest.fn(),
@@ -175,6 +171,67 @@ describe('BitcoinChain.signPsbt (bip122 WalletConnect)', () => {
       }),
     ).rejects.toThrow('No PSBT inputs belong to this wallet');
     expect(broadcastBitcoinTransaction).not.toHaveBeenCalled();
+  });
+
+  describe('signature types (sighash)', () => {
+    const own = () => p2wpkhOf(walletKey);
+    // `inputSighash` is the type stored in the PSBT input; the dApp's
+    // signInputs[].sighashTypes allow-list always permits it here.
+    const buildPsbt = ({inputSighash, outputs = 1, walletInputIndex = 0}) => {
+      const psbt = new bitcoin.Psbt({network});
+      for (let i = 0; i <= walletInputIndex; i++) {
+        const owner = i === walletInputIndex ? own() : p2wpkhOf(strangerKey);
+        psbt.addInput({
+          hash: (i + 10).toString(16).padStart(2, '0').repeat(32),
+          index: 0,
+          witnessUtxo: {script: owner.output, value: 10000},
+          ...(i === walletInputIndex && inputSighash !== undefined
+            ? {sighashType: inputSighash}
+            : {}),
+        });
+      }
+      for (let i = 0; i < outputs; i++) {
+        psbt.addOutput({address: p2wpkhOf(strangerKey).address, value: 5000});
+      }
+      return psbt.toBase64();
+    };
+    const signWith = (sighash, options = {}) =>
+      signPsbt({
+        psbt: buildPsbt({inputSighash: sighash, ...options}),
+        signInputs: [
+          {
+            index: options.walletInputIndex ?? 0,
+            address: own().address,
+            sighashTypes: [sighash],
+          },
+        ],
+        broadcast: false,
+      });
+
+    it.each([
+      ['SIGHASH_NONE', 0x02],
+      ['SIGHASH_NONE|ANYONECANPAY', 0x82],
+    ])('refuses %s, which does not cover the outputs', async (_l, type) => {
+      await expect(signWith(type)).rejects.toThrow(/not signed/);
+      expect(broadcastBitcoinTransaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses SIGHASH_SINGLE when no output has the input index', async () => {
+      await expect(
+        signWith(0x83, {walletInputIndex: 1, outputs: 1}),
+      ).rejects.toThrow(/not signed/);
+    });
+
+    it.each([
+      ['SIGHASH_ALL|ANYONECANPAY', 0x81, {}],
+      ['SIGHASH_SINGLE|ANYONECANPAY (marketplace listing)', 0x83, {}],
+      ['SIGHASH_SINGLE with a matching output', 0x03, {}],
+    ])('still signs %s', async (_l, type, options) => {
+      const result = await signWith(type, options);
+      expect(
+        decode(result.psbt).data.inputs[0].finalScriptWitness,
+      ).toBeDefined();
+    });
   });
 
   describe('inputs that lack what the signer needs for the address type', () => {

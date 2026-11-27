@@ -9,22 +9,21 @@ import {
   getExplorerTxUrl,
   validateNumber,
 } from 'dok-wallet-blockchain-networks/helper';
+import {
+  extractXrplTxJson as extractTxJson,
+  getXrplTakeoverReason,
+} from 'dok-wallet-blockchain-networks/helper/xrplTxReview';
 
-function extractTxJson(data) {
-  if (!data) {
-    return {};
+// WalletConnect: a transaction that lets another key sign for the account is
+// never signed. Returns the tx JSON to sign.
+const takeoverCheckedTxJson = data => {
+  const txJson = extractTxJson(data);
+  const reason = getXrplTakeoverReason(txJson);
+  if (reason) {
+    throw new Error(`${reason} It was not signed.`);
   }
-  if (Array.isArray(data)) {
-    return extractTxJson(data[0]);
-  }
-  if (data.tx_json) {
-    return data.tx_json;
-  }
-  if (data.transaction) {
-    return data.transaction;
-  }
-  return data;
-}
+  return txJson;
+};
 
 function hexToBytes(hex) {
   const bytes = [];
@@ -215,9 +214,9 @@ export const RippleChain = () => {
     signRawTransaction: async ({payload, privateKey}) => {
       try {
         const finalPayload = payload?.signTypeData?.transaction;
+        const txJson = takeoverCheckedTxJson(finalPayload);
         await rippleProvider.connect();
         const publicKey = derivePublicKey(privateKey);
-        const txJson = extractTxJson(finalPayload);
         const tx = {
           ...txJson,
           Account: txJson.Account ?? deriveAddress(publicKey),
@@ -239,9 +238,9 @@ export const RippleChain = () => {
     sendRawTransaction: async ({payload, privateKey}) => {
       try {
         const finalPayload = payload?.signTypeData?.transaction;
+        const txJson = takeoverCheckedTxJson(finalPayload);
         await rippleProvider.connect();
         const publicKey = derivePublicKey(privateKey);
-        const txJson = extractTxJson(finalPayload);
         const tx = {
           ...txJson,
           Account: txJson.Account ?? deriveAddress(publicKey),

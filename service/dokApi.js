@@ -151,21 +151,6 @@ export const signMoonPayUrl = async ({url}) => {
   }
 };
 
-export const getBitcoinAddresses = async ({chain_name, extended_pub_key}) => {
-  try {
-    const payload = {
-      extended_pub_key,
-      chain_name,
-      is_testnet: IS_SANDBOX,
-    };
-    const resp = await DokApi.post('/get-bitcoin-addresses', payload);
-    return {status: resp?.status, data: resp?.data?.data};
-  } catch (e) {
-    console.error('Error in getBitcoinAddresses', JSON.stringify(e));
-    throw e;
-  }
-};
-
 export const getNewsAPI = async key => {
   try {
     const resp = await DokApi.post('/get-news-key', {key});

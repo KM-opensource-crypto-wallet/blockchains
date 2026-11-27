@@ -12,6 +12,16 @@ import {
 
 const firstOf = data => (Array.isArray(data) ? data[0] : data);
 
+// The first payload byte is Tezos' watermark. tezos_sign only signs messages:
+// operation (03) and block / consensus (01, 02, 11-13) watermarks are refused.
+// Sign-in messages use 05.
+const NON_MESSAGE_WATERMARKS = ['01', '02', '03', '11', '12', '13'];
+const hasNonMessageWatermark = payload =>
+  typeof payload === 'string' &&
+  NON_MESSAGE_WATERMARKS.includes(
+    payload.replace(/^0x/i, '').slice(0, 2).toLowerCase(),
+  );
+
 const buildTransferParams = op => ({
   to: op.destination,
   amount: Number(op.amount),
@@ -48,9 +58,14 @@ export const TezosChain = () => {
     },
     signMessage: async ({signTypeData, privateKey}) => {
       try {
-        const signer = await getSignerConfigure(privateKey);
         const data = firstOf(signTypeData);
         const payload = data?.payload ?? data;
+        if (hasNonMessageWatermark(payload)) {
+          throw new Error(
+            'This is a Tezos operation, not a message, so it was not signed.',
+          );
+        }
+        const signer = await getSignerConfigure(privateKey);
         const {prefixSig} = await signer.sign(payload);
         return {signature: prefixSig};
       } catch (e) {

@@ -112,6 +112,7 @@ import {
   BATCH_DELEGATION_NOTICE_ADDRESSES,
   OLD_BATCH_CONTRACT_ADDRESS,
   config,
+  isWalletConnectMethodForChain,
   WalletConnectMethods,
 } from 'dok-wallet-blockchain-networks/config/config';
 // import {ETH_WALLET_SEND_CALLS} from 'dok-wallet-blockchain-networks/service/walletConnect/etherWalletConnect';
@@ -1265,6 +1266,22 @@ export const walletConnect = createAsyncThunk(
       clearPending();
       return thunkAPI.rejectWithValue('request_expired');
     };
+    // Same namespace check as service/walletconnect.js, repeated before
+    // anything is signed.
+    if (!isWalletConnectMethodForChain(method, chainId)) {
+      logger.warn('walletconnect.method_not_for_chain', {
+        method,
+        chain_name,
+        chainId: chainId != null ? String(chainId) : undefined,
+      });
+      await respondWithError({
+        code: -32601,
+        message: `Method ${method} not supported`,
+      });
+      clearPending();
+      return thunkAPI.rejectWithValue('method_not_for_chain');
+    }
+
     if (isWalletConnectRequestExpired(connector, id)) {
       return rejectAsExpired();
     }

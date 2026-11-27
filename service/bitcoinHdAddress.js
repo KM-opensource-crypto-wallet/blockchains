@@ -363,6 +363,27 @@ export const ensureStandardAddresses = ({
   }
 };
 
+/**
+ * The balance source (Electrum, the backend, the web API route) reports
+ * balances only. Keep the wallet's own entries (address, path, key) and copy
+ * each entry's balance from the report by address. Reported entries the
+ * wallet did not send are ignored; entries the report left out keep their
+ * last balance.
+ */
+export const withReportedBalances = (ownItems, reportedItems) => {
+  const balanceByAddress = new Map();
+  (Array.isArray(reportedItems) ? reportedItems : []).forEach(item => {
+    if (item?.address && item.balance !== undefined) {
+      balanceByAddress.set(item.address, item.balance);
+    }
+  });
+  return (Array.isArray(ownItems) ? ownItems : []).map(item =>
+    balanceByAddress.has(item?.address)
+      ? {...item, balance: balanceByAddress.get(item.address)}
+      : item,
+  );
+};
+
 /** True when the path sits on the internal/change chain (…/1/i). */
 export const isInternalChainAddress = (chain_name, derivePath) =>
   typeof derivePath === 'string' &&

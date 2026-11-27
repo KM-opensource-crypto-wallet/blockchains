@@ -96,15 +96,15 @@ describe('polkadot_signMessage → signMessage', () => {
     ).toBe(false);
   });
 
-  it("signs type 'payload' data raw, without a <Bytes> wrapper", async () => {
+  // 'payload' is wrapped like everything else, as the polkadot{.js}
+  // extension's signRaw does.
+  it("wraps type 'payload' data in <Bytes> too", async () => {
     const {signature} = await PolkadotChain().signMessage({
       signTypeData: {message: UNWRAPPED_HEX, type: 'payload'},
       privateKey,
     });
-    expect(verifies(Buffer.from('hello'), signature)).toBe(true);
-    expect(verifies(Buffer.from('<Bytes>hello</Bytes>'), signature)).toBe(
-      false,
-    );
+    expect(verifies(Buffer.from('<Bytes>hello</Bytes>'), signature)).toBe(true);
+    expect(verifies(Buffer.from('hello'), signature)).toBe(false);
   });
 
   it('still accepts a bare plain-text string and wraps it', async () => {

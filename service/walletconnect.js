@@ -13,7 +13,7 @@ import {getSdkError} from '@walletconnect/utils';
 import {
   CHAIN_CONFIG,
   config,
-  isSupportedWalletConnectMethod,
+  isWalletConnectMethodForChain,
 } from 'dok-wallet-blockchain-networks/config/config';
 import {
   buildWalletSendCallsBatch,
@@ -326,10 +326,10 @@ export const subscribeWalletConnectEvent = () => {
           ? getSendCallsError(requestSessionData, params)
           : null;
 
-      // Reject methods this wallet cannot answer before any UI opens.
-      // JSON-RPC -32601 ("Method not found") is what the WalletKit docs use
-      // for unsupported session_request methods.
-      if (!isSupportedWalletConnectMethod(request?.method)) {
+      // Reject methods this wallet cannot answer, or that belong to another
+      // chain's namespace, before any UI opens. JSON-RPC -32601 ("Method not
+      // found") is what the WalletKit docs use for unsupported methods.
+      if (!isWalletConnectMethodForChain(request?.method, params?.chainId)) {
         logWalletConnectEvent('warn', 'session_request.unsupported_method', {
           method: request?.method,
           chainId: params?.chainId,
