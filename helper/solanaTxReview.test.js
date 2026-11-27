@@ -5,6 +5,7 @@
  * Runner: node-env jest config (same as the other Solana suites).
  */
 import {
+  AddressLookupTableAccount,
   Keypair,
   PublicKey,
   SystemProgram,
@@ -158,6 +159,39 @@ describe('reviewSolanaRequest', () => {
       `5 (smallest unit) to token account ${other.toBase58()}`,
       `1.5 of ${mint.toBase58()} to token account ${other.toBase58()}`,
     ]);
+  });
+
+  it('warns when a destination comes from an address lookup table', () => {
+    const table = new AddressLookupTableAccount({
+      key: Keypair.fromSeed(Uint8Array.from({length: 32}, () => 11)).publicKey,
+      state: {
+        deactivationSlot: 2n ** 64n - 1n,
+        lastExtendedSlot: 0,
+        lastExtendedSlotStartIndex: 0,
+        addresses: [other],
+      },
+    });
+    const tx = Buffer.from(
+      new VersionedTransaction(
+        new TransactionMessage({
+          payerKey: wallet.publicKey,
+          recentBlockhash: blockhash,
+          instructions: [
+            createTransferInstruction(
+              tokenAccount,
+              other,
+              wallet.publicKey,
+              5n,
+            ),
+          ],
+        }).compileToV0Message([table]),
+      ).serialize(),
+    ).toString('base64');
+    const r = reviewSolanaRequest({transaction: tx}, WALLET);
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(row(r, 'Sends tokens')).toMatch(/lookup table/);
+    expect(r.reasons.join(' ')).toMatch(/lookup table/);
   });
 
   it('reviews the field the signer uses for each method', () => {

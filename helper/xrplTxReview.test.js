@@ -49,7 +49,8 @@ describe('reviewXrplRequest', () => {
         Amount: {currency: 'USD', value: '10', issuer: OTHER},
       }),
     );
-    expect(row(r, 'Sends')).toBe(`10 USD to ${OTHER}`);
+    // Issued currencies are identified by code AND issuer.
+    expect(row(r, 'Sends')).toBe(`10 USD (issuer ${OTHER}) to ${OTHER}`);
   });
 
   it.each([
@@ -109,7 +110,7 @@ describe('reviewXrplRequest', () => {
         Destination: OTHER,
       }),
     );
-    expect(row(r, 'Sends')).toBe(`1 USD to ${OTHER}`);
+    expect(row(r, 'Sends')).toBe(`1 USD (issuer ${OTHER}) to ${OTHER}`);
     expect(row(r, 'Spends up to')).toBe('1000 XRP');
   });
 
@@ -135,7 +136,7 @@ describe('reviewXrplRequest', () => {
     );
     expect(r.level).toBe('none');
     expect(row(r, 'You give')).toBe('1 XRP');
-    expect(row(r, 'You get')).toBe('0.5 USD');
+    expect(row(r, 'You get')).toBe(`0.5 USD (issuer ${OTHER})`);
   });
 
   it('shows a trust line limit and its issuer', () => {
@@ -146,7 +147,7 @@ describe('reviewXrplRequest', () => {
       }),
     );
     expect(r.level).toBe('none');
-    expect(row(r, 'Trust line')).toBe(`100 USD, issuer ${OTHER}`);
+    expect(row(r, 'Trust line')).toBe(`100 USD (issuer ${OTHER})`);
   });
 
   it('marks NFT offers as danger and shows the offer', () => {

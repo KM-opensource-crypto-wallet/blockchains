@@ -71,7 +71,9 @@ const describeAmount = amount => {
       .replace(/0+$/, '');
     return `${drops / 1000000n}${fraction ? `.${fraction}` : ''} XRP`;
   }
-  return `${amount?.value} ${amount?.currency}`;
+  // An issued currency is identified by its code and its issuer.
+  const issuer = amount?.issuer ? ` (issuer ${amount.issuer})` : '';
+  return `${amount?.value} ${amount?.currency}${issuer}`;
 };
 
 export const reviewXrplRequest = signTypeData => {
@@ -145,9 +147,7 @@ export const reviewXrplRequest = signTypeData => {
       if (tx.LimitAmount) {
         result.rows.push({
           label: 'Trust line',
-          value: `${describeAmount(tx.LimitAmount)}, issuer ${
-            tx.LimitAmount.issuer
-          }`,
+          value: describeAmount(tx.LimitAmount),
         });
       }
     } else if (NFT_OFFER_TYPES.includes(type)) {

@@ -187,6 +187,16 @@ const reviewTransaction = (sdk, tx, result, raise) => {
       } is not checked by the wallet.`,
     );
   } else if (tx instanceof sdk.TransferTransaction) {
+    if (tx.hbarTransfers.size) {
+      result.rows.push({
+        label: 'HBAR',
+        value: [...tx.hbarTransfers]
+          .map(([account, amount]) => ({account, amount}))
+          .sort((a, b) => a.amount.toTinybars().compare(b.amount.toTinybars()))
+          .map(({account, amount}) => `${account}: ${amount}`)
+          .join(', '),
+      });
+    }
     for (const [tokenId, transfers] of tx.tokenTransfers) {
       result.rows.push({
         label: `Token ${tokenId}`,

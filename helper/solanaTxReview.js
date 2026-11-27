@@ -34,6 +34,11 @@ const TOKEN_ACCOUNT_AUTHORITIES = [2, 3];
 const CLOSE_ACCOUNT_AUTHORITY = 3;
 const U64_MAX = 2n ** 64n - 1n;
 
+// Accounts loaded from an address lookup table cannot be resolved offline.
+const LOOKUP_TABLE_ADDRESS = 'an address from a lookup table (not shown)';
+const LOOKUP_TABLE_REASON =
+  'This transaction uses addresses from an address lookup table that the wallet cannot show. Only continue if you trust this site.';
+
 const decode = base64Tx => {
   try {
     return VersionedTransaction.deserialize(Buffer.from(base64Tx, 'base64'));
@@ -134,6 +139,12 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
     value: tx.message.staticAccountKeys[0]?.toBase58() ?? '—',
   });
   const unknownPrograms = [];
+  const shown = (...addresses) => {
+    if (addresses.some(address => address == null)) {
+      raise('danger', LOOKUP_TABLE_REASON);
+    }
+    return addresses.map(address => address ?? LOOKUP_TABLE_ADDRESS);
+  };
   instructionsOf(tx).forEach(ix => {
     const takeover = takeoverOf(ix, wallet);
     if (takeover) {
@@ -143,11 +154,10 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
     }
     if (ix.program === SYSTEM_PROGRAM) {
       if (ix.data[0] === SYSTEM_TRANSFER && ix.accounts[0] === wallet) {
+        const [destination] = shown(ix.accounts[1]);
         result.rows.push({
           label: label('Sends'),
-          value: `${formatSol(readU64(ix.data, 4))} to ${
-            ix.accounts[1] ?? '—'
-          }`,
+          value: `${formatSol(readU64(ix.data, 4))} to ${destination}`,
         });
       }
       return;
@@ -160,13 +170,17 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
         const checked = op === TOKEN_TRANSFER_CHECKED;
         if (ix.accounts[checked ? 3 : 2] === wallet) {
           const amount = readU64(ix.data, 1);
-          const destination = ix.accounts[checked ? 2 : 1] ?? '—';
+          const [destination, mint] = shown(
+            ix.accounts[checked ? 2 : 1],
+            ...(checked ? [ix.accounts[1]] : []),
+          );
           result.rows.push({
             label: label('Sends tokens'),
             value: checked
-              ? `${formatUnits(amount, ix.data[9] ?? 0)} of ${
-                  ix.accounts[1]
-                } to token account ${destination}`
+              ? `${formatUnits(
+                  amount,
+                  ix.data[9] ?? 0,
+                )} of ${mint} to token account ${destination}`
               : `${amount} (smallest unit) to token account ${destination}`,
           });
         }
@@ -180,7 +194,7 @@ const reviewOne = (base64Tx, wallet, result, raise, prefix) => {
         }
         const amount = readU64(ix.data, 1);
         result.rows.push(
-          {label: label('Delegate'), value: String(delegate)},
+          {label: label('Delegate'), value: shown(delegate)[0]},
           {
             label: label('Amount'),
             value: amount === U64_MAX ? 'Unlimited' : amount.toString(),

@@ -201,6 +201,36 @@ describe('reviewHederaRequest (hedera_signAndExecuteTransaction)', () => {
     expect(row(sign, 'Schedule')).toBe('0.0.55');
   });
 
+  it('shows HBAR transfers, also inside a scheduled transaction', () => {
+    const hbarTransfer = () =>
+      new TransferTransaction()
+        .addHbarTransfer('0.0.1234', new Hbar(-2))
+        .addHbarTransfer('0.0.3', new Hbar(2));
+    expect(row(review(hbarTransfer()), 'HBAR')).toBe(
+      '0.0.1234: -2 ℏ, 0.0.3: 2 ℏ',
+    );
+    const scheduled = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(hbarTransfer()),
+    );
+    expect(row(scheduled, 'HBAR')).toBe('0.0.1234: -2 ℏ, 0.0.3: 2 ℏ');
+    expect(scheduled.level).toBe('danger');
+  });
+
+  it('reviews an allowance inside a scheduled transaction', () => {
+    const r = review(
+      new ScheduleCreateTransaction().setScheduledTransaction(
+        new AccountAllowanceApproveTransaction().approveHbarAllowance(
+          '0.0.1234',
+          '0.0.99',
+          new Hbar(5),
+        ),
+      ),
+    );
+    expect(r.level).toBe('danger');
+    expect(r.blocked).toBe(false);
+    expect(row(r, 'HBAR allowance')).toBe('0.0.99: 5 ℏ');
+  });
+
   it('marks a transaction type it does not check as danger', () => {
     const r = review(
       new TokenUpdateTransaction().setTokenId('0.0.777').setTokenMemo('x'),
