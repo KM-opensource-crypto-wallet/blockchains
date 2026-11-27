@@ -10,6 +10,7 @@ import {
   AccountBalance,
   AccountBalanceQuery,
   AccountId,
+  AccountUpdateTransaction,
   Client,
   Hbar,
   PrecheckStatusError,
@@ -238,6 +239,25 @@ describe('hedera_signAndExecuteTransaction → sendRawTransaction', () => {
     expect(client.setOperator).toHaveBeenCalledTimes(1);
     expect(String(client.setOperator.mock.calls[0][0])).toBe(ACCOUNT_ID);
     expect(client.close).toHaveBeenCalled();
+  });
+
+  it('refuses an AccountUpdate that sets a new key, without signing or executing', async () => {
+    executeSpy.mockImplementation(async () => {
+      throw new Error('must not execute');
+    });
+    const update = new AccountUpdateTransaction()
+      .setAccountId(ACCOUNT_ID)
+      .setKey(PrivateKey.generateECDSA().publicKey);
+    await expect(
+      HederaChain().sendRawTransaction({
+        signTypeData: {
+          signerAccountId: SIGNER,
+          transactionList: b64(update.toBytes()),
+        },
+        privateKey,
+      }),
+    ).rejects.toThrow(/key that controls/);
+    expect(executeSpy).not.toHaveBeenCalled();
   });
 
   it('executes an already frozen transaction without re-freezing it', async () => {

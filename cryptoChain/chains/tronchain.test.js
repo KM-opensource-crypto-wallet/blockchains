@@ -283,6 +283,60 @@ describe('TronChain', () => {
     });
   });
 
+  describe('WalletConnect signing', () => {
+    const permissionUpdate = {
+      txID: 'ab'.repeat(32),
+      raw_data: {
+        contract: [
+          {
+            type: 'AccountPermissionUpdateContract',
+            parameter: {value: {owner_address: '41' + '11'.repeat(20)}},
+          },
+        ],
+      },
+      raw_data_hex: '00',
+    };
+    const transfer = {
+      ...permissionUpdate,
+      raw_data: {
+        contract: [
+          {
+            type: 'TransferContract',
+            parameter: {value: {amount: 1, to_address: '41' + '22'.repeat(20)}},
+          },
+        ],
+      },
+    };
+
+    it.each(['signRawTransaction', 'sendRawTransaction'])(
+      '%s refuses AccountPermissionUpdate without signing',
+      async method => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        const error = await instance[method]({
+          payload: {transactionData: permissionUpdate},
+          privateKey: 'aa'.repeat(32),
+        }).then(
+          () => null,
+          e => e,
+        );
+        expect(String(error?.message ?? error)).toMatch(
+          /controls your Tron account/,
+        );
+        expect(tronWeb.trx.sign).not.toHaveBeenCalled();
+        console.error.mockRestore();
+      },
+    );
+
+    it('still signs an ordinary transfer', async () => {
+      const result = await instance.signRawTransaction({
+        payload: {transactionData: transfer},
+        privateKey: 'aa'.repeat(32),
+      });
+      expect(tronWeb.trx.sign).toHaveBeenCalledTimes(1);
+      expect(result.result.signature).toEqual(['sig']);
+    });
+  });
+
   describe('send', () => {
     it('signs once and returns the broadcast result', async () => {
       const result = await instance.send({

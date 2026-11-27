@@ -117,3 +117,46 @@ describe('SolanaChain.signAllTransactions (solana_signAllTransactions)', () => {
     ).rejects.toThrow('No transactions to sign');
   });
 });
+
+describe('SolanaChain WalletConnect signing: account takeover', () => {
+  // Assigns the wallet account itself to another program.
+  const assignTx = () => {
+    const message = new TransactionMessage({
+      payerKey: signer.publicKey,
+      recentBlockhash,
+      instructions: [
+        SystemProgram.assign({
+          accountPubkey: signer.publicKey,
+          programId: recipient,
+        }),
+      ],
+    }).compileToV0Message();
+    // eslint-disable-next-line no-undef
+    return Buffer.from(new VersionedTransaction(message).serialize()).toString(
+      'base64',
+    );
+  };
+
+  beforeEach(() => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    console.error.mockRestore();
+  });
+
+  it.each([
+    ['signRawTransaction', () => ({transaction: assignTx()})],
+    ['sendRawTransaction', () => ({transaction: assignTx()})],
+    [
+      'signAllTransactions',
+      () => ({transactions: [buildUnsignedTxBase64(1), assignTx()]}),
+    ],
+  ])('%s refuses it without signing', async (method, signTypeData) => {
+    await expect(
+      SolanaChain()[method]({
+        payload: {signTypeData: signTypeData()},
+        privateKey,
+      }),
+    ).rejects.toThrow(/assigns your wallet account/);
+  });
+});

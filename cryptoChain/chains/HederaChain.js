@@ -25,6 +25,7 @@ import {
   HEDERA_KEY_MISMATCH_MESSAGE,
   HEDERA_UNACTIVATED_MESSAGE,
 } from 'dok-wallet-blockchain-networks/helper';
+import {getHederaTakeoverReason} from 'dok-wallet-blockchain-networks/helper/hederaWalletConnect';
 
 /**
  * Account model (HIP-583).
@@ -596,6 +597,11 @@ export const HederaChain = (chain_name = 'hedera', phrase, customRpcUrl) => {
         await assertAccountControlledByKey(signerAccountId, privateKey);
         const key = PrivateKey.fromStringECDSA(privateKey);
         const transaction = Transaction.fromBytes(fromBase64(transactionList));
+        // A transaction that replaces an account's key is never signed.
+        const takeover = getHederaTakeoverReason(transaction);
+        if (takeover) {
+          throw new Error(`${takeover} It was not signed.`);
+        }
         client = newClient().setOperator(signerAccountId, key);
         if (!transaction.isFrozen()) {
           transaction.freezeWith(client);

@@ -15,6 +15,16 @@ import {sha256} from 'ethers';
 import {TronScan} from 'dok-wallet-blockchain-networks/service/tronScan';
 import dayjs from 'dayjs';
 import trc20Abi from 'dok-wallet-blockchain-networks/abis/trc20.json';
+import {getTronTakeoverReason} from 'dok-wallet-blockchain-networks/helper/tronTxReview';
+
+// WalletConnect: a transaction that hands the account to other keys is never
+// signed, whatever the dApp sends.
+const refuseTronTakeover = transaction => {
+  const reason = getTronTakeoverReason(transaction);
+  if (reason) {
+    throw new Error(`${reason} It was not signed.`);
+  }
+};
 
 let accountInfo = {};
 let lastCallTimeStamp;
@@ -1763,8 +1773,9 @@ export const TronChain = () => {
           throw e;
         }
       }),
-    signRawTransaction: async ({payload, privateKey}) =>
-      retryFunc(async tronWeb => {
+    signRawTransaction: async ({payload, privateKey}) => {
+      refuseTronTakeover(payload?.transactionData);
+      return retryFunc(async tronWeb => {
         try {
           const transactionData = await tronWeb.trx.sign(
             {...payload?.transactionData},
@@ -1775,9 +1786,11 @@ export const TronChain = () => {
           console.error('Error in sign tron transaction', e);
           throw e;
         }
-      }),
-    sendRawTransaction: async ({payload, privateKey}) =>
-      retryFunc(async tronWeb => {
+      });
+    },
+    sendRawTransaction: async ({payload, privateKey}) => {
+      refuseTronTakeover(payload?.transactionData);
+      return retryFunc(async tronWeb => {
         try {
           const signedTransaction = await tronWeb.trx.sign(
             {...payload?.transactionData},
@@ -1799,7 +1812,8 @@ export const TronChain = () => {
           console.error('Error in tron signAndSendTransaction', e);
           return Promise.reject(e?.message);
         }
-      }),
+      });
+    },
 
     waitForConfirmation: async ({transaction, interval = 3000, retries = 5}) =>
       retryFunc(async tronWeb => {

@@ -37,6 +37,7 @@ import bs58 from 'bs58';
 import {Buffer} from 'buffer';
 import nacl from 'tweetnacl';
 import {getSolanaContract} from 'dok-wallet-blockchain-networks/service/solflare';
+import {getSolanaTakeoverReason} from 'dok-wallet-blockchain-networks/helper/solanaTxReview';
 import {nanoid} from 'nanoid';
 import {
   getFreeRPCUrl,
@@ -253,6 +254,18 @@ const readComputeBudget = message => {
     console.log('Error reading Solana compute budget', e);
   }
   return {units, microLamports};
+};
+
+// WalletConnect: a transaction that hands the wallet account, or a token
+// account it controls, to someone else is never signed.
+const refuseSolanaTakeover = (base64Tx, keypair) => {
+  const reason = getSolanaTakeoverReason(
+    base64Tx,
+    keypair.publicKey.toBase58(),
+  );
+  if (reason) {
+    throw new Error(`${reason} It was not signed.`);
+  }
 };
 
 // True when the bytes deserialize as a legacy or v0 transaction message whose
@@ -696,6 +709,7 @@ export const SolanaChain = () => {
         const keypair = Keypair.fromSecretKey(secretKey, {
           skipValidation: true,
         });
+        refuseSolanaTakeover(finalPayload, keypair);
 
         const txBuffer = Buffer.from(finalPayload, 'base64');
         const versionedTransaction = VersionedTransaction.deserialize(txBuffer);
@@ -723,6 +737,7 @@ export const SolanaChain = () => {
         const keypair = Keypair.fromSecretKey(secretKey, {
           skipValidation: true,
         });
+        transactions.forEach(tx => refuseSolanaTakeover(tx, keypair));
         const signed = transactions.map(tx => {
           const versionedTransaction = VersionedTransaction.deserialize(
             Buffer.from(tx, 'base64'),
@@ -738,8 +753,12 @@ export const SolanaChain = () => {
         throw e;
       }
     },
-    sendRawTransaction: async ({payload, privateKey}) =>
-      retryFunc(async solanaProvider => {
+    sendRawTransaction: async ({payload, privateKey}) => {
+      refuseSolanaTakeover(
+        payload?.signTypeData?.transaction,
+        Keypair.fromSecretKey(bs58.decode(privateKey), {skipValidation: true}),
+      );
+      return retryFunc(async solanaProvider => {
         try {
           const finalPayload = payload?.signTypeData?.transaction;
           const secretKey = bs58.decode(privateKey);
@@ -766,7 +785,8 @@ export const SolanaChain = () => {
           console.error('Error in solana signAndSendTransaction', e);
           throw e;
         }
-      }),
+      });
+    },
     signMessage: async ({signTypeData, privateKey}) => {
       try {
         const message = signTypeData;
