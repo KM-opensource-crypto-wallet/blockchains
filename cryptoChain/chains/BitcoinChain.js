@@ -30,6 +30,7 @@ import {
 import {BIP32Factory} from 'bip32';
 import * as bip39 from 'bip39';
 import {getBitcoinAddresses} from 'dok-wallet-blockchain-networks/service/dokApi';
+import {getUnsafePsbtInput} from 'dok-wallet-blockchain-networks/helper/psbtReview';
 import {
   fetchBitcoinAddressUsage,
   fetchBitcoinBalances,
@@ -360,6 +361,13 @@ export const BitcoinChain = () => {
           : findOwnedInputs(psbtObj, address, network);
         if (!inputs.length) {
           throw new Error('No PSBT inputs belong to this wallet');
+        }
+        const unsafe = getUnsafePsbtInput(
+          psbtObj,
+          inputs.map(input => input.index),
+        );
+        if (unsafe) {
+          throw new Error(`${unsafe.reason} It was not signed.`);
         }
         await completePsbtInputs({
           psbtObj,
